@@ -1,0 +1,6 @@
+{
+  "name": "Client Intelligence Hub",
+  "description": "SaaS para agencias de marketing digital. Centralización de métricas multi-cliente, health scores e insights generados por IA (Gemini 1.5 Pro).",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
