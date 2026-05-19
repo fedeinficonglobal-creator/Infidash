@@ -1,20 +1,64 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Infidash
 
-# Run and deploy your AI Studio app
+Infidash es un dashboard para agencias con autenticación local, SQLite persistente y vistas operativas para clientes, ventas, tráfico, SEO, RRSS, insights IA, reportes e integraciones.
 
-This contains everything you need to run your app locally.
+## Requisitos
 
-View your app in AI Studio: https://ai.studio/apps/49234bb4-0f07-4dca-9505-4ce684534b97
+- Node.js 18+ recomendado
+- npm
 
-## Run Locally
+## Scripts
 
-**Prerequisites:**  Node.js
+- `npm run dev` — levanta el frontend Vite en `http://127.0.0.1:3000`
+- `npm run api` — levanta la API Express en `http://127.0.0.1:4000`
+- `npm run build` — build de producción
+- `npm run preview` — preview del build
+- `npm run lint` — comprobación TypeScript para frontend y backend
+- `npm run test` — suite de regresión
+- `npm run clean` — borra `dist/`, `server.js` y `data/`
 
+## Variables de entorno
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Copia `.env.example` a tu entorno local y ajusta lo necesario:
+
+- `API_PORT` — puerto del backend Express
+- `PORT` — fallback del puerto en algunos entornos
+- `INFIDASH_DB_PATH` — ruta del fichero SQLite
+- `INFIDASH_BACKUP_DIR` — carpeta de backups SQLite
+- `APP_URL` — URL pública/local del frontend cuando haga falta generar enlaces o callbacks
+
+## Arranque local
+
+1. Instala dependencias:
+   ```bash
+   npm install
+   ```
+2. Arranca la API:
+   ```bash
+   npm run api
+   ```
+3. En otra terminal, arranca el frontend:
+   ```bash
+   npm run dev
+   ```
+4. Abre `http://127.0.0.1:3000`
+
+## Datos y persistencia
+
+- La base de datos vive en `./data/infidash.sqlite` por defecto.
+- El contenido de `data/` se genera en tiempo de ejecución y no se versiona.
+- La app se inicializa con datos semilla para poder probar login y dashboard desde el primer arranque.
+
+## Verificación rápida
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+## Notas operativas
+
+- La autenticación usa sesión/token con roles `admin` y `viewer`.
+- Los backups SQLite se crean desde la API y se guardan en `data/backups/` por defecto.
+- Si borras `data/`, la siguiente ejecución volverá a crear la base y las semillas.

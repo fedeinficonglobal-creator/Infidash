@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { OverviewTab } from './components/OverviewTab';
 import { SalesTab } from './components/SalesTab';
@@ -10,12 +11,45 @@ import { ReportsTab } from './components/ReportsTab';
 import { IntegrationsTab } from './components/IntegrationsTab';
 import { UserProfile } from './components/UserProfile';
 import { AgencyDashboard } from './components/AgencyDashboard';
+import { LoginScreen } from './components/LoginScreen';
 import { useClientStore } from './store/useClientStore';
-import { Zap, Bell, ChevronDown } from 'lucide-react';
+import { Zap, Bell, ChevronDown, LoaderCircle } from 'lucide-react';
 
 export default function App() {
-  const { activeClientId, activeTabId, clients, setActiveTab } = useClientStore();
-  const activeClient = clients.find(c => c.id === activeClientId) || null;
+  const {
+    activeClientId,
+    activeTabId,
+    clients,
+    setActiveTab,
+    bootstrapSession,
+    isBootstrapping,
+    sessionToken,
+    currentUser,
+    signIn,
+    authError,
+    isAuthenticating,
+  } = useClientStore();
+
+  useEffect(() => {
+    void bootstrapSession();
+  }, [bootstrapSession]);
+
+  if (isBootstrapping) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex items-center gap-3 rounded-2xl bg-white px-6 py-4 shadow-lg border border-slate-100">
+          <LoaderCircle className="size-5 animate-spin text-brand-primary" />
+          <span className="text-sm font-medium text-slate-600">Cargando Infidash...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!sessionToken || !currentUser) {
+    return <LoginScreen isLoading={isAuthenticating} error={authError} onLogin={signIn} />;
+  }
+
+  const activeClient = clients.find((c) => c.id === activeClientId) || null;
 
   const renderTab = () => {
     if (activeTabId === 'profile') {
@@ -25,7 +59,7 @@ export default function App() {
     if (!activeClient) {
       return <AgencyDashboard />;
     }
-    
+
     switch (activeTabId) {
       case 'overview': return <OverviewTab client={activeClient} />;
       case 'sales': return <SalesTab client={activeClient} />;
@@ -43,7 +77,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar />
-      
+
       <main className="flex-1 flex flex-col">
         {/* Navbar */}
         <header className="h-20 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
@@ -83,8 +117,8 @@ export default function App() {
                       <img src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=100&h=100&auto=format&fit=crop" alt="Profile" />
                    </div>
                    <div className="hidden md:block">
-                      <p className="text-sm font-bold text-slate-900 leading-none mb-1">Fede Nevado</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Senior Manager</p>
+                      <p className="text-sm font-bold text-slate-900 leading-none mb-1">{currentUser.name}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">{currentUser.role === 'admin' ? 'Administrador' : 'Visualizador'}</p>
                    </div>
                    <ChevronDown className="size-4 text-slate-400 group-hover:translate-y-0.5 transition-transform" />
                 </div>

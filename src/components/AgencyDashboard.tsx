@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useClientStore } from '../store/useClientStore';
-import { LayoutGrid, List, Plus, Search, Filter, TrendingUp, TrendingDown, Minus, ArrowRight, X } from 'lucide-react';
+import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
+import { LayoutGrid, List, Plus, Search, Filter, TrendingUp, TrendingDown, ArrowRight, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function AgencyDashboard() {
   const { clients, setActiveClient, addClient } = useClientStore();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isNewClientModalOpen, setNewClientModalOpen] = useState(false);
+  const [isSavingClient, setIsSavingClient] = useState(false);
+  const [isLoadingHealthSummary, setIsLoadingHealthSummary] = useState(true);
+  const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   
   const [newClientForm, setNewClientForm] = useState({
     name: '',
@@ -14,24 +18,64 @@ export function AgencyDashboard() {
     logo: ''
   });
 
-  const handleAddNewClient = (e: React.FormEvent) => {
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHealthSummary = async () => {
+      try {
+        const summary = await getHealthSummary();
+        if (!cancelled) {
+          setHealthSummary(summary);
+        }
+      } catch {
+        if (!cancelled) {
+          setHealthSummary(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingHealthSummary(false);
+        }
+      }
+    };
+
+    void loadHealthSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleAddNewClient = async (e: FormEvent) => {
     e.preventDefault();
-    addClient({
-      name: newClientForm.name,
-      industry: newClientForm.industry || 'General',
-      logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`
-    });
-    setNewClientModalOpen(false);
-    setNewClientForm({ name: '', industry: '', logo: '' });
+    setIsSavingClient(true);
+    try {
+      await addClient({
+        name: newClientForm.name,
+        industry: newClientForm.industry || 'General',
+        logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`
+      });
+      setNewClientModalOpen(false);
+      setNewClientForm({ name: '', industry: '', logo: '' });
+    } finally {
+      setIsSavingClient(false);
+    }
   };
   
   const totalRevenue = clients.reduce((acc, client) => {
     // Basic parse for mock values like "52.430 €" to numbers
-    const num = parseFloat(client.metrics.revenue.value.toString().replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.'));
+    const num = parseFloat(client.metrics.revenue.value.toString().replace(/[^\\d.,]/g, '').replace(/\\./g, '').replace(',', '.'));
     return acc + (isNaN(num) ? 0 : num);
   }, 0);
 
   const avgHealth = Math.round(clients.reduce((acc, client) => acc + client.health, 0) / (clients.length || 1));
+  const criticalClients = clients.filter((client) => client.health < 40).length;
+  const activeClientsCount = healthSummary?.clients ?? clients.length;
+  const dailyStatsCount = healthSummary?.dailyStats ?? 0;
+  const agencySignal = isLoadingHealthSummary
+    ? 'Sincronizando métricas reales...'
+    : dailyStatsCount > 0
+      ? `Se registraron ${dailyStatsCount} métricas diarias en la base.`
+      : 'Aún no hay métricas diarias registradas.';
 
   const getHealthStatus = (score: number) => {
     if (score >= 80) return { label: 'Excelente', bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', border: 'border-emerald-200' };
@@ -60,15 +104,15 @@ export function AgencyDashboard() {
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Clientes Activos</h3>
             <div className="flex items-end justify-between">
-               <span className="text-3xl font-bold text-slate-900">{clients.length}</span>
-               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">+2 este mes</span>
+               <span className="text-3xl font-bold text-slate-900">{activeClientsCount}</span>
+               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{isLoadingHealthSummary ? 'Sincronizando...' : `${dailyStatsCount} registros`}</span>
             </div>
          </div>
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Revenue Gestionado (30d)</h3>
             <div className="flex items-end justify-between">
                <span className="text-3xl font-bold text-slate-900">{new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(totalRevenue)}</span>
-               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">+14.2%</span>
+               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{healthSummary ? 'Datos reales' : 'Sincronizando...'}</span>
             </div>
          </div>
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
@@ -88,20 +132,25 @@ export function AgencyDashboard() {
                </div>
                <div>
                   <p className="text-sm font-bold text-slate-700">Estado Estable</p>
-                  <p className="text-[10px] text-slate-400 font-medium">1 cliente en riesgo crítico</p>
+                  <p className="text-[10px] text-slate-400 font-medium">{criticalClients} cliente{criticalClients === 1 ? '' : 's'} en riesgo crítico</p>
                </div>
             </div>
          </div>
-         <div className="bg-brand-primary p-6 rounded-2xl shadow-[0_8px_30px_rgba(14,165,233,0.3)] flex flex-col justify-between text-white relative overflow-hidden group cursor-pointer">
-            <div className="relative z-10">
-               <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/80 mb-2">Insights de Agencia</h3>
-               <p className="text-sm font-medium leading-relaxed">Se detectó una caída general del CTR en campañas de Meta en 3 clientes.</p>
-               <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold bg-white/20 px-2 py-1 rounded">
-                  Ver Análisis Completo <ArrowRight className="size-3" />
-               </div>
-            </div>
-            <TrendingDown className="absolute -right-4 -bottom-4 size-24 text-white opacity-10 group-hover:scale-110 transition-transform" />
-         </div>
+        <div className="bg-brand-primary p-6 rounded-2xl shadow-[0_8px_30px_rgba(14,165,233,0.3)] flex flex-col justify-between text-white relative overflow-hidden group cursor-pointer">
+           <div className="relative z-10">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/80 mb-2">Resumen automático</h3>
+              <p className="text-sm font-medium leading-relaxed">{agencySignal}</p>
+              <p className="mt-3 text-xs text-white/70">
+                {isLoadingHealthSummary
+                  ? 'Cargando cartera y métricas reales...'
+                  : `${activeClientsCount} clientes activos · ${dailyStatsCount} métricas guardadas`}
+              </p>
+              <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold bg-white/20 px-2 py-1 rounded">
+                 Ver cartera real <ArrowRight className="size-3" />
+              </div>
+           </div>
+           <TrendingDown className="absolute -right-4 -bottom-4 size-24 text-white opacity-10 group-hover:scale-110 transition-transform" />
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -330,10 +379,10 @@ export function AgencyDashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!newClientForm.name.trim()}
+                  disabled={!newClientForm.name.trim() || isSavingClient}
                   className="px-4 py-2 text-sm font-bold text-white bg-brand-primary hover:bg-brand-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-lg shadow-brand-primary/20"
                 >
-                  Añadir Cliente
+                  {isSavingClient ? 'Guardando...' : 'Añadir Cliente'}
                 </button>
               </div>
             </form>
