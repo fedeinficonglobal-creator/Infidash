@@ -1,4 +1,5 @@
 import { type Client } from '../store/useClientStore.js';
+import { evaluateKpiThresholds as evaluateKpiThresholdStates, type KpiThresholdState } from './kpiThresholds.js';
 
 export type HealthBand = 'excellent' | 'stable' | 'risk' | 'critical';
 
@@ -47,6 +48,18 @@ export function formatDecimal(value: number, fractionDigits = 1) {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   }).format(value);
+}
+
+export function evaluateKpiThresholds(client: Client): KpiThresholdState[] {
+  return evaluateKpiThresholdStates(
+    {
+      revenue: parseLocaleNumber(client.metrics.revenue.value),
+      roas: parseLocaleNumber(client.metrics.roas.value),
+      conversions: parseLocaleNumber(client.metrics.conversions.value),
+      cpa: parseLocaleNumber(client.metrics.cpa.value),
+    },
+    client.kpiThresholds,
+  );
 }
 
 export function formatPlain(value: number) {

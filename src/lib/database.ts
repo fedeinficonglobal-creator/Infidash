@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
+import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
 
 export type UserRole = 'admin' | 'viewer';
 
@@ -27,6 +28,7 @@ export interface ClientRecord {
   logoUrl: string | null;
   industry: string | null;
   healthScore: number;
+  kpiThresholds: KpiThresholds;
   createdAt: string;
   updatedAt: string;
 }
@@ -146,6 +148,7 @@ function initializeSchema(db: Database.Database) {
       logo_url TEXT,
       industry TEXT,
       health_score INTEGER NOT NULL DEFAULT 0,
+      kpi_thresholds_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -186,6 +189,13 @@ function initializeSchema(db: Database.Database) {
   `);
 }
 
+function ensureClientThresholdSchema(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(clients)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'kpi_thresholds_json')) {
+    db.exec(`ALTER TABLE clients ADD COLUMN kpi_thresholds_json TEXT NOT NULL DEFAULT '{}'`);
+  }
+}
+
 function seedDefaults(db: Database.Database) {
   const timestamp = nowIso();
 
@@ -205,6 +215,7 @@ function seedDefaults(db: Database.Database) {
       logoUrl: 'https://images.unsplash.com/photo-1522312346375-d1f5dca6d8d2?q=80&w=256&auto=format&fit=crop',
       industry: 'Retail / Ecommerce',
       healthScore: 86,
+      kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     },
     {
       id: 'micaela-villa',
@@ -213,6 +224,7 @@ function seedDefaults(db: Database.Database) {
       logoUrl: 'https://images.unsplash.com/photo-1523381235312-3a1ec56d99b7?q=80&w=256&auto=format&fit=crop',
       industry: 'Moda / Joyería',
       healthScore: 84,
+      kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     },
     {
       id: 'concha-vega',
@@ -221,12 +233,13 @@ function seedDefaults(db: Database.Database) {
       logoUrl: 'https://images.unsplash.com/photo-1581578731522-745d05db9ad2?q=80&w=256&auto=format&fit=crop',
       industry: 'Interiorismo / Deco',
       healthScore: 32,
+      kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     },
   ];
 
   const insertClient = db.prepare(
-    `INSERT OR IGNORE INTO clients (id, org_id, name, slug, logo_url, industry, health_score, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO clients (id, org_id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   for (const client of defaultClients) {
@@ -238,6 +251,7 @@ function seedDefaults(db: Database.Database) {
       client.logoUrl,
       client.industry,
       client.healthScore,
+      JSON.stringify(client.kpiThresholds),
       timestamp,
       timestamp,
     );
@@ -330,6 +344,7 @@ export function getDatabase() {
   if (!database) {
     database = createDatabase();
     initializeSchema(database);
+    ensureClientThresholdSchema(database);
     seedDefaults(database);
   }
 
@@ -356,6 +371,7 @@ function rowToClient(row: any): ClientRecord {
     logoUrl: row.logo_url ?? null,
     industry: row.industry ?? null,
     healthScore: row.health_score,
+    kpiThresholds: parseKpiThresholdsJson(row.kpi_thresholds_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -496,7 +512,7 @@ export function getClientBySlug(slug: string) {
   return row ? rowToClient(row) : null;
 }
 
-export function createClient(input: { name: string; industry?: string | null; logoUrl?: string | null; healthScore?: number }) {
+export function createClient(input: { name: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
   const db = getDatabase();
   const timestamp = nowIso();
   const slugBase = input.name
@@ -514,13 +530,14 @@ export function createClient(input: { name: string; industry?: string | null; lo
     logo_url: input.logoUrl ?? null,
     industry: input.industry ?? null,
     health_score: Number.isFinite(input.healthScore) ? Math.max(0, Math.min(100, input.healthScore ?? 0)) : 80,
+    kpi_thresholds_json: JSON.stringify(normalizeKpiThresholds(input.kpiThresholds)),
     created_at: timestamp,
     updated_at: timestamp,
   };
 
   db.prepare(
-    `INSERT INTO clients (id, name, slug, logo_url, industry, health_score, created_at, updated_at)
-     VALUES (@id, @name, @slug, @logo_url, @industry, @health_score, @created_at, @updated_at)`
+    `INSERT INTO clients (id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
+     VALUES (@id, @name, @slug, @logo_url, @industry, @health_score, @kpi_thresholds_json, @created_at, @updated_at)`
   ).run(record);
 
   return rowToClient(record);

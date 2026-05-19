@@ -1,5 +1,7 @@
 export type UserRole = 'admin' | 'viewer';
 
+import { type KpiThresholds } from '../lib/kpiThresholds.js';
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -42,7 +44,9 @@ export interface ApiClient {
   createdAt: string;
   updatedAt: string;
   latestStat: DailyStat | null;
+  kpiThresholds: KpiThresholds;
 }
+
 
 const SESSION_KEY = 'infidash.session';
 
@@ -187,7 +191,7 @@ export async function getHealthSummary() {
 
 export async function createClient(
   token: string,
-  input: { name: string; industry?: string; logoUrl?: string; healthScore?: number },
+  input: { name: string; industry?: string; logoUrl?: string; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> },
 ) {
   return apiRequest<{ client: ApiClient }>('/api/clients', {
     method: 'POST',

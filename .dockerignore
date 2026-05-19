@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.local
+.env.*
+.git
+.gitignore
+.husky
+.hermes
+data
+coverage
+*.log

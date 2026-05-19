@@ -1,11 +1,17 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { buildClientSignals, getHealthBand } from '../src/lib/clientSignals.js';
+import { buildClientSignals, evaluateKpiThresholds, getHealthBand } from '../src/lib/clientSignals.js';
 
 const clientFixture = {
   id: 'client-1',
   name: 'Cliente Prueba',
   health: 84,
+  kpiThresholds: {
+    revenue: 12000,
+    roas: 4.5,
+    conversions: 150,
+    cpa: 15,
+  },
   metrics: {
     revenue: { value: '12.345' },
     roas: { value: '4,7' },
@@ -19,6 +25,16 @@ test('getHealthBand keeps the same thresholds used by the UI', () => {
   assert.equal(getHealthBand(70), 'stable');
   assert.equal(getHealthBand(55), 'risk');
   assert.equal(getHealthBand(12), 'critical');
+});
+
+test('evaluateKpiThresholds classifies each KPI against the configured target', () => {
+  const thresholdState = evaluateKpiThresholds(clientFixture);
+
+  assert.deepEqual(thresholdState.map((item) => item.key), ['revenue', 'roas', 'conversions', 'cpa']);
+  assert.deepEqual(thresholdState.map((item) => item.status), ['success', 'success', 'failure', 'success']);
+  assert.equal(thresholdState[0].target, 12000);
+  assert.equal(thresholdState[2].current, 138);
+  assert.equal(thresholdState[3].direction, 'lower-is-better');
 });
 
 test('buildClientSignals derives dynamic guidance from client metrics', () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { DEFAULT_KPI_THRESHOLDS } from '../lib/kpiThresholds.js';
 import { useClientStore } from '../store/useClientStore';
 import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
 import { LayoutGrid, List, Plus, Search, Filter, TrendingUp, TrendingDown, ArrowRight, X } from 'lucide-react';
@@ -15,7 +16,11 @@ export function AgencyDashboard() {
   const [newClientForm, setNewClientForm] = useState({
     name: '',
     industry: '',
-    logo: ''
+    logo: '',
+    revenueTarget: String(DEFAULT_KPI_THRESHOLDS.revenue),
+    roasTarget: String(DEFAULT_KPI_THRESHOLDS.roas),
+    conversionsTarget: String(DEFAULT_KPI_THRESHOLDS.conversions),
+    cpaTarget: String(DEFAULT_KPI_THRESHOLDS.cpa),
   });
 
   useEffect(() => {
@@ -52,10 +57,24 @@ export function AgencyDashboard() {
       await addClient({
         name: newClientForm.name,
         industry: newClientForm.industry || 'General',
-        logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`
+        logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`,
+        kpiThresholds: {
+          revenue: Number(newClientForm.revenueTarget) || DEFAULT_KPI_THRESHOLDS.revenue,
+          roas: Number(newClientForm.roasTarget) || DEFAULT_KPI_THRESHOLDS.roas,
+          conversions: Number(newClientForm.conversionsTarget) || DEFAULT_KPI_THRESHOLDS.conversions,
+          cpa: Number(newClientForm.cpaTarget) || DEFAULT_KPI_THRESHOLDS.cpa,
+        },
       });
       setNewClientModalOpen(false);
-      setNewClientForm({ name: '', industry: '', logo: '' });
+      setNewClientForm({
+        name: '',
+        industry: '',
+        logo: '',
+        revenueTarget: String(DEFAULT_KPI_THRESHOLDS.revenue),
+        roasTarget: String(DEFAULT_KPI_THRESHOLDS.roas),
+        conversionsTarget: String(DEFAULT_KPI_THRESHOLDS.conversions),
+        cpaTarget: String(DEFAULT_KPI_THRESHOLDS.cpa),
+      });
     } finally {
       setIsSavingClient(false);
     }
@@ -355,17 +374,59 @@ export function AgencyDashboard() {
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="logo" className="block text-sm font-bold text-slate-700 mb-1">URL del Logo (Opcional)</label>
-                  <input
-                    type="url"
-                    id="logo"
-                    value={newClientForm.logo}
-                    onChange={(e) => setNewClientForm(prev => ({ ...prev, logo: e.target.value }))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all"
-                    placeholder="https://..."
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">Si se deja vacío, se generará uno automáticamente.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="revenueTarget" className="block text-sm font-bold text-slate-700 mb-1">Umbral revenue éxito (€)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      id="revenueTarget"
+                      value={newClientForm.revenueTarget}
+                      onChange={(e) => setNewClientForm(prev => ({ ...prev, revenueTarget: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all"
+                      placeholder="10000"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="roasTarget" className="block text-sm font-bold text-slate-700 mb-1">Umbral ROAS éxito</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      id="roasTarget"
+                      value={newClientForm.roasTarget}
+                      onChange={(e) => setNewClientForm(prev => ({ ...prev, roasTarget: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all"
+                      placeholder="4.0"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="conversionsTarget" className="block text-sm font-bold text-slate-700 mb-1">Umbral conversiones éxito</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      id="conversionsTarget"
+                      value={newClientForm.conversionsTarget}
+                      onChange={(e) => setNewClientForm(prev => ({ ...prev, conversionsTarget: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all"
+                      placeholder="100"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="cpaTarget" className="block text-sm font-bold text-slate-700 mb-1">Umbral CPA fracaso (€ máx.)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      id="cpaTarget"
+                      value={newClientForm.cpaTarget}
+                      onChange={(e) => setNewClientForm(prev => ({ ...prev, cpaTarget: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all"
+                      placeholder="15"
+                    />
+                  </div>
                 </div>
               </div>
 

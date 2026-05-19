@@ -186,7 +186,7 @@ app.post('/api/clients', (req, res) => {
     return;
   }
 
-  const { name, industry, logoUrl, healthScore } = req.body ?? {};
+  const { name, industry, logoUrl, healthScore, kpiThresholds } = req.body ?? {};
   if (typeof name !== 'string' || !name.trim()) {
     return sendError(res, 400, 'name es obligatorio', 'INVALID_PAYLOAD');
   }
@@ -196,6 +196,7 @@ app.post('/api/clients', (req, res) => {
     industry: typeof industry === 'string' && industry.trim() ? industry : null,
     logoUrl: typeof logoUrl === 'string' && logoUrl.trim() ? logoUrl : null,
     healthScore: typeof healthScore === 'number' ? healthScore : undefined,
+    kpiThresholds: kpiThresholds && typeof kpiThresholds === 'object' ? kpiThresholds : null,
   });
 
   return res.status(201).json({ client });

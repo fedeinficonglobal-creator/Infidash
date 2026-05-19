@@ -82,12 +82,30 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
       name: clientName,
       industry: 'QA / Regression',
       healthScore: 82,
+      kpiThresholds: {
+        revenue: 15000,
+        roas: 4.2,
+        conversions: 120,
+        cpa: 14,
+      },
     }),
   });
 
   assert.equal(createClientResponse.status, 201);
   assert.equal(createClientBody.client.name, clientName);
+  assert.equal(createClientBody.client.kpiThresholds.revenue, 15000);
   const clientId = createClientBody.client.id as string;
+
+  const { response: dashboardAfterCreateResponse, body: dashboardAfterCreateBody } = await request('/api/clients', {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(dashboardAfterCreateResponse.status, 200);
+  const createdClient = dashboardAfterCreateBody.clients.find((entry: any) => entry.id === clientId);
+  assert.ok(createdClient, 'The created client should still be present in the dashboard payload');
+  assert.equal(createdClient.kpiThresholds.cpa, 14);
 
   const statDate = '2026-05-18';
   const firstPayload = {

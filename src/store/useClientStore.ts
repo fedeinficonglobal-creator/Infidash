@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, type KpiThresholds } from '../lib/kpiThresholds.js';
 import {
   clearStoredSession,
   createClient as apiCreateClient,
@@ -33,6 +34,7 @@ export interface Client {
     conversions: Metric;
     cpa: Metric;
   };
+  kpiThresholds: KpiThresholds;
 }
 
 interface ClientState {
@@ -66,6 +68,7 @@ const FALLBACK_CLIENTS: Client[] = [
     health: 86,
     industry: 'Retail / Ecommerce',
     activeTabs: ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'],
+    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     metrics: {
       revenue: { label: 'Ventas (30d)', value: '12.450 €', change: 12.5, trend: 'up' },
       roas: { label: 'ROAS Global', value: '4.8x', change: -2.3, trend: 'down' },
@@ -81,6 +84,7 @@ const FALLBACK_CLIENTS: Client[] = [
     health: 84,
     industry: 'Moda / Joyería',
     activeTabs: ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'],
+    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     metrics: {
       revenue: { label: 'Ventas (30d)', value: '52.430 €', change: 12.5, trend: 'up' },
       roas: { label: 'ROAS Global', value: '4.8x', change: -2.3, trend: 'down' },
@@ -96,6 +100,7 @@ const FALLBACK_CLIENTS: Client[] = [
     health: 32,
     industry: 'Interiorismo / Deco',
     activeTabs: ['overview', 'rrss', 'ai', 'reports', 'integrations'],
+    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     metrics: {
       revenue: { label: 'Impresiones RRSS', value: '2.1M', change: -15.2, trend: 'down' },
       roas: { label: 'Engagement Rate', value: '1.2%', change: -8.3, trend: 'down' },
@@ -111,6 +116,7 @@ const FALLBACK_CLIENTS: Client[] = [
     health: 71,
     industry: 'Servicios B2B / Industrial',
     activeTabs: ['overview', 'leads', 'seo', 'ai', 'reports', 'integrations'],
+    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
     metrics: {
       revenue: { label: 'Revenue Atribuido', value: '245K €', change: 5.1, trend: 'up' },
       roas: { label: 'Nuevos Contratos', value: '12', change: 0, trend: 'neutral' },
@@ -181,6 +187,7 @@ function mapApiClientToUiClient(client: ApiClient): Client {
     health: client.healthScore,
     industry: client.industry ?? fallback?.industry ?? 'General',
     activeTabs: fallback?.activeTabs ?? DEFAULT_TABS,
+    kpiThresholds: client.kpiThresholds ?? fallback?.kpiThresholds ?? DEFAULT_KPI_THRESHOLDS,
     metrics,
   };
 }
@@ -288,7 +295,8 @@ export const useClientStore = create<ClientState>((set, get) => ({
   },
   addClient: async (clientInput) => {
     const token = get().sessionToken;
-    const fallback = {
+    const kpiThresholds = normalizeKpiThresholds(clientInput.kpiThresholds);
+    const fallback: Client = {
       id: Math.random().toString(36).substring(2, 9),
       slug: clientInput.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `client-${Date.now()}`,
       name: clientInput.name,
@@ -296,13 +304,14 @@ export const useClientStore = create<ClientState>((set, get) => ({
       health: 80,
       industry: clientInput.industry,
       activeTabs: ['overview', 'rrss', 'ai', 'reports', 'integrations'],
+      kpiThresholds,
       metrics: {
         revenue: { label: 'Ventas (30d)', value: '0 €', change: 0, trend: 'neutral' },
         roas: { label: 'ROAS Global', value: '0.0x', change: 0, trend: 'neutral' },
         conversions: { label: 'Conversiones', value: '0', change: 0, trend: 'neutral' },
         cpa: { label: 'CPA Medio', value: '0,00 €', change: 0, trend: 'neutral' },
       },
-    } satisfies Client;
+    };
 
     if (!token) {
       set((state) => ({ clients: [...state.clients, fallback] }));
@@ -315,6 +324,7 @@ export const useClientStore = create<ClientState>((set, get) => ({
         industry: clientInput.industry,
         logoUrl: clientInput.logo,
         healthScore: 80,
+        kpiThresholds,
       });
       set((state) => ({
         clients: [...state.clients.filter((item) => item.slug !== response.client.slug), mapApiClientToUiClient(response.client)],
