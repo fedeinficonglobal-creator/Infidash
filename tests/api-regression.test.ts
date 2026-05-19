@@ -24,6 +24,12 @@ async function request(path: string, init?: RequestInit) {
   return { response, body };
 }
 
+async function requestText(path: string, init?: RequestInit) {
+  const response = await fetch(`${baseUrl}${path}`, init);
+  const body = await response.text();
+  return { response, body };
+}
+
 async function login(email: string, password: string) {
   const { response, body } = await request('/api/auth/login', {
     method: 'POST',
@@ -40,6 +46,16 @@ before(async () => {
   assert.equal(health.ok, true, `Backend no disponible en ${baseUrl}`);
   adminToken = await login(adminEmail, adminPassword);
   viewerToken = await login(viewerEmail, viewerPassword);
+});
+
+test('the root path serves the Infidash frontend shell instead of a JSON 404', async () => {
+  const { response, body } = await requestText('/');
+
+  assert.equal(response.status, 200, body);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/);
+  assert.match(body, /<title>Infidash<\/title>/);
+  assert.match(body, /<div id="root"><\/div>/);
+  assert.doesNotMatch(body, /Ruta no encontrada/);
 });
 
 test('auth/login returns a usable token for the seeded admin account', async () => {

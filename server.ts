@@ -1,4 +1,7 @@
+import * as expressModule from 'express';
 import type { NextFunction, Request, Response } from 'express';
+import { existsSync } from 'node:fs';
+import * as path from 'node:path';
 import {
   authenticateUser,
   createClient,
@@ -23,10 +26,11 @@ import {
   type UserRole,
 } from './src/lib/database.js';
 
-const expressModule = await import('express');
 const express = ((expressModule as unknown as { default?: typeof import('express') }).default ?? expressModule) as typeof import('express');
 const app = express();
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? 4000);
+const distPath = path.resolve(process.cwd(), 'dist');
+const indexHtmlPath = path.join(distPath, 'index.html');
 
 app.use(express.json({ limit: '1mb' }));
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -427,6 +431,20 @@ app.get('/api/dashboard/summary', (req, res) => {
     clients: listClients(),
   });
 });
+
+if (process.env.NODE_ENV !== 'test') {
+  if (existsSync(distPath)) {
+    app.use(express.static(distPath, { extensions: ['html'] }));
+  }
+
+  app.get(/^\/(?!api(?:\/|$)).*/, (_req, res, next) => {
+    if (existsSync(indexHtmlPath)) {
+      return res.sendFile(indexHtmlPath);
+    }
+
+    return next();
+  });
+}
 
 app.use((_req, res) => {
   return sendError(res, 404, 'Ruta no encontrada', 'NOT_FOUND');
