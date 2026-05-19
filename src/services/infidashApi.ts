@@ -47,6 +47,21 @@ export interface ApiClient {
   kpiThresholds: KpiThresholds;
 }
 
+export interface ApiIntegration {
+  id: string;
+  clientId: string;
+  provider: 'clarity' | 'wordpress' | 'woocommerce';
+  label: string;
+  status: 'connected' | 'pending' | 'error' | 'disabled';
+  capabilities: Array<'analytics' | 'leads' | 'sales'>;
+  config: Record<string, string>;
+  secretKeys: string[];
+  lastSync: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 
 const SESSION_KEY = 'infidash.session';
 
@@ -196,5 +211,62 @@ export async function createClient(
   return apiRequest<{ client: ApiClient }>('/api/clients', {
     method: 'POST',
     body: JSON.stringify(input),
+  }, token);
+}
+
+export async function getClientIntegrations(token: string, clientId: string) {
+  return apiRequest<{ integrations: ApiIntegration[] }>(`/api/clients/${encodeURIComponent(clientId)}/integrations`, {}, token);
+}
+
+export async function saveClientIntegration(
+  token: string,
+  input: {
+    id?: string;
+    clientId: string;
+    provider: ApiIntegration['provider'];
+    label?: string;
+    config?: Record<string, unknown>;
+    credentials?: Record<string, unknown>;
+    status?: ApiIntegration['status'];
+    lastError?: string | null;
+  },
+) {
+  return apiRequest<{ integration: ApiIntegration }>('/api/integrations', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, token);
+}
+
+export async function updateClientIntegration(
+  token: string,
+  integrationId: string,
+  input: {
+    label?: string;
+    config?: Record<string, unknown>;
+    credentials?: Record<string, unknown>;
+    status?: ApiIntegration['status'];
+    lastError?: string | null;
+  },
+) {
+  return apiRequest<{ integration: ApiIntegration }>(`/api/integrations/${encodeURIComponent(integrationId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, token);
+}
+
+export async function testClientIntegration(token: string, integrationId: string) {
+  return apiRequest<{
+    integration: ApiIntegration;
+    ready: boolean;
+    missingFields: string[];
+    summary: string;
+  }>(`/api/integrations/${encodeURIComponent(integrationId)}/test`, {
+    method: 'POST',
+  }, token);
+}
+
+export async function deleteClientIntegration(token: string, integrationId: string) {
+  return apiRequest<void>(`/api/integrations/${encodeURIComponent(integrationId)}`, {
+    method: 'DELETE',
   }, token);
 }

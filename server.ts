@@ -4,15 +4,20 @@ import {
   createClient,
   createDatabaseBackup,
   createUser,
+  createOrUpdateClientIntegration,
   deleteDailyStat,
   getClientBySlug,
+  getClientIntegrations,
   getDailyStatById,
   getDashboardHealthSummary,
+  getIntegrationById,
   getSessionByToken,
   listClients,
   listClientsWithLatestStat,
   listDailyStats,
   listUsers,
+  removeClientIntegration,
+  testIntegrationById,
   updateUserRole,
   upsertDailyStat,
   type UserRole,
@@ -200,6 +205,106 @@ app.post('/api/clients', (req, res) => {
   });
 
   return res.status(201).json({ client });
+});
+
+app.get('/api/clients/:clientId/integrations', (req, res) => {
+  const session = requireSession(req, res, ['viewer', 'admin']);
+  if (!session) {
+    return;
+  }
+
+  const clientIntegrations = getClientIntegrations(req.params.clientId);
+  return res.json({ integrations: clientIntegrations });
+});
+
+app.post('/api/integrations', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const { id, clientId, provider, label, config, credentials, status, lastError } = req.body ?? {};
+  if (typeof clientId !== 'string' || typeof provider !== 'string') {
+    return sendError(res, 400, 'clientId y provider son obligatorios', 'INVALID_PAYLOAD');
+  }
+
+  try {
+    const saved = createOrUpdateClientIntegration({
+      id: typeof id === 'string' && id.trim() ? id : undefined,
+      clientId,
+      provider: provider as any,
+      label: typeof label === 'string' ? label : null,
+      config: config && typeof config === 'object' ? config : null,
+      credentials: credentials && typeof credentials === 'object' ? credentials : null,
+      status: typeof status === 'string' ? status as any : undefined,
+      lastError: typeof lastError === 'string' ? lastError : null,
+    });
+
+    if (!saved) {
+      return sendError(res, 404, 'Cliente no encontrado', 'NOT_FOUND');
+    }
+
+    return res.status(201).json({ integration: saved });
+  } catch (error) {
+    return sendError(res, 400, error instanceof Error ? error.message : 'No se pudo guardar la integración', 'INVALID_INTEGRATION');
+  }
+});
+
+app.patch('/api/integrations/:id', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const existing = getIntegrationById(req.params.id);
+  if (!existing) {
+    return sendError(res, 404, 'Integración no encontrada', 'NOT_FOUND');
+  }
+
+  try {
+    const saved = createOrUpdateClientIntegration({
+      id: existing.id,
+      clientId: existing.clientId,
+      provider: existing.provider,
+      label: typeof req.body?.label === 'string' ? req.body.label : existing.label,
+      config: req.body?.config && typeof req.body.config === 'object' ? req.body.config : null,
+      credentials: req.body?.credentials && typeof req.body.credentials === 'object' ? req.body.credentials : null,
+      status: typeof req.body?.status === 'string' ? req.body.status as any : existing.status,
+      lastError: typeof req.body?.lastError === 'string' ? req.body.lastError : existing.lastError,
+    });
+
+    return res.json({ integration: saved });
+  } catch (error) {
+    return sendError(res, 400, error instanceof Error ? error.message : 'No se pudo actualizar la integración', 'INVALID_INTEGRATION');
+  }
+});
+
+app.post('/api/integrations/:id/test', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const result = testIntegrationById(req.params.id);
+  if (!result) {
+    return sendError(res, 404, 'Integración no encontrada', 'NOT_FOUND');
+  }
+
+  return res.json(result);
+});
+
+app.delete('/api/integrations/:id', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const removed = removeClientIntegration(req.params.id);
+  if (!removed) {
+    return sendError(res, 404, 'Integración no encontrada', 'NOT_FOUND');
+  }
+
+  return res.status(204).send();
 });
 
 app.get('/api/daily-stats', (req, res) => {

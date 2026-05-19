@@ -22,10 +22,16 @@ export const clients = sqliteTable('clients', {
 export const integrations = sqliteTable('integrations', {
   id: text('id').primaryKey(),
   clientId: text('client_id').references(() => clients.id),
-  type: text('type').notNull(),
-  credentialsJson: text('credentials_json').notNull(),
+  provider: text('provider').notNull(),
+  label: text('label').notNull(),
+  status: text('status').notNull().default('pending'),
+  configJson: text('config_json').notNull().default('{}'),
+  credentialsJson: text('credentials_json').notNull().default('{}'),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
   lastSync: text('last_sync'),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 });
 
 export const dailyStats = sqliteTable('daily_stats', {

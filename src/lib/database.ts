@@ -4,6 +4,16 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
+import {
+  buildIntegrationCapabilitySummary,
+  buildIntegrationDisplayName,
+  getIntegrationProviderDefinition,
+  listMissingIntegrationFields,
+  normalizeIntegrationSection,
+  type IntegrationCapability,
+  type IntegrationProvider,
+  type IntegrationStatus,
+} from './integrationCatalog.js';
 
 export type UserRole = 'admin' | 'viewer';
 
@@ -31,6 +41,32 @@ export interface ClientRecord {
   kpiThresholds: KpiThresholds;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IntegrationRecord {
+  id: string;
+  clientId: string;
+  provider: IntegrationProvider;
+  label: string;
+  status: IntegrationStatus;
+  capabilities: IntegrationCapability[];
+  config: Record<string, string>;
+  secretKeys: string[];
+  lastSync: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IntegrationInput {
+  id?: string;
+  clientId: string;
+  provider: IntegrationProvider;
+  label?: string | null;
+  config?: Record<string, unknown> | null;
+  credentials?: Record<string, unknown> | null;
+  status?: IntegrationStatus;
+  lastError?: string | null;
 }
 
 export interface DailyStatRecord {
@@ -156,10 +192,17 @@ function initializeSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS integrations (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      type TEXT NOT NULL,
-      credentials_json TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      config_json TEXT NOT NULL DEFAULT '{}',
+      credentials_json TEXT NOT NULL DEFAULT '{}',
       is_active INTEGER NOT NULL DEFAULT 1,
-      last_sync TEXT
+      last_sync TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(client_id, provider)
     );
 
     CREATE TABLE IF NOT EXISTS daily_stats (
@@ -193,6 +236,102 @@ function ensureClientThresholdSchema(db: Database.Database) {
   const columns = db.prepare(`PRAGMA table_info(clients)`).all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === 'kpi_thresholds_json')) {
     db.exec(`ALTER TABLE clients ADD COLUMN kpi_thresholds_json TEXT NOT NULL DEFAULT '{}'`);
+  }
+}
+
+function ensureIntegrationSchema(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(integrations)`).all() as Array<{ name: string }>;
+  const existingColumns = new Set(columns.map((column) => column.name));
+  const addColumn = (definition: string) => db.exec(`ALTER TABLE integrations ADD COLUMN ${definition}`);
+
+  if (!existingColumns.has('provider')) {
+    addColumn(`provider TEXT`);
+  }
+
+  if (!existingColumns.has('label')) {
+    addColumn(`label TEXT`);
+  }
+
+  if (!existingColumns.has('status')) {
+    addColumn(`status TEXT NOT NULL DEFAULT 'pending'`);
+  }
+
+  if (!existingColumns.has('config_json')) {
+    addColumn(`config_json TEXT NOT NULL DEFAULT '{}'`);
+  }
+
+  if (!existingColumns.has('credentials_json')) {
+    addColumn(`credentials_json TEXT NOT NULL DEFAULT '{}'`);
+  }
+
+  if (!existingColumns.has('last_error')) {
+    addColumn(`last_error TEXT`);
+  }
+
+  if (!existingColumns.has('created_at')) {
+    addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
+  }
+
+  if (!existingColumns.has('updated_at')) {
+    addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
+  }
+
+  if (!existingColumns.has('is_active')) {
+    addColumn(`is_active INTEGER NOT NULL DEFAULT 1`);
+  }
+
+  if (!existingColumns.has('last_sync')) {
+    addColumn(`last_sync TEXT`);
+  }
+
+  const hasTypeColumn = existingColumns.has('type');
+  const rows = db.prepare(`SELECT id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at${hasTypeColumn ? ', type' : ''} FROM integrations`).all() as Array<Record<string, unknown>>;
+  const updateRow = db.prepare(
+    `UPDATE integrations
+     SET provider = ?, label = ?, status = ?, config_json = ?, credentials_json = ?, is_active = ?, last_sync = ?, last_error = ?, created_at = ?, updated_at = ?
+     WHERE id = ?`
+  );
+
+  for (const row of rows) {
+    const rawProvider = String(row.provider ?? row.type ?? '').trim().toLowerCase();
+    const provider = (['clarity', 'wordpress', 'woocommerce'].includes(rawProvider) ? rawProvider : 'clarity') as IntegrationProvider;
+    const definition = getIntegrationProviderDefinition(provider);
+    if (!definition) {
+      continue;
+    }
+
+    const config = normalizeIntegrationSection(definition.configFields, (() => {
+      try {
+        return JSON.parse(String(row.config_json ?? '{}')) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    })());
+    const credentials = normalizeIntegrationSection(definition.credentialFields, (() => {
+      try {
+        return JSON.parse(String(row.credentials_json ?? '{}')) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    })());
+    const missingFields = listMissingIntegrationFields(definition, config, credentials);
+    const status = String(row.status ?? '').trim() || (missingFields.length === 0 ? 'connected' : 'pending');
+    const label = String(row.label ?? '').trim() || buildIntegrationDisplayName(definition, config);
+    const now = nowIso();
+
+    updateRow.run(
+      provider,
+      label,
+      status,
+      JSON.stringify(config),
+      JSON.stringify(credentials),
+      Number(row.is_active ?? 1),
+      String(row.last_sync ?? '') || null,
+      String(row.last_error ?? '') || null,
+      String(row.created_at ?? '') || now,
+      String(row.updated_at ?? '') || now,
+      String(row.id),
+    );
   }
 }
 
@@ -345,6 +484,7 @@ export function getDatabase() {
     database = createDatabase();
     initializeSchema(database);
     ensureClientThresholdSchema(database);
+    ensureIntegrationSchema(database);
     seedDefaults(database);
   }
 
@@ -372,6 +512,37 @@ function rowToClient(row: any): ClientRecord {
     industry: row.industry ?? null,
     healthScore: row.health_score,
     kpiThresholds: parseKpiThresholdsJson(row.kpi_thresholds_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function parseJsonRecord(value: unknown) {
+  try {
+    return JSON.parse(typeof value === 'string' ? value : JSON.stringify(value ?? {})) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function rowToIntegration(row: any): IntegrationRecord {
+  const provider = (getIntegrationProviderDefinition(row.provider as IntegrationProvider)
+    ? (row.provider as IntegrationProvider)
+    : 'clarity') as IntegrationProvider;
+  const definition = getIntegrationProviderDefinition(provider) ?? getIntegrationProviderDefinition('clarity')!;
+  const config = normalizeIntegrationSection(definition.configFields, parseJsonRecord(row.config_json ?? '{}'));
+  const credentials = normalizeIntegrationSection(definition.credentialFields, parseJsonRecord(row.credentials_json ?? '{}'));
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    provider,
+    label: row.label ?? buildIntegrationDisplayName(definition, config),
+    status: (row.status ?? 'pending') as IntegrationStatus,
+    capabilities: [...definition.capabilities],
+    config,
+    secretKeys: definition.credentialFields.map((field) => field.key).filter((key) => Boolean(credentials[key])),
+    lastSync: row.last_sync ?? null,
+    lastError: row.last_error ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -541,6 +712,226 @@ export function createClient(input: { name: string; industry?: string | null; lo
   ).run(record);
 
   return rowToClient(record);
+}
+
+function getClientById(clientId: string) {
+  const row = getDatabase().prepare(`SELECT * FROM clients WHERE id = ?`).get(clientId) as any;
+  return row ? rowToClient(row) : null;
+}
+
+function getIntegrationRowById(id: string) {
+  const row = getDatabase().prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  return row ?? null;
+}
+
+export function listClientIntegrations(clientId: string) {
+  const rows = getDatabase()
+    .prepare(`SELECT * FROM integrations WHERE client_id = ? ORDER BY updated_at DESC, created_at DESC`)
+    .all(clientId) as any[];
+  return rows.map(rowToIntegration);
+}
+
+export function saveClientIntegration(input: IntegrationInput) {
+  const db = getDatabase();
+  const timestamp = nowIso();
+  const existingById = input.id
+    ? (db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(input.id) as any)
+    : null;
+  const existingByProvider = !existingById
+    ? (db.prepare(`SELECT * FROM integrations WHERE client_id = ? AND provider = ?`).get(input.clientId, input.provider) as any)
+    : null;
+  const existing = existingById ?? existingByProvider;
+  const clientId = existing?.client_id ?? input.clientId;
+  const provider = (existing?.provider ?? input.provider) as IntegrationProvider;
+  const client = getClientById(clientId);
+  if (!client) {
+    return null;
+  }
+
+  const definition = getIntegrationProviderDefinition(provider);
+  if (!definition) {
+    throw new Error(`Proveedor de integración no soportado: ${provider}`);
+  }
+
+  const previousConfig = existing ? normalizeIntegrationSection(definition.configFields, parseJsonRecord(existing.config_json ?? '{}')) : {};
+  const previousCredentials = existing ? normalizeIntegrationSection(definition.credentialFields, parseJsonRecord(existing.credentials_json ?? '{}')) : {};
+  const config = normalizeIntegrationSection(definition.configFields, { ...previousConfig, ...(input.config ?? {}) });
+  const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...(input.credentials ?? {}) });
+  const missingFields = listMissingIntegrationFields(definition, config, credentials);
+  const status = input.status ?? (missingFields.length === 0 ? 'connected' : 'pending');
+  const label = buildIntegrationDisplayName(definition, config, input.label ?? existing?.label ?? null);
+  const lastSync = missingFields.length === 0 ? (existing?.last_sync ?? timestamp) : existing?.last_sync ?? null;
+  const lastError = input.lastError ?? (missingFields.length > 0 ? `Faltan campos obligatorios: ${missingFields.join(', ')}` : null);
+
+  if (existing) {
+    db.prepare(
+      `UPDATE integrations
+       SET client_id = ?, provider = ?, label = ?, status = ?, config_json = ?, credentials_json = ?, is_active = ?, last_sync = ?, last_error = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      clientId,
+      provider,
+      label,
+      status,
+      JSON.stringify(config),
+      JSON.stringify(credentials),
+      Number(existing.is_active ?? 1),
+      lastSync,
+      lastError,
+      timestamp,
+      existing.id,
+    );
+
+    const refreshed = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(existing.id) as any;
+    return rowToIntegration(refreshed);
+  }
+
+  const record = {
+    id: crypto.randomUUID(),
+    client_id: clientId,
+    provider,
+    label,
+    status,
+    config_json: JSON.stringify(config),
+    credentials_json: JSON.stringify(credentials),
+    is_active: 1,
+    last_sync: lastSync,
+    last_error: lastError,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+
+  db.prepare(
+    `INSERT INTO integrations (
+      id, client_id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    record.id,
+    record.client_id,
+    record.provider,
+    record.label,
+    record.status,
+    record.config_json,
+    record.credentials_json,
+    record.is_active,
+    record.last_sync,
+    record.last_error,
+    record.created_at,
+    record.updated_at,
+  );
+
+  const created = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(record.id) as any;
+  return rowToIntegration(created);
+}
+
+export function deleteClientIntegration(id: string) {
+  const db = getDatabase();
+  const result = db.prepare(`DELETE FROM integrations WHERE id = ?`).run(id);
+  return result.changes > 0;
+}
+
+export function testClientIntegration(id: string) {
+  const db = getDatabase();
+  const row = getIntegrationRowById(id);
+  if (!row) {
+    return null;
+  }
+
+  const integration = rowToIntegration(row);
+  const definition = getIntegrationProviderDefinition(integration.provider)!;
+  const missingFields = listMissingIntegrationFields(definition, integration.config, Object.fromEntries(integration.secretKeys.map((key) => [key, 'present'])));
+  const timestamp = nowIso();
+  const status: IntegrationStatus = missingFields.length === 0 ? 'connected' : 'pending';
+  const lastError = missingFields.length > 0 ? `Faltan campos obligatorios: ${missingFields.join(', ')}` : null;
+
+  db.prepare(`UPDATE integrations SET status = ?, last_sync = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
+    status,
+    timestamp,
+    lastError,
+    timestamp,
+    id,
+  );
+
+  const refreshed = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  return {
+    integration: rowToIntegration(refreshed),
+    ready: missingFields.length === 0,
+    missingFields,
+    summary: buildIntegrationCapabilitySummary(definition),
+  };
+}
+
+export function getIntegrationById(id: string) {
+  const row = getIntegrationRowById(id);
+  return row ? rowToIntegration(row) : null;
+}
+
+export function getClientByIdRecord(clientId: string) {
+  return getClientById(clientId);
+}
+
+export function getClientIntegrationsSummary(clientId: string) {
+  return listClientIntegrations(clientId).map((integration) => ({
+    ...integration,
+    summary: buildIntegrationCapabilitySummary(getIntegrationProviderDefinition(integration.provider)!),
+  }));
+}
+
+export function setClientIntegrationStatus(id: string, status: IntegrationStatus, lastError: string | null = null) {
+  const db = getDatabase();
+  const timestamp = nowIso();
+  db.prepare(`UPDATE integrations SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(status, lastError, timestamp, id);
+  const row = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  return row ? rowToIntegration(row) : null;
+}
+
+export function getClientByIdOrSlug(value: string) {
+  return getClientById(value) ?? getClientBySlug(value);
+}
+
+export function getIntegrationProviderLabel(provider: IntegrationProvider) {
+  return getIntegrationProviderDefinition(provider)?.label ?? provider;
+}
+
+export function getIntegrationCapabilitySummary(provider: IntegrationProvider) {
+  const definition = getIntegrationProviderDefinition(provider);
+  return definition ? buildIntegrationCapabilitySummary(definition) : '';
+}
+
+export function getClientIntegrations(clientId: string) {
+  return listClientIntegrations(clientId);
+}
+
+export function upsertClientIntegration(input: IntegrationInput) {
+  return saveClientIntegration(input);
+}
+
+export function removeClientIntegration(id: string) {
+  return deleteClientIntegration(id);
+}
+
+export function inspectClientIntegration(id: string) {
+  return testClientIntegration(id);
+}
+
+export function getClientByIdStrict(clientId: string) {
+  return getClientById(clientId);
+}
+
+export function getClientByIdLoose(value: string) {
+  return getClientById(value) ?? getClientBySlug(value);
+}
+
+export function listIntegrationsForClient(clientId: string) {
+  return listClientIntegrations(clientId);
+}
+
+export function createOrUpdateClientIntegration(input: IntegrationInput) {
+  return saveClientIntegration(input);
+}
+
+export function testIntegrationById(id: string) {
+  return testClientIntegration(id);
 }
 
 export function listDailyStats(clientId?: string) {
