@@ -70,6 +70,43 @@ test('auth/login returns a usable token for the seeded admin account', async () 
   assert.equal(body.user.role, 'admin');
 });
 
+test('admin can list and update users from the management backend', async () => {
+  const { response: listResponse, body: listBody } = await request('/api/users', {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(listResponse.status, 200);
+  assert.ok(Array.isArray(listBody.users));
+  const viewer = listBody.users.find((user: any) => user.email === viewerEmail);
+  assert.ok(viewer, 'Expected the seeded viewer account to exist');
+
+  const toggleTo = !viewer.active;
+  const { response: updateResponse, body: updateBody } = await request(`/api/users/${viewer.id}`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({ active: toggleTo }),
+  });
+
+  assert.equal(updateResponse.status, 200, JSON.stringify(updateBody));
+  assert.equal(updateBody.user.active, toggleTo);
+
+  const { response: restoreResponse, body: restoreBody } = await request(`/api/users/${viewer.id}`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({ active: viewer.active }),
+  });
+
+  assert.equal(restoreResponse.status, 200, JSON.stringify(restoreBody));
+  assert.equal(restoreBody.user.active, viewer.active);
+});
+
+
 test('viewer cannot create daily stats', async () => {
   const { response, body } = await request('/api/daily-stats', {
     method: 'POST',

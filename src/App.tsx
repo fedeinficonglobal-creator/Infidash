@@ -12,8 +12,9 @@ import { IntegrationsTab } from './components/IntegrationsTab';
 import { UserProfile } from './components/UserProfile';
 import { AgencyDashboard } from './components/AgencyDashboard';
 import { LoginScreen } from './components/LoginScreen';
+import { UsersAdminTab } from './components/UsersAdminTab';
 import { useClientStore } from './store/useClientStore';
-import { Zap, Bell, ChevronDown, LoaderCircle } from 'lucide-react';
+import { Zap, Bell, ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
 
 export default function App() {
   const {
@@ -21,6 +22,7 @@ export default function App() {
     activeTabId,
     clients,
     setActiveTab,
+    setActiveClient,
     bootstrapSession,
     isBootstrapping,
     sessionToken,
@@ -51,7 +53,16 @@ export default function App() {
 
   const activeClient = clients.find((c) => c.id === activeClientId) || null;
 
+  const openUsersAdmin = () => {
+    setActiveClient(null);
+    setActiveTab('users-admin');
+  };
+
   const renderTab = () => {
+    if (activeTabId === 'users-admin') {
+      return <UsersAdminTab />;
+    }
+
     if (activeTabId === 'profile') {
       return <UserProfile />;
     }
@@ -105,12 +116,27 @@ export default function App() {
              </div>
 
              <div className="flex items-center gap-3 border-l border-slate-200 pl-6">
-                <button className="p-2 text-slate-400 hover:text-slate-600 transition-colors relative group">
+                {currentUser.role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={openUsersAdmin}
+                    className="p-2 text-slate-400 hover:text-slate-700 transition-colors relative group rounded-xl hover:bg-slate-50"
+                    aria-label="Administración de usuarios"
+                    title="Administración de usuarios"
+                  >
+                    <Settings2 className="size-5 group-hover:rotate-45 transition-transform" />
+                  </button>
+                )}
+                <button type="button" className="p-2 text-slate-400 hover:text-slate-600 transition-colors relative group rounded-xl hover:bg-slate-50">
                   <Bell className="size-5 group-hover:rotate-12 transition-transform" />
                   <span className="absolute top-2 right-2 size-2 bg-brand-accent rounded-full border-2 border-white" />
                 </button>
-                <div 
-                   onClick={() => setActiveTab('profile')}
+                <button
+                   type="button"
+                   onClick={() => {
+                     setActiveClient(null);
+                     setActiveTab('profile');
+                   }}
                    className="flex items-center gap-3 pl-3 active:scale-95 transition-transform cursor-pointer group"
                 >
                    <div className="size-10 bg-slate-100 rounded-full flex items-center justify-center border-2 border-white overflow-hidden shadow-sm">
@@ -121,7 +147,7 @@ export default function App() {
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">{currentUser.role === 'admin' ? 'Administrador' : 'Visualizador'}</p>
                    </div>
                    <ChevronDown className="size-4 text-slate-400 group-hover:translate-y-0.5 transition-transform" />
-                </div>
+                </button>
              </div>
           </div>
         </header>

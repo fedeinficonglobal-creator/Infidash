@@ -162,6 +162,40 @@ export async function logout(token: string) {
   return apiRequest<void>('/api/auth/logout', { method: 'POST' }, token);
 }
 
+export async function getUsers(token: string) {
+  return apiRequest<{ users: SessionUser[] }>('/api/users', {}, token);
+}
+
+export async function createUserAccount(
+  token: string,
+  input: {
+    email: string;
+    name: string;
+    password: string;
+    role?: UserRole;
+  },
+) {
+  return apiRequest<{ user: SessionUser }>('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, token);
+}
+
+export async function updateUserAccount(
+  token: string,
+  userId: string,
+  input: {
+    name?: string;
+    role?: UserRole;
+    active?: boolean;
+  },
+) {
+  return apiRequest<{ user: SessionUser }>(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, token);
+}
+
 export async function getClients(token: string) {
   return apiRequest<{ clients: ApiClient[] }>('/api/clients', {}, token);
 }
