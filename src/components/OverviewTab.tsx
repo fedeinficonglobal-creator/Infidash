@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { MetricCard, HealthScoreCard } from './DashboardComponents';
 import { ArrowDownRight, ArrowUpRight, AlertTriangle, LoaderCircle, RefreshCw, ShoppingCart, UserCheck, Zap } from 'lucide-react';
 import { type Client } from '../store/useClientStore';
-import { getDailyStats, type DailyStat } from '../services/infidashApi.js';
+import { getClientDashboard, type DailyStat, type UxSnapshot } from '../services/infidashApi.js';
 import { useClientStore } from '../store/useClientStore.js';
 import { buildComparisonPeriod, type ComparisonMetric } from '../lib/overviewComparison.js';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
@@ -102,6 +102,7 @@ const sessionToken = useClientStore((state) => state.sessionToken);
 const setActiveTab = useClientStore((state) => state.setActiveTab);
 const signals = useMemo(() => buildClientSignals(client), [client]);
 const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
+const [uxSnapshots, setUxSnapshots] = useState<UxSnapshot[]>([]);
 const [isLoadingStats, setIsLoadingStats] = useState(true);
 const [statsError, setStatsError] = useState<string | null>(null);
 const [comparisonWindow, setComparisonWindow] = useState<PeriodOption>(7);
@@ -115,6 +116,7 @@ const loadStats = async () => {
 if (!sessionToken) {
 if (!cancelled) {
 setDailyStats([]);
+setUxSnapshots([]);
 setIsLoadingStats(false);
 }
 return;
@@ -124,14 +126,16 @@ setIsLoadingStats(true);
 setStatsError(null);
 
 try {
-const response = await getDailyStats(sessionToken, client.id);
+const response = await getClientDashboard(sessionToken, client.id);
 if (!cancelled) {
-setDailyStats(response.stats.sort((a, b) => a.statDate.localeCompare(b.statDate)));
+setDailyStats(response.dailyStats.sort((a, b) => a.statDate.localeCompare(b.statDate)));
+setUxSnapshots(response.uxSnapshots.sort((a, b) => a.snapshotDate.localeCompare(b.snapshotDate)));
 }
 } catch (error) {
 if (!cancelled) {
 setStatsError(error instanceof Error ? error.message : 'No se pudieron cargar las métricas diarias');
 setDailyStats([]);
+setUxSnapshots([]);
 }
 } finally {
 if (!cancelled) {
@@ -141,9 +145,13 @@ setIsLoadingStats(false);
 };
 
 void loadStats();
+const interval = window.setInterval(() => {
+  void loadStats();
+}, 120000);
 
 return () => {
 cancelled = true;
+window.clearInterval(interval);
 };
 }, [client.id, sessionToken]);
 
@@ -159,12 +167,14 @@ const comparison = useMemo(() => buildComparisonPeriod(dailyStats, comparisonWin
 
 const periodLabel = `Últimos ${comparisonWindow} días`;
 const latestStat = dailyStats.at(-1) ?? null;
+const latestUxSnapshot = uxSnapshots.at(-1) ?? null;
 const firstVisibleStat = chartData[0] ?? null;
 const lastVisibleStat = chartData.at(-1) ?? null;
 const salesDelta = firstVisibleStat && lastVisibleStat && firstVisibleStat.sales > 0
 ? ((lastVisibleStat.sales - firstVisibleStat.sales) / firstVisibleStat.sales) * 100
 : 0;
 const comparisonReady = Boolean(comparison && comparison.currentCount === comparisonWindow && comparison.previousCount === comparisonWindow);
+const hasHistoricalData = chartData.some((stat) => stat.sales > 0 || stat.roas > 0);
 
 useEffect(() => {
   const element = chartWrapperRef.current;
@@ -188,8 +198,8 @@ return (
 <header className="flex items-center justify-between mb-8">
 <div>
 <div className="flex items-center gap-3 mb-1">
-<h2 className="text-3xl font-bold text-slate-900">Dashboard Overview</h2>
-<span className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold px-2 py-1 rounded-md">DATOS REAL-TIME</span>
+<h2 className="text-3xl font-bold text-slate-900">Resumen operativo</h2>
+<span className="bg-brand-primary/10 text-brand-primary text-[10px] font-bold px-2 py-1 rounded-md">DATOS REALES</span>
 </div>
 <p className="text-slate-500 font-medium">
 Análisis consolidado para <span className="text-slate-900 font-bold">{client.name}</span>
@@ -202,7 +212,7 @@ Análisis consolidado para <span className="text-slate-900 font-bold">{client.na
 </div>
 <div className="flex items-center gap-3">
 <button className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors">
-Personalizar Dashboard
+Configurar vista
 </button>
 <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
 {PERIOD_OPTIONS.map((option) => (
@@ -227,12 +237,51 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
 <MetricCard metric={client.metrics.cpa} />
 </div>
 
+<div className="mb-8 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+  <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-lg font-bold text-slate-900">Análisis/UX sincronizado</h3>
+        <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Clarity</span>
+      </div>
+      <p className="text-xs text-slate-400 font-medium tracking-wide">Datos reales del último sincronizado en base de datos</p>
+    </div>
+    <div className="text-xs text-slate-500 text-right">
+      <p className="font-semibold text-slate-700">Última sincronización</p>
+      <p>{latestUxSnapshot?.updatedAt ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latestUxSnapshot.updatedAt)) : 'Sin sincronizar'}</p>
+    </div>
+  </div>
+
+  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Sesiones</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? formatPlain(latestUxSnapshot.sessions) : '0'}</p>
+      <p className="text-xs text-slate-500 mt-1">{latestUxSnapshot?.source ?? 'Sin datos reales'}</p>
+    </div>
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Páginas vistas</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? formatPlain(latestUxSnapshot.pageViews) : '0'}</p>
+      <p className="text-xs text-slate-500 mt-1">{latestUxSnapshot ? 'Sincronizado desde backend' : 'Sin datos reales'}</p>
+    </div>
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Clics de fricción</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? formatPlain(latestUxSnapshot.rageClicks + latestUxSnapshot.deadClicks) : '0'}</p>
+      <p className="text-xs text-slate-500 mt-1">Rage + dead clicks</p>
+    </div>
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Scroll medio</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? `${formatPercent(latestUxSnapshot.scrollDepthAvg)}%` : '0%'}</p>
+      <p className="text-xs text-slate-500 mt-1">Profundidad media de lectura</p>
+    </div>
+  </div>
+</div>
+
 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
 {/* Main Chart */}
 <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
 <div className="flex items-center justify-between mb-8">
 <div>
-<h3 className="text-lg font-bold text-slate-900">Rendimiento de Ventas & ROAS</h3>
+<h3 className="text-lg font-bold text-slate-900">Ventas y ROAS</h3>
 <p className="text-xs text-slate-400 font-medium tracking-wide">{periodLabel.toUpperCase()} FRENTE AL MISMO PERIODO ANTERIOR</p>
 </div>
 <div className="flex items-center gap-4">
@@ -335,16 +384,18 @@ ROAS último dato: {formatPercent(latestStat.roas)}x
 <div className="relative z-10">
 <div className="flex items-center gap-2 mb-4">
 <Zap className="size-5 text-amber-400 fill-amber-400" />
-<h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">AI Insight Activo</h3>
+<h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">Insight operativo</h3>
 </div>
 <p className="text-sm leading-relaxed mb-4">
-{signals.healthBand === 'excellent'
-  ? `La cartera de ${client.name} está en un punto fuerte: ${formatMoney(signals.revenue)} de revenue y ${signals.roas.toFixed(1)}x de ROAS.`
-  : signals.healthBand === 'stable'
-    ? `La cuenta de ${client.name} mantiene una base estable. Conviene revisar creatividad y foco de campañas para sostener el ritmo.`
-    : signals.healthBand === 'risk'
-      ? `Hay señales de presión en ${client.name}. El foco debería ir a CPA, audiencias y velocidad de respuesta.`
-      : `La cuenta de ${client.name} necesita una intervención prioritaria antes de seguir escalando inversión.`}
+{!signals.hasData || !hasHistoricalData
+  ? `La cuenta de ${client.name} aún no tiene datos sincronizados. Todas las métricas se muestran en 0 hasta recibir información real.`
+  : signals.healthBand === 'excellent'
+    ? `La cartera de ${client.name} está en un punto fuerte: ${formatMoney(signals.revenue)} de revenue y ${signals.roas.toFixed(1)}x de ROAS.`
+    : signals.healthBand === 'stable'
+      ? `La cuenta de ${client.name} mantiene una base estable. Conviene revisar creatividad y foco de campañas para sostener el ritmo.`
+      : signals.healthBand === 'risk'
+        ? `Hay señales de presión en ${client.name}. El foco debería ir a CPA, audiencias y velocidad de respuesta.`
+        : `La cuenta de ${client.name} necesita una intervención prioritaria antes de seguir escalando inversión.`}
 </p>
 <p className="text-xs text-slate-300 leading-relaxed mb-6">
 Recomendación: {signals.actionMessage}
@@ -402,10 +453,10 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <ShoppingCart className="size-6 text-emerald-600" />
 </div>
 <div>
-<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Carritos Abandonados</p>
+<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Leads diarios</p>
 <div className="flex items-center gap-2">
-<h4 className="text-xl font-bold">12.4%</h4>
-<span className="text-[10px] text-emerald-600 font-bold">-2.1% ptos</span>
+<h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.leads) : '0'}</h4>
+<span className="text-[10px] text-emerald-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
 </div>
 </div>
 </div>
@@ -417,10 +468,10 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <UserCheck className="size-6 text-blue-600" />
 </div>
 <div>
-<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Leads Totales</p>
+<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tráfico diario</p>
 <div className="flex items-center gap-2">
-<h4 className="text-xl font-bold">452</h4>
-<span className="text-[10px] text-blue-600 font-bold">+15.2%</span>
+<h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.traffic) : '0'}</h4>
+<span className="text-[10px] text-blue-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
 </div>
 </div>
 </div>
@@ -431,10 +482,10 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <AlertTriangle className="size-6 text-rose-600" />
 </div>
 <div>
-<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Problemas UX Detectados</p>
+<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Clicks diarios</p>
 <div className="flex items-center gap-2">
-<h4 className="text-xl font-bold">3</h4>
-<span className="text-[10px] text-rose-600 font-bold">Críticos</span>
+<h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.clicks) : '0'}</h4>
+<span className="text-[10px] text-rose-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
 </div>
 </div>
 </div>

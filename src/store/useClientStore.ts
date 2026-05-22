@@ -59,72 +59,7 @@ interface ClientState {
 
 const DEFAULT_TABS = ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'];
 
-const FALLBACK_CLIENTS: Client[] = [
-  {
-    id: 'matundy',
-    slug: 'matundy',
-    name: 'Matundy',
-    logo: 'https://images.unsplash.com/photo-1522312346375-d1f5dca6d8d2?q=80&w=200&h=200&auto=format&fit=crop',
-    health: 86,
-    industry: 'Retail / Ecommerce',
-    activeTabs: ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'],
-    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    metrics: {
-      revenue: { label: 'Ventas (30d)', value: '12.450 €', change: 12.5, trend: 'up' },
-      roas: { label: 'ROAS Global', value: '4.8x', change: -2.3, trend: 'down' },
-      conversions: { label: 'Pedidos Reales', value: '138', change: 8.1, trend: 'up' },
-      cpa: { label: 'CPA Medio', value: '12,50 €', change: -5.4, trend: 'up' },
-    },
-  },
-  {
-    id: 'micaela-villa',
-    slug: 'micaela-villa',
-    name: 'Micaela Villa',
-    logo: 'https://images.unsplash.com/photo-1523381235312-3a1ec56d99b7?q=80&w=200&h=200&auto=format&fit=crop',
-    health: 84,
-    industry: 'Moda / Joyería',
-    activeTabs: ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'],
-    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    metrics: {
-      revenue: { label: 'Ventas (30d)', value: '52.430 €', change: 12.5, trend: 'up' },
-      roas: { label: 'ROAS Global', value: '4.8x', change: -2.3, trend: 'down' },
-      conversions: { label: 'Pedidos Reales', value: '840', change: 8.1, trend: 'up' },
-      cpa: { label: 'CPA Medio', value: '12,50 €', change: -5.4, trend: 'up' },
-    },
-  },
-  {
-    id: 'concha-vega',
-    slug: 'concha-vega',
-    name: 'Concha Vega',
-    logo: 'https://images.unsplash.com/photo-1581578731522-745d05db9ad2?q=80&w=200&h=200&auto=format&fit=crop',
-    health: 32,
-    industry: 'Interiorismo / Deco',
-    activeTabs: ['overview', 'rrss', 'ai', 'reports', 'integrations'],
-    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    metrics: {
-      revenue: { label: 'Impresiones RRSS', value: '2.1M', change: -15.2, trend: 'down' },
-      roas: { label: 'Engagement Rate', value: '1.2%', change: -8.3, trend: 'down' },
-      conversions: { label: 'Seguidores Ganados', value: '+124', change: -32.5, trend: 'down' },
-      cpa: { label: 'Interacciones', value: '14.5K', change: -12.4, trend: 'down' },
-    },
-  },
-  {
-    id: 'alfran',
-    slug: 'alfran',
-    name: 'alfran',
-    logo: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=200&h=200&auto=format&fit=crop',
-    health: 71,
-    industry: 'Servicios B2B / Industrial',
-    activeTabs: ['overview', 'leads', 'seo', 'ai', 'reports', 'integrations'],
-    kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    metrics: {
-      revenue: { label: 'Revenue Atribuido', value: '245K €', change: 5.1, trend: 'up' },
-      roas: { label: 'Nuevos Contratos', value: '12', change: 0, trend: 'neutral' },
-      conversions: { label: 'Propuestas Abiertas', value: '34', change: 2.3, trend: 'up' },
-      cpa: { label: 'Valor Medio Ciclo', value: '24K €', change: 4.5, trend: 'up' },
-    },
-  },
-];
+const FALLBACK_CLIENTS: Client[] = [];
 
 function getFallbackClient(slug: string) {
   return FALLBACK_CLIENTS.find((client) => client.slug === slug) ?? null;
@@ -296,26 +231,11 @@ export const useClientStore = create<ClientState>((set, get) => ({
   addClient: async (clientInput) => {
     const token = get().sessionToken;
     const kpiThresholds = normalizeKpiThresholds(clientInput.kpiThresholds);
-    const fallback: Client = {
-      id: Math.random().toString(36).substring(2, 9),
-      slug: clientInput.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `client-${Date.now()}`,
-      name: clientInput.name,
-      logo: clientInput.logo,
-      health: 80,
-      industry: clientInput.industry,
-      activeTabs: ['overview', 'rrss', 'ai', 'reports', 'integrations'],
-      kpiThresholds,
-      metrics: {
-        revenue: { label: 'Ventas (30d)', value: '0 €', change: 0, trend: 'neutral' },
-        roas: { label: 'ROAS Global', value: '0.0x', change: 0, trend: 'neutral' },
-        conversions: { label: 'Conversiones', value: '0', change: 0, trend: 'neutral' },
-        cpa: { label: 'CPA Medio', value: '0,00 €', change: 0, trend: 'neutral' },
-      },
-    };
 
     if (!token) {
-      set((state) => ({ clients: [...state.clients, fallback] }));
-      return;
+      const error = new Error('Necesitas una sesión activa para crear un cliente real');
+      set({ dataError: error.message });
+      throw error;
     }
 
     try {
@@ -330,8 +250,10 @@ export const useClientStore = create<ClientState>((set, get) => ({
         clients: [...state.clients.filter((item) => item.slug !== response.client.slug), mapApiClientToUiClient(response.client)],
         activeClientId: response.client.id,
       }));
-    } catch {
-      set((state) => ({ clients: [...state.clients, fallback] }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo crear el cliente';
+      set({ dataError: message });
+      throw error instanceof Error ? error : new Error(message);
     }
   },
 }));

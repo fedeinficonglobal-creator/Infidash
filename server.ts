@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   authenticateUser,
+  closeMonthlyKpi,
   createClient,
   createDatabaseBackup,
   createUser,
@@ -14,17 +15,28 @@ import {
   getDailyStatById,
   getDashboardHealthSummary,
   getIntegrationById,
+  getIntegrationCredentialsById,
+  getLatestUxSnapshot,
   getSessionByToken,
   listClients,
   listClientsWithLatestStat,
   listDailyStats,
+  listUxSnapshots,
+  listIntegrationsByProvider,
+  listMonthlyKpis,
+  listRrssChannels,
   listUsers,
   removeClientIntegration,
+  saveMonthlyKpi,
+  saveRrssChannel,
   testIntegrationById,
+  updateIntegrationSyncState,
   updateUserRole,
   upsertDailyStat,
+  upsertUxSnapshot,
   type UserRole,
 } from './src/lib/database.js';
+import { fetchClaritySnapshots } from './src/lib/claritySync.js';
 
 const express = ((expressModule as unknown as { default?: typeof import('express') }).default ?? expressModule) as typeof import('express');
 const app = express();
@@ -80,6 +92,113 @@ function parseNumber(value: unknown, fallback = 0) {
 
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+async function syncClarityIntegration(integrationId: string) {
+  const integration = getIntegrationById(integrationId);
+  if (!integration) {
+    return null;
+  }
+
+  if (integration.provider !== 'clarity') {
+    return {
+      integration,
+      snapshots: [],
+      skipped: true,
+    };
+  }
+
+  const credentials = getIntegrationCredentialsById(integrationId) ?? {};
+  const accessToken = typeof credentials.accessToken === 'string' ? credentials.accessToken : undefined;
+  const snapshots = await fetchClaritySnapshots({
+    clientId: integration.clientId,
+    integrationId: integration.id,
+    exportUrl: typeof integration.config.exportUrl === 'string' ? integration.config.exportUrl : undefined,
+    accessToken,
+    projectId: typeof integration.config.projectId === 'string' ? integration.config.projectId : undefined,
+    siteUrl: typeof integration.config.siteUrl === 'string' ? integration.config.siteUrl : undefined,
+    segmentName: typeof integration.config.segmentName === 'string' ? integration.config.segmentName : undefined,
+  });
+
+  const savedSnapshots = snapshots
+    .map((snapshot) => upsertUxSnapshot({
+      clientId: snapshot.clientId,
+      snapshotDate: snapshot.snapshotDate,
+      sessions: snapshot.sessions,
+      pageViews: snapshot.pageViews,
+      rageClicks: snapshot.rageClicks,
+      deadClicks: snapshot.deadClicks,
+      scrollDepthAvg: snapshot.scrollDepthAvg,
+      engagedSessions: snapshot.engagedSessions,
+      conversions: snapshot.conversions,
+      conversionRate: snapshot.conversionRate,
+      notes: snapshot.notes,
+      source: snapshot.source,
+      payloadJson: snapshot.payloadJson,
+    }))
+    .filter(Boolean);
+
+  const lastSnapshot = savedSnapshots[savedSnapshots.length - 1] ?? null;
+  const refreshedIntegration = updateIntegrationSyncState(integration.id, {
+    status: 'connected',
+    lastError: null,
+    lastSync: lastSnapshot?.updatedAt ?? new Date().toISOString(),
+  });
+
+  return {
+    integration: refreshedIntegration ?? integration,
+    snapshots: savedSnapshots,
+    skipped: false,
+  };
+}
+
+let claritySyncRunning = false;
+
+async function syncAllClarityIntegrations() {
+  if (claritySyncRunning) {
+    return;
+  }
+
+  claritySyncRunning = true;
+  try {
+    const integrations = listIntegrationsByProvider('clarity');
+    for (const integration of integrations) {
+      try {
+        await syncClarityIntegration(integration.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error desconocido durante la sincronización de Análisis/UX';
+        updateIntegrationSyncState(integration.id, {
+          status: 'error',
+          lastError: message,
+        });
+        console.error('[infidash] clarity sync failed', integration.id, message);
+      }
+    }
+  } finally {
+    claritySyncRunning = false;
+  }
+}
+
+function startClaritySyncScheduler() {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  const intervalMs = Number(process.env.CLARITY_SYNC_INTERVAL_MS ?? 15 * 60 * 1000);
+  const safeInterval = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 15 * 60 * 1000;
+  const globalState = globalThis as typeof globalThis & { __infidashClaritySyncInterval?: ReturnType<typeof setInterval> };
+  if (globalState.__infidashClaritySyncInterval) {
+    return;
+  }
+
+  const run = () => {
+    void syncAllClarityIntegrations().catch((error) => {
+      console.error('[infidash] clarity sync scheduler failed', error);
+    });
+  };
+
+  run();
+  globalState.__infidashClaritySyncInterval = setInterval(run, safeInterval);
 }
 
 app.get('/api/health', (_req, res) => {
@@ -187,6 +306,29 @@ app.get('/api/clients/:slug', (req, res) => {
   }
 
   return res.json({ client });
+});
+
+app.get('/api/clients/:clientId/dashboard', (req, res) => {
+  const session = requireSession(req, res, ['viewer', 'admin']);
+  if (!session) {
+    return;
+  }
+
+  const client = getClientBySlug(req.params.clientId) ?? listClients().find((item) => item.id === req.params.clientId) ?? null;
+  if (!client) {
+    return sendError(res, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+
+  const dailyStats = listDailyStats(client.id);
+  const uxSnapshots = listUxSnapshots(client.id);
+  const latestUxSnapshot = getLatestUxSnapshot(client.id);
+
+  return res.json({
+    client,
+    dailyStats,
+    uxSnapshots,
+    latestUxSnapshot,
+  });
 });
 
 app.post('/api/clients', (req, res) => {
@@ -297,6 +439,39 @@ app.post('/api/integrations/:id/test', (req, res) => {
   return res.json(result);
 });
 
+app.post('/api/integrations/:id/sync', async (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const integration = getIntegrationById(req.params.id);
+  if (!integration) {
+    return sendError(res, 404, 'Integración no encontrada', 'NOT_FOUND');
+  }
+
+  try {
+    const result = await syncClarityIntegration(integration.id);
+    if (!result) {
+      return sendError(res, 404, 'Integración no encontrada', 'NOT_FOUND');
+    }
+
+    return res.json({
+      integration: result.integration,
+      snapshots: result.snapshots,
+      skipped: result.skipped,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo sincronizar Análisis/UX';
+    updateIntegrationSyncState(integration.id, {
+      status: 'error',
+      lastError: message,
+      lastSync: null,
+    });
+    return sendError(res, 500, message, 'CLARITY_SYNC_FAILED');
+  }
+});
+
 app.delete('/api/integrations/:id', (req, res) => {
   const session = requireSession(req, res, ['admin']);
   if (!session) {
@@ -405,6 +580,198 @@ app.delete('/api/daily-stats/:id', (req, res) => {
   return res.status(204).send();
 });
 
+app.get('/api/clients/:clientId/ux-snapshots', (req, res) => {
+  const session = requireSession(req, res, ['viewer', 'admin']);
+  if (!session) {
+    return;
+  }
+
+  return res.json({ snapshots: listUxSnapshots(req.params.clientId) });
+});
+
+app.post('/api/clients/:clientId/ux-snapshots', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const { snapshotDate, notes, source, payloadJson } = req.body ?? {};
+  if (typeof snapshotDate !== 'string' || !snapshotDate.trim()) {
+    return sendError(res, 400, 'snapshotDate es obligatorio', 'INVALID_PAYLOAD');
+  }
+
+  const snapshot = upsertUxSnapshot({
+    clientId: req.params.clientId,
+    snapshotDate,
+    sessions: parseNumber(req.body?.sessions),
+    pageViews: parseNumber(req.body?.pageViews),
+    rageClicks: parseNumber(req.body?.rageClicks),
+    deadClicks: parseNumber(req.body?.deadClicks),
+    scrollDepthAvg: parseNumber(req.body?.scrollDepthAvg),
+    engagedSessions: parseNumber(req.body?.engagedSessions),
+    conversions: parseNumber(req.body?.conversions),
+    conversionRate: parseNumber(req.body?.conversionRate),
+    notes: typeof notes === 'string' ? notes : null,
+    source: typeof source === 'string' && source.trim() ? source : 'clarity',
+    payloadJson: typeof payloadJson === 'string' && payloadJson.trim() ? payloadJson : JSON.stringify(req.body ?? {}),
+  });
+
+  if (!snapshot) {
+    return sendError(res, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+
+  return res.status(201).json({ snapshot });
+});
+
+app.get('/api/clients/:clientId/rrss-channels', (req, res) => {
+  const session = requireSession(req, res, ['viewer', 'admin']);
+  if (!session) {
+    return;
+  }
+
+  return res.json({ channels: listRrssChannels(req.params.clientId) });
+});
+
+app.post('/api/clients/:clientId/rrss-channels', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const { platformKey, label, isActive, sortOrder } = req.body ?? {};
+  if (typeof platformKey !== 'string' || typeof label !== 'string') {
+    return sendError(res, 400, 'platformKey y label son obligatorios', 'INVALID_PAYLOAD');
+  }
+
+  const channel = saveRrssChannel({
+    clientId: req.params.clientId,
+    platformKey,
+    label,
+    isActive: typeof isActive === 'boolean' ? isActive : undefined,
+    sortOrder: typeof sortOrder === 'number' ? sortOrder : undefined,
+  });
+
+  if (!channel) {
+    return sendError(res, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+
+  return res.status(201).json({ channel });
+});
+
+app.put('/api/rrss-channels/:id', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const channel = saveRrssChannel({
+    id: req.params.id,
+    clientId: typeof req.body?.clientId === 'string' ? req.body.clientId : '',
+    platformKey: typeof req.body?.platformKey === 'string' ? req.body.platformKey : 'instagram',
+    label: typeof req.body?.label === 'string' ? req.body.label : '',
+    isActive: typeof req.body?.isActive === 'boolean' ? req.body.isActive : undefined,
+    sortOrder: typeof req.body?.sortOrder === 'number' ? req.body.sortOrder : undefined,
+  });
+
+  if (!channel) {
+    return sendError(res, 404, 'Canal no encontrado o cliente no válido', 'NOT_FOUND');
+  }
+
+  return res.json({ channel });
+});
+
+app.get('/api/clients/:clientId/monthly-kpis', (req, res) => {
+  const session = requireSession(req, res, ['viewer', 'admin']);
+  if (!session) {
+    return;
+  }
+
+  const monthKey = typeof req.query.monthKey === 'string' && req.query.monthKey.trim() ? req.query.monthKey : undefined;
+  return res.json({ kpis: listMonthlyKpis(req.params.clientId, monthKey) });
+});
+
+app.post('/api/clients/:clientId/monthly-kpis', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const { departmentKey, metricKey, monthKey, targetText, actualText, notes } = req.body ?? {};
+  const normalizedDepartmentKey = departmentKey === 'web' || departmentKey === 'rrss' ? departmentKey : departmentKey === 'publicidad' ? departmentKey : null;
+  if (!normalizedDepartmentKey || typeof metricKey !== 'string' || typeof monthKey !== 'string') {
+    return sendError(res, 400, 'departmentKey, metricKey y monthKey son obligatorios', 'INVALID_PAYLOAD');
+  }
+
+  const kpi = saveMonthlyKpi({
+    clientId: req.params.clientId,
+    departmentKey: normalizedDepartmentKey,
+    metricKey,
+    monthKey,
+    targetValue: typeof req.body?.targetValue === 'number' ? req.body.targetValue : null,
+    targetText: typeof targetText === 'string' ? targetText : null,
+    actualValue: typeof req.body?.actualValue === 'number' ? req.body.actualValue : null,
+    actualText: typeof actualText === 'string' ? actualText : null,
+    status: typeof req.body?.status === 'string' ? req.body.status as any : undefined,
+    differenceValue: typeof req.body?.differenceValue === 'number' ? req.body.differenceValue : null,
+    differencePct: typeof req.body?.differencePct === 'number' ? req.body.differencePct : null,
+    notes: typeof notes === 'string' ? notes : null,
+    createdByUserId: session.user.id,
+    updatedByUserId: session.user.id,
+  });
+
+  if (!kpi) {
+    return sendError(res, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+
+  return res.status(201).json({ kpi });
+});
+
+app.put('/api/monthly-kpis/:id', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const current = listMonthlyKpis(typeof req.body?.clientId === 'string' ? req.body.clientId : '', typeof req.body?.monthKey === 'string' ? req.body.monthKey : undefined).find((item) => item.id === req.params.id) ?? null;
+  const kpi = saveMonthlyKpi({
+    id: req.params.id,
+    clientId: typeof req.body?.clientId === 'string' ? req.body.clientId : current?.clientId ?? '',
+    departmentKey: (req.body?.departmentKey === 'web' || req.body?.departmentKey === 'rrss' ? req.body.departmentKey : req.body?.departmentKey === 'publicidad' ? req.body.departmentKey : current?.departmentKey ?? 'publicidad') as any,
+    metricKey: typeof req.body?.metricKey === 'string' ? req.body.metricKey : current?.metricKey ?? '',
+    monthKey: typeof req.body?.monthKey === 'string' ? req.body.monthKey : current?.monthKey ?? '',
+    targetValue: typeof req.body?.targetValue === 'number' ? req.body.targetValue : current?.targetValue ?? null,
+    targetText: typeof req.body?.targetText === 'string' ? req.body.targetText : current?.targetText ?? null,
+    actualValue: typeof req.body?.actualValue === 'number' ? req.body.actualValue : current?.actualValue ?? null,
+    actualText: typeof req.body?.actualText === 'string' ? req.body.actualText : current?.actualText ?? null,
+    status: typeof req.body?.status === 'string' ? req.body.status as any : current?.status,
+    differenceValue: typeof req.body?.differenceValue === 'number' ? req.body.differenceValue : current?.differenceValue ?? null,
+    differencePct: typeof req.body?.differencePct === 'number' ? req.body.differencePct : current?.differencePct ?? null,
+    notes: typeof req.body?.notes === 'string' ? req.body.notes : current?.notes ?? null,
+    createdByUserId: current?.createdByUserId ?? session.user.id,
+    updatedByUserId: session.user.id,
+  });
+
+  if (!kpi) {
+    return sendError(res, 404, 'KPI no encontrado', 'NOT_FOUND');
+  }
+
+  return res.json({ kpi });
+});
+
+app.post('/api/monthly-kpis/:id/close', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const kpi = closeMonthlyKpi(req.params.id);
+  if (!kpi) {
+    return sendError(res, 404, 'KPI no encontrado', 'NOT_FOUND');
+  }
+
+  return res.json({ kpi });
+});
+
 app.post('/api/admin/backup', async (req, res) => {
   const session = requireSession(req, res, ['admin']);
   if (!session) {
@@ -451,6 +818,7 @@ app.use((_req, res) => {
 });
 
 if (process.env.NODE_ENV !== 'test') {
+  startClaritySyncScheduler();
   app.listen(port, () => {
     console.log(`[infidash] API escuchando en http://127.0.0.1:${port}`);
   });

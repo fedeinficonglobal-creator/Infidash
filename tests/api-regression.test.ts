@@ -220,6 +220,122 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(statsBody.stats.length, 1);
   assert.equal(statsBody.stats[0].revenue, 15678);
 
+  const { response: uxCreateResponse, body: uxCreateBody } = await request(`/api/clients/${clientId}/ux-snapshots`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      snapshotDate: statDate,
+      sessions: 640,
+      pageViews: 1280,
+      rageClicks: 12,
+      deadClicks: 4,
+      scrollDepthAvg: 68.5,
+      engagedSessions: 390,
+      conversions: 27,
+      conversionRate: 4.2,
+      notes: 'Importación de Clarity para el dashboard',
+      source: 'clarity',
+      payloadJson: JSON.stringify({ source: 'clarity', sessions: 640 }),
+    }),
+  });
+
+  assert.equal(uxCreateResponse.status, 201, JSON.stringify(uxCreateBody));
+  assert.equal(uxCreateBody.snapshot.clientId, clientId);
+  assert.equal(uxCreateBody.snapshot.sessions, 640);
+
+  const { response: uxListResponse, body: uxListBody } = await request(`/api/clients/${clientId}/ux-snapshots`, {
+    headers: {
+      authorization: `Bearer ${viewerToken}`,
+    },
+  });
+
+  assert.equal(uxListResponse.status, 200);
+  assert.equal(uxListBody.snapshots.length, 1);
+  assert.equal(uxListBody.snapshots[0].rageClicks, 12);
+
+  const { response: dashboardUxResponse, body: dashboardUxBody } = await request(`/api/clients/${clientId}/dashboard`, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(dashboardUxResponse.status, 200);
+  assert.equal(dashboardUxBody.latestUxSnapshot.sessions, 640);
+  assert.equal(dashboardUxBody.latestUxSnapshot.pageViews, 1280);
+
+  const { response: channelCreateResponse, body: channelCreateBody } = await request(`/api/clients/${clientId}/rrss-channels`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      platformKey: 'instagram',
+      label: 'Instagram principal',
+      isActive: true,
+      sortOrder: 1,
+    }),
+  });
+
+  assert.equal(channelCreateResponse.status, 201);
+  assert.equal(channelCreateBody.channel.clientId, clientId);
+  assert.equal(channelCreateBody.channel.platformKey, 'instagram');
+
+  const { response: channelListResponse, body: channelListBody } = await request(`/api/clients/${clientId}/rrss-channels`, {
+    headers: {
+      authorization: `Bearer ${viewerToken}`,
+    },
+  });
+
+  assert.equal(channelListResponse.status, 200);
+  assert.equal(channelListBody.channels.length, 1);
+  assert.equal(channelListBody.channels[0].label, 'Instagram principal');
+
+  const { response: kpiCreateResponse, body: kpiCreateBody } = await request(`/api/clients/${clientId}/monthly-kpis`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      departmentKey: 'rrss',
+      metricKey: 'followers',
+      monthKey: '2026-05',
+      targetValue: 5000,
+      actualValue: 5200,
+      targetText: '5.000 seguidores',
+      actualText: '5.200 seguidores',
+      status: 'success',
+      notes: 'Carga inicial del KPI mensual de RRSS',
+    }),
+  });
+
+  assert.equal(kpiCreateResponse.status, 201);
+  assert.equal(kpiCreateBody.kpi.clientId, clientId);
+  assert.equal(kpiCreateBody.kpi.departmentKey, 'rrss');
+  assert.equal(kpiCreateBody.kpi.monthKey, '2026-05');
+
+  const { response: kpiListResponse, body: kpiListBody } = await request(`/api/clients/${clientId}/monthly-kpis?monthKey=2026-05`, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(kpiListResponse.status, 200);
+  assert.equal(kpiListBody.kpis.length, 1);
+  assert.equal(kpiListBody.kpis[0].metricKey, 'followers');
+
+  const { response: kpiCloseResponse, body: kpiCloseBody } = await request(`/api/monthly-kpis/${kpiCreateBody.kpi.id}/close`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(kpiCloseResponse.status, 200);
+  assert.equal(kpiCloseBody.kpi.id, kpiCreateBody.kpi.id);
+  assert.ok(kpiCloseBody.kpi.closedAt);
+
   const { response: dashboardResponse, body: dashboardBody } = await request('/api/clients', {
     headers: {
       authorization: `Bearer ${adminToken}`,
@@ -230,6 +346,62 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   const savedClient = dashboardBody.clients.find((entry: any) => entry.id === clientId);
   assert.ok(savedClient, 'The created client should still be present in the dashboard payload');
   assert.equal(savedClient.latestStat.revenue, 15678);
+});
+
+test('admin can create and manage users from the management backend', async () => {
+  const uniqueEmail = `qa-${Date.now()}@infidash.local`;
+  const uniqueName = `QA User ${Date.now()}`;
+
+  const { response: listResponse, body: listBody } = await request('/api/users', {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(listResponse.status, 200);
+  assert.ok(Array.isArray(listBody.users));
+  assert.ok(listBody.users.some((user: any) => user.email === viewerEmail));
+
+  const { response: createResponse, body: createBody } = await request('/api/users', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      email: uniqueEmail,
+      name: uniqueName,
+      password: 'TempPass123',
+      role: 'viewer',
+    }),
+  });
+
+  assert.equal(createResponse.status, 201, JSON.stringify(createBody));
+  assert.equal(createBody.user.email, uniqueEmail);
+  assert.equal(createBody.user.name, uniqueName);
+  assert.equal(createBody.user.role, 'viewer');
+  assert.equal(createBody.user.active, true);
+
+  const { response: updateResponse, body: updateBody } = await request(`/api/users/${createBody.user.id}`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({ role: 'admin', active: false, name: `${uniqueName} Renovado` }),
+  });
+
+  assert.equal(updateResponse.status, 200, JSON.stringify(updateBody));
+  assert.equal(updateBody.user.role, 'admin');
+  assert.equal(updateBody.user.active, false);
+  assert.equal(updateBody.user.name, `${uniqueName} Renovado`);
+
+  const { response: forbiddenResponse, body: forbiddenBody } = await request('/api/users', {
+    headers: {
+      authorization: `Bearer ${viewerToken}`,
+    },
+  });
+
+  assert.equal(forbiddenResponse.status, 403);
+  assert.equal(forbiddenBody.code, 'FORBIDDEN');
 });
 
 test('admin can create a sqlite backup and viewer cannot', async () => {

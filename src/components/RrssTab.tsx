@@ -19,14 +19,15 @@ const baseEngagementData = [
 export function RrssTab({ client }: { client: Client }) {
   const [activePlatform, setActivePlatform] = useState<string>('all');
   const signals = buildClientSignals(client);
-  const followers = Math.max(9200, Math.round(signals.conversions * 72 + client.health * 180));
-  const engagementRate = signals.healthBand === 'excellent' ? 6.1 : signals.healthBand === 'stable' ? 4.8 : signals.healthBand === 'risk' ? 3.4 : 2.2;
-  const impressions = Math.round(followers * (signals.healthBand === 'excellent' ? 12.4 : signals.healthBand === 'stable' ? 10.1 : 8.3));
-  const interactions = Math.round(impressions * (engagementRate / 100));
-  const scale = Math.max(impressions / 512000, 0.25);
+  const hasData = signals.hasData;
+  const followers = hasData ? Math.max(9200, Math.round(signals.conversions * 72 + client.health * 180)) : 0;
+  const engagementRate = hasData ? (signals.healthBand === 'excellent' ? 6.1 : signals.healthBand === 'stable' ? 4.8 : signals.healthBand === 'risk' ? 3.4 : 2.2) : 0;
+  const impressions = hasData ? Math.round(followers * (signals.healthBand === 'excellent' ? 12.4 : signals.healthBand === 'stable' ? 10.1 : 8.3)) : 0;
+  const interactions = hasData ? Math.round(impressions * (engagementRate / 100)) : 0;
+  const scale = hasData ? Math.max(impressions / 512000, 0.25) : 0;
   const engagementData = baseEngagementData.map((item) => ({
     ...item,
-    views: Math.round(item.views * scale * (signals.healthBand === 'critical' ? 0.82 : 1)),
+    views: hasData ? Math.round(item.views * scale * (signals.healthBand === 'critical' ? 0.82 : 1)) : 0,
   }));
 
   const platforms = [
@@ -39,7 +40,9 @@ export function RrssTab({ client }: { client: Client }) {
     { id: 'youtube', label: 'YouTube', color: 'bg-rose-600' },
   ];
 
-  const contentIdeas = client.industry.toLowerCase().includes('moda')
+  const contentIdeas = !hasData
+    ? ['Sin datos sincronizados', 'Sin datos sincronizados', 'Sin datos sincronizados']
+    : client.industry.toLowerCase().includes('moda')
     ? [
         'Reel: "3 combinaciones que convierten mejor este mes"',
         'Carousel: "Cómo elegir tu siguiente compra según el estilo"',
@@ -58,10 +61,10 @@ export function RrssTab({ client }: { client: Client }) {
         ];
 
   const posts = [
-    { id: 1, type: 'Reel', title: contentIdeas[0], views: formatPlain(Math.round(impressions * 0.24)), likes: formatPlain(Math.round(interactions * 0.34)), comments: Math.round(interactions * 0.012), platform: 'Instagram' },
-    { id: 2, type: 'Carousel', title: contentIdeas[1], views: formatPlain(Math.round(impressions * 0.13)), likes: formatPlain(Math.round(interactions * 0.19)), comments: Math.round(interactions * 0.006), platform: 'LinkedIn' },
-    { id: 3, type: 'Post', title: contentIdeas[2], views: formatPlain(Math.round(impressions * 0.09)), likes: formatPlain(Math.round(interactions * 0.27)), comments: Math.round(interactions * 0.042), platform: 'Instagram' },
-    { id: 4, type: 'Video', title: 'Actualización de producto / servicio', views: formatPlain(Math.round(impressions * 0.08)), likes: formatPlain(Math.round(interactions * 0.11)), comments: Math.round(interactions * 0.004), platform: 'TikTok' },
+    { id: 1, type: 'Reel', title: contentIdeas[0], views: formatPlain(hasData ? Math.round(impressions * 0.24) : 0), likes: formatPlain(hasData ? Math.round(interactions * 0.34) : 0), comments: hasData ? Math.round(interactions * 0.012) : 0, platform: 'Instagram' },
+    { id: 2, type: 'Carousel', title: contentIdeas[1], views: formatPlain(hasData ? Math.round(impressions * 0.13) : 0), likes: formatPlain(hasData ? Math.round(interactions * 0.19) : 0), comments: hasData ? Math.round(interactions * 0.006) : 0, platform: 'LinkedIn' },
+    { id: 3, type: 'Post', title: contentIdeas[2], views: formatPlain(hasData ? Math.round(impressions * 0.09) : 0), likes: formatPlain(hasData ? Math.round(interactions * 0.27) : 0), comments: hasData ? Math.round(interactions * 0.042) : 0, platform: 'Instagram' },
+    { id: 4, type: 'Video', title: hasData ? 'Actualización de producto / servicio' : 'Sin datos sincronizados', views: formatPlain(hasData ? Math.round(impressions * 0.08) : 0), likes: formatPlain(hasData ? Math.round(interactions * 0.11) : 0), comments: hasData ? Math.round(interactions * 0.004) : 0, platform: 'TikTok' },
   ];
 
   const isFiltered = activePlatform !== 'all';
@@ -72,7 +75,9 @@ export function RrssTab({ client }: { client: Client }) {
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1 flex items-center gap-3">Redes Sociales</h2>
           <p className="text-slate-500 font-medium">
-            {client.name} mantiene un engagement de {engagementRate.toFixed(1)}% con {formatPlain(interactions)} interacciones registradas.
+            {hasData
+              ? `${client.name} mantiene un engagement de ${engagementRate.toFixed(1)}% con ${formatPlain(interactions)} interacciones registradas.`
+              : `${client.name} aún no tiene datos sincronizados. Las métricas se muestran en 0.`}
           </p>
         </div>
         <div className="flex bg-white border border-slate-100 p-1 rounded-xl shadow-sm overflow-x-auto no-scrollbar max-w-full">
@@ -100,7 +105,7 @@ export function RrssTab({ client }: { client: Client }) {
           </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-bold">{formatPlain(followers)}</h3>
-            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">+{formatPlain(Math.round(followers * 0.03))}</span>
+            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{hasData ? `+${formatPlain(Math.round(followers * 0.03))}` : '0'}</span>
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -110,7 +115,7 @@ export function RrssTab({ client }: { client: Client }) {
           </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-bold">{formatPlain(impressions)}</h3>
-            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">+{signals.healthBand === 'critical' ? '2%' : '11%'}</span>
+            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{hasData ? (signals.healthBand === 'critical' ? '2%' : '11%') : '0%'}</span>
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -120,7 +125,7 @@ export function RrssTab({ client }: { client: Client }) {
           </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-bold">{formatPlain(interactions)}</h3>
-            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">+{signals.healthBand === 'critical' ? '0.8%' : '6.4%'}</span>
+            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{hasData ? (signals.healthBand === 'critical' ? '0.8%' : '6.4%') : '0%'}</span>
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -130,8 +135,8 @@ export function RrssTab({ client }: { client: Client }) {
           </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-bold">{engagementRate.toFixed(1)}%</h3>
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${signals.healthBand === 'critical' ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50'}`}>
-              {signals.healthBand === 'critical' ? '-0.4%' : '+0.7%'}
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${hasData && signals.healthBand === 'critical' ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50'}`}>
+              {hasData ? (signals.healthBand === 'critical' ? '-0.4%' : '+0.7%') : '0%'}
             </span>
           </div>
         </div>

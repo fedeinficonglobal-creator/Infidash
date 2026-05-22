@@ -51,6 +51,25 @@ export const dailyStats = sqliteTable('daily_stats', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const uxSnapshots = sqliteTable('ux_snapshots', {
+  id: text('id').primaryKey(),
+  clientId: text('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  snapshotDate: text('snapshot_date').notNull(),
+  sessions: integer('sessions').notNull().default(0),
+  pageViews: integer('page_views').notNull().default(0),
+  rageClicks: integer('rage_clicks').notNull().default(0),
+  deadClicks: integer('dead_clicks').notNull().default(0),
+  scrollDepthAvg: real('scroll_depth_avg').notNull().default(0),
+  engagedSessions: integer('engaged_sessions').notNull().default(0),
+  conversions: integer('conversions').notNull().default(0),
+  conversionRate: real('conversion_rate').notNull().default(0),
+  notes: text('notes'),
+  source: text('source').notNull().default('clarity'),
+  payloadJson: text('payload_json').notNull().default('{}'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const aiInsights = sqliteTable('ai_insights', {
   id: text('id').primaryKey(),
   clientId: text('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),

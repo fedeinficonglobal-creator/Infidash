@@ -82,17 +82,17 @@ export function HealthScoreCard({ score }: { score: number }) {
         <div className="flex-1 space-y-2">
            <div className="flex justify-between text-[10px] font-bold">
               <span className="text-slate-400">SALES</span>
-              <span>8.4/10</span>
+              <span>{(score / 10).toFixed(1)}/10</span>
            </div>
            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full" style={{ width: '84%' }} />
+              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.max(Math.min(score, 100), 0)}%` }} />
            </div>
            <div className="flex justify-between text-[10px] font-bold">
               <span className="text-slate-400">ADS</span>
-              <span>4.2/10</span>
+              <span>{(Math.max(score - 40, 0) / 10).toFixed(1)}/10</span>
            </div>
            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-rose-500 rounded-full" style={{ width: '42%' }} />
+              <div className="h-full bg-rose-500 rounded-full" style={{ width: `${Math.max(Math.min(score - 40, 100), 0)}%` }} />
            </div>
         </div>
       </div>

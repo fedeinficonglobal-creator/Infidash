@@ -86,6 +86,104 @@ export interface DailyStatRecord {
   updatedAt: string;
 }
 
+export type MonthlyKpiStatus = 'success' | 'warning' | 'fail' | 'unknown';
+export type MonthlyKpiDepartmentKey = 'publicidad' | 'web' | 'rrss';
+
+export interface RrssChannelRecord {
+  id: string;
+  clientId: string;
+  platformKey: string;
+  label: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RrssChannelInput {
+  id?: string;
+  clientId: string;
+  platformKey: string;
+  label: string;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface ClarityUxSnapshotRecord {
+  id: string;
+  clientId: string;
+  snapshotDate: string;
+  sessions: number;
+  pageViews: number;
+  rageClicks: number;
+  deadClicks: number;
+  scrollDepthAvg: number;
+  engagedSessions: number;
+  conversions: number;
+  conversionRate: number;
+  notes: string | null;
+  source: string;
+  payloadJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClarityUxSnapshotInput {
+  id?: string;
+  clientId: string;
+  snapshotDate: string;
+  sessions?: number;
+  pageViews?: number;
+  rageClicks?: number;
+  deadClicks?: number;
+  scrollDepthAvg?: number;
+  engagedSessions?: number;
+  conversions?: number;
+  conversionRate?: number;
+  notes?: string | null;
+  source?: string;
+  payloadJson?: string;
+}
+
+export interface MonthlyKpiRecord {
+  id: string;
+  clientId: string;
+  departmentKey: MonthlyKpiDepartmentKey;
+  metricKey: string;
+  monthKey: string;
+  targetValue: number | null;
+  targetText: string | null;
+  actualValue: number | null;
+  actualText: string | null;
+  status: MonthlyKpiStatus;
+  differenceValue: number | null;
+  differencePct: number | null;
+  notes: string | null;
+  closedAt: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MonthlyKpiInput {
+  id?: string;
+  clientId: string;
+  departmentKey: MonthlyKpiDepartmentKey;
+  metricKey: string;
+  monthKey: string;
+  targetValue?: number | null;
+  targetText?: string | null;
+  actualValue?: number | null;
+  actualText?: string | null;
+  status?: MonthlyKpiStatus;
+  differenceValue?: number | null;
+  differencePct?: number | null;
+  notes?: string | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
+}
+
 export interface AuthenticatedSession {
   token: string;
   user: PublicUser;
@@ -223,6 +321,60 @@ function initializeSchema(db: Database.Database) {
       UNIQUE(client_id, stat_date)
     );
 
+    CREATE TABLE IF NOT EXISTS ux_snapshots (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      snapshot_date TEXT NOT NULL,
+      sessions INTEGER NOT NULL DEFAULT 0,
+      page_views INTEGER NOT NULL DEFAULT 0,
+      rage_clicks INTEGER NOT NULL DEFAULT 0,
+      dead_clicks INTEGER NOT NULL DEFAULT 0,
+      scroll_depth_avg REAL NOT NULL DEFAULT 0,
+      engaged_sessions INTEGER NOT NULL DEFAULT 0,
+      conversions INTEGER NOT NULL DEFAULT 0,
+      conversion_rate REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      source TEXT NOT NULL DEFAULT 'clarity',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(client_id, snapshot_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS rrss_channels (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      platform_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(client_id, platform_key, label)
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_kpis (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      department_key TEXT NOT NULL,
+      metric_key TEXT NOT NULL,
+      month_key TEXT NOT NULL,
+      target_value REAL,
+      target_text TEXT,
+      actual_value REAL,
+      actual_text TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      difference_value REAL,
+      difference_pct REAL,
+      notes TEXT,
+      closed_at TEXT,
+      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      updated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(client_id, department_key, metric_key, month_key)
+    );
+
     CREATE TABLE IF NOT EXISTS ai_insights (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -230,6 +382,72 @@ function initializeSchema(db: Database.Database) {
       created_at TEXT NOT NULL
     );
   `);
+}
+
+function ensureUxSnapshotSchema(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(ux_snapshots)`).all() as Array<{ name: string }>;
+  if (columns.length === 0) {
+    return;
+  }
+
+  const existingColumns = new Set(columns.map((column) => column.name));
+  const addColumn = (definition: string) => db.exec(`ALTER TABLE ux_snapshots ADD COLUMN ${definition}`);
+
+  if (!existingColumns.has('snapshot_date')) {
+    addColumn(`snapshot_date TEXT NOT NULL DEFAULT ''`);
+  }
+
+  if (!existingColumns.has('sessions')) {
+    addColumn(`sessions INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('page_views')) {
+    addColumn(`page_views INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('rage_clicks')) {
+    addColumn(`rage_clicks INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('dead_clicks')) {
+    addColumn(`dead_clicks INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('scroll_depth_avg')) {
+    addColumn(`scroll_depth_avg REAL NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('engaged_sessions')) {
+    addColumn(`engaged_sessions INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('conversions')) {
+    addColumn(`conversions INTEGER NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('conversion_rate')) {
+    addColumn(`conversion_rate REAL NOT NULL DEFAULT 0`);
+  }
+
+  if (!existingColumns.has('notes')) {
+    addColumn(`notes TEXT`);
+  }
+
+  if (!existingColumns.has('source')) {
+    addColumn(`source TEXT NOT NULL DEFAULT 'clarity'`);
+  }
+
+  if (!existingColumns.has('payload_json')) {
+    addColumn(`payload_json TEXT NOT NULL DEFAULT '{}'`);
+  }
+
+  if (!existingColumns.has('created_at')) {
+    addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
+  }
+
+  if (!existingColumns.has('updated_at')) {
+    addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
+  }
 }
 
 function ensureClientThresholdSchema(db: Database.Database) {
@@ -294,7 +512,7 @@ function ensureIntegrationSchema(db: Database.Database) {
 
   for (const row of rows) {
     const rawProvider = String(row.provider ?? row.type ?? '').trim().toLowerCase();
-    const provider = (['clarity', 'wordpress', 'woocommerce'].includes(rawProvider) ? rawProvider : 'clarity') as IntegrationProvider;
+    const provider = (['clarity', 'meta_ads', 'google_ads', 'wordpress', 'woocommerce'].includes(rawProvider) ? rawProvider : 'clarity') as IntegrationProvider;
     const definition = getIntegrationProviderDefinition(provider);
     if (!definition) {
       continue;
@@ -346,55 +564,8 @@ function seedDefaults(db: Database.Database) {
     ).run(orgId, 'Infidash', 'infidash', timestamp);
   }
 
-  const defaultClients = [
-    {
-      id: 'matundy',
-      name: 'Matundy',
-      slug: 'matundy',
-      logoUrl: 'https://images.unsplash.com/photo-1522312346375-d1f5dca6d8d2?q=80&w=256&auto=format&fit=crop',
-      industry: 'Retail / Ecommerce',
-      healthScore: 86,
-      kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    },
-    {
-      id: 'micaela-villa',
-      name: 'Micaela Villa',
-      slug: 'micaela-villa',
-      logoUrl: 'https://images.unsplash.com/photo-1523381235312-3a1ec56d99b7?q=80&w=256&auto=format&fit=crop',
-      industry: 'Moda / Joyería',
-      healthScore: 84,
-      kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    },
-    {
-      id: 'concha-vega',
-      name: 'Concha Vega',
-      slug: 'concha-vega',
-      logoUrl: 'https://images.unsplash.com/photo-1581578731522-745d05db9ad2?q=80&w=256&auto=format&fit=crop',
-      industry: 'Interiorismo / Deco',
-      healthScore: 32,
-      kpiThresholds: DEFAULT_KPI_THRESHOLDS,
-    },
-  ];
-
-  const insertClient = db.prepare(
-    `INSERT OR IGNORE INTO clients (id, org_id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-
-  for (const client of defaultClients) {
-    insertClient.run(
-      client.id,
-      orgId,
-      client.name,
-      client.slug,
-      client.logoUrl,
-      client.industry,
-      client.healthScore,
-      JSON.stringify(client.kpiThresholds),
-      timestamp,
-      timestamp,
-    );
-  }
+  // No se seedan clientes de demostración: el panel debe arrancar vacío y
+  // poblarse solo con datos reales creados por usuarios o sincronizados desde backend.
 
   const adminEmail = normalizeEmail(process.env.INFIDASH_ADMIN_EMAIL ?? 'admin@infidash.local');
   const viewerEmail = normalizeEmail(process.env.INFIDASH_VIEWER_EMAIL ?? 'viewer@infidash.local');
@@ -485,6 +656,7 @@ export function getDatabase() {
     initializeSchema(database);
     ensureClientThresholdSchema(database);
     ensureIntegrationSchema(database);
+    ensureUxSnapshotSchema(database);
     seedDefaults(database);
   }
 
@@ -562,6 +734,71 @@ function rowToDailyStat(row: any): DailyStatRecord {
     traffic: row.traffic,
     notes: row.notes ?? null,
     source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToUxSnapshot(row: any): ClarityUxSnapshotRecord {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    snapshotDate: row.snapshot_date,
+    sessions: row.sessions,
+    pageViews: row.page_views,
+    rageClicks: row.rage_clicks,
+    deadClicks: row.dead_clicks,
+    scrollDepthAvg: row.scroll_depth_avg,
+    engagedSessions: row.engaged_sessions,
+    conversions: row.conversions,
+    conversionRate: row.conversion_rate,
+    notes: row.notes ?? null,
+    source: row.source,
+    payloadJson: row.payload_json ?? '{}',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToRrssChannel(row: any): RrssChannelRecord {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    platformKey: row.platform_key,
+    label: row.label,
+    isActive: row.is_active === 1,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function normalizeMonthlyKpiDepartmentKey(value: unknown): MonthlyKpiDepartmentKey {
+  return value === 'web' || value === 'rrss' ? value : 'publicidad';
+}
+
+function normalizeMonthlyKpiStatus(value: unknown): MonthlyKpiStatus {
+  return value === 'success' || value === 'warning' || value === 'fail' ? value : 'unknown';
+}
+
+function rowToMonthlyKpi(row: any): MonthlyKpiRecord {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    departmentKey: normalizeMonthlyKpiDepartmentKey(row.department_key),
+    metricKey: row.metric_key,
+    monthKey: row.month_key,
+    targetValue: row.target_value ?? null,
+    targetText: row.target_text ?? null,
+    actualValue: row.actual_value ?? null,
+    actualText: row.actual_text ?? null,
+    status: normalizeMonthlyKpiStatus(row.status),
+    differenceValue: row.difference_value ?? null,
+    differencePct: row.difference_pct ?? null,
+    notes: row.notes ?? null,
+    closedAt: row.closed_at ?? null,
+    createdByUserId: row.created_by_user_id ?? null,
+    updatedByUserId: row.updated_by_user_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -722,6 +959,15 @@ function getClientById(clientId: string) {
 function getIntegrationRowById(id: string) {
   const row = getDatabase().prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
   return row ?? null;
+}
+
+export function getIntegrationCredentialsById(id: string) {
+  const row = getIntegrationRowById(id);
+  if (!row) {
+    return null;
+  }
+
+  return parseJsonRecord(row.credentials_json ?? '{}');
 }
 
 export function listClientIntegrations(clientId: string) {
@@ -942,6 +1188,312 @@ export function listDailyStats(clientId?: string) {
     ? getDatabase().prepare(query).all(clientId)
     : getDatabase().prepare(query).all();
   return rows.map(rowToDailyStat);
+}
+
+export function listUxSnapshots(clientId?: string) {
+  const query = clientId
+    ? `SELECT * FROM ux_snapshots WHERE client_id = ? ORDER BY snapshot_date DESC, created_at DESC`
+    : `SELECT * FROM ux_snapshots ORDER BY snapshot_date DESC, created_at DESC`;
+  const rows = clientId
+    ? getDatabase().prepare(query).all(clientId)
+    : getDatabase().prepare(query).all();
+  return rows.map(rowToUxSnapshot);
+}
+
+export function getLatestUxSnapshot(clientId: string) {
+  const row = getDatabase()
+    .prepare(`SELECT * FROM ux_snapshots WHERE client_id = ? ORDER BY snapshot_date DESC, updated_at DESC LIMIT 1`)
+    .get(clientId) as any;
+  return row ? rowToUxSnapshot(row) : null;
+}
+
+export function listIntegrationsByProvider(provider: IntegrationProvider) {
+  const rows = getDatabase()
+    .prepare(`SELECT * FROM integrations WHERE provider = ? AND is_active = 1 ORDER BY updated_at DESC, created_at DESC`)
+    .all(provider) as any[];
+  return rows.map(rowToIntegration);
+}
+
+export function updateIntegrationSyncState(
+  id: string,
+  updates: { status?: IntegrationStatus; lastError?: string | null; lastSync?: string | null },
+) {
+  const db = getDatabase();
+  const current = getIntegrationRowById(id);
+  if (!current) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  const status = updates.status ?? current.status ?? 'pending';
+  const lastSync = updates.lastSync ?? current.last_sync ?? null;
+  const lastError = updates.lastError ?? current.last_error ?? null;
+
+  db.prepare(`UPDATE integrations SET status = ?, last_sync = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
+    status,
+    lastSync,
+    lastError,
+    timestamp,
+    id,
+  );
+
+  const refreshed = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  return refreshed ? rowToIntegration(refreshed) : null;
+}
+
+export function upsertUxSnapshot(input: ClarityUxSnapshotInput) {
+  const db = getDatabase();
+  const client = getClientById(input.clientId);
+  if (!client) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  const existing = db.prepare(`SELECT * FROM ux_snapshots WHERE client_id = ? AND snapshot_date = ?`).get(input.clientId, input.snapshotDate) as any;
+  const record = {
+    id: existing?.id ?? input.id ?? crypto.randomUUID(),
+    client_id: input.clientId,
+    snapshot_date: input.snapshotDate.trim(),
+    sessions: Number.isFinite(input.sessions) ? Number(input.sessions ?? 0) : 0,
+    page_views: Number.isFinite(input.pageViews) ? Number(input.pageViews ?? 0) : 0,
+    rage_clicks: Number.isFinite(input.rageClicks) ? Number(input.rageClicks ?? 0) : 0,
+    dead_clicks: Number.isFinite(input.deadClicks) ? Number(input.deadClicks ?? 0) : 0,
+    scroll_depth_avg: Number.isFinite(input.scrollDepthAvg) ? Number(input.scrollDepthAvg ?? 0) : 0,
+    engaged_sessions: Number.isFinite(input.engagedSessions) ? Number(input.engagedSessions ?? 0) : 0,
+    conversions: Number.isFinite(input.conversions) ? Number(input.conversions ?? 0) : 0,
+    conversion_rate: Number.isFinite(input.conversionRate) ? Number(input.conversionRate ?? 0) : 0,
+    notes: input.notes ?? null,
+    source: input.source?.trim() || 'clarity',
+    payload_json: input.payloadJson ?? '{}',
+    created_at: existing?.created_at ?? timestamp,
+    updated_at: timestamp,
+  };
+
+  if (existing) {
+    db.prepare(
+      `UPDATE ux_snapshots
+       SET sessions = ?, page_views = ?, rage_clicks = ?, dead_clicks = ?, scroll_depth_avg = ?, engaged_sessions = ?, conversions = ?, conversion_rate = ?, notes = ?, source = ?, payload_json = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      record.sessions,
+      record.page_views,
+      record.rage_clicks,
+      record.dead_clicks,
+      record.scroll_depth_avg,
+      record.engaged_sessions,
+      record.conversions,
+      record.conversion_rate,
+      record.notes,
+      record.source,
+      record.payload_json,
+      record.updated_at,
+      record.id,
+    );
+  } else {
+    db.prepare(
+      `INSERT INTO ux_snapshots (
+        id, client_id, snapshot_date, sessions, page_views, rage_clicks, dead_clicks, scroll_depth_avg, engaged_sessions, conversions, conversion_rate, notes, source, payload_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.id,
+      record.client_id,
+      record.snapshot_date,
+      record.sessions,
+      record.page_views,
+      record.rage_clicks,
+      record.dead_clicks,
+      record.scroll_depth_avg,
+      record.engaged_sessions,
+      record.conversions,
+      record.conversion_rate,
+      record.notes,
+      record.source,
+      record.payload_json,
+      record.created_at,
+      record.updated_at,
+    );
+  }
+
+  const saved = db.prepare(`SELECT * FROM ux_snapshots WHERE id = ?`).get(record.id) as any;
+  return saved ? rowToUxSnapshot(saved) : null;
+}
+
+export function listRrssChannels(clientId: string) {
+  const rows = getDatabase()
+    .prepare(`SELECT * FROM rrss_channels WHERE client_id = ? ORDER BY sort_order ASC, created_at ASC`)
+    .all(clientId) as any[];
+  return rows.map(rowToRrssChannel);
+}
+
+export function saveRrssChannel(input: RrssChannelInput) {
+  const db = getDatabase();
+  const client = getClientById(input.clientId);
+  if (!client) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  const existing = input.id
+    ? (db.prepare(`SELECT * FROM rrss_channels WHERE id = ?`).get(input.id) as any)
+    : (db.prepare(`SELECT * FROM rrss_channels WHERE client_id = ? AND platform_key = ? AND label = ?`).get(input.clientId, input.platformKey, input.label.trim()) as any);
+
+  if (existing) {
+    db.prepare(
+      `UPDATE rrss_channels
+       SET platform_key = ?, label = ?, is_active = ?, sort_order = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      input.platformKey.trim(),
+      input.label.trim(),
+      input.isActive === false ? 0 : 1,
+      Number.isFinite(input.sortOrder) ? input.sortOrder ?? 0 : 0,
+      timestamp,
+      existing.id,
+    );
+
+    const refreshed = db.prepare(`SELECT * FROM rrss_channels WHERE id = ?`).get(existing.id) as any;
+    return rowToRrssChannel(refreshed);
+  }
+
+  const record = {
+    id: input.id ?? crypto.randomUUID(),
+    client_id: input.clientId,
+    platform_key: input.platformKey.trim(),
+    label: input.label.trim(),
+    is_active: input.isActive === false ? 0 : 1,
+    sort_order: Number.isFinite(input.sortOrder) ? input.sortOrder ?? 0 : 0,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+
+  db.prepare(
+    `INSERT INTO rrss_channels (id, client_id, platform_key, label, is_active, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    record.id,
+    record.client_id,
+    record.platform_key,
+    record.label,
+    record.is_active,
+    record.sort_order,
+    record.created_at,
+    record.updated_at,
+  );
+
+  const created = db.prepare(`SELECT * FROM rrss_channels WHERE id = ?`).get(record.id) as any;
+  return rowToRrssChannel(created);
+}
+
+export function listMonthlyKpis(clientId: string, monthKey?: string) {
+  const rows = monthKey
+    ? getDatabase().prepare(`SELECT * FROM monthly_kpis WHERE client_id = ? AND month_key = ? ORDER BY department_key ASC, metric_key ASC`).all(clientId, monthKey)
+    : getDatabase().prepare(`SELECT * FROM monthly_kpis WHERE client_id = ? ORDER BY month_key DESC, department_key ASC, metric_key ASC`).all(clientId);
+  return (rows as any[]).map(rowToMonthlyKpi);
+}
+
+export function saveMonthlyKpi(input: MonthlyKpiInput) {
+  const db = getDatabase();
+  const client = getClientById(input.clientId);
+  if (!client) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  const existing = input.id
+    ? (db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(input.id) as any)
+    : (db.prepare(`SELECT * FROM monthly_kpis WHERE client_id = ? AND department_key = ? AND metric_key = ? AND month_key = ?`).get(
+        input.clientId,
+        input.departmentKey,
+        input.metricKey,
+        input.monthKey,
+      ) as any);
+
+  const record = {
+    id: existing?.id ?? input.id ?? crypto.randomUUID(),
+    client_id: input.clientId,
+    department_key: input.departmentKey,
+    metric_key: input.metricKey.trim(),
+    month_key: input.monthKey.trim(),
+    target_value: typeof input.targetValue === 'number' ? input.targetValue : null,
+    target_text: input.targetText ?? null,
+    actual_value: typeof input.actualValue === 'number' ? input.actualValue : null,
+    actual_text: input.actualText ?? null,
+    status: input.status ?? existing?.status ?? 'unknown',
+    difference_value: typeof input.differenceValue === 'number' ? input.differenceValue : null,
+    difference_pct: typeof input.differencePct === 'number' ? input.differencePct : null,
+    notes: input.notes ?? null,
+    closed_at: existing?.closed_at ?? null,
+    created_by_user_id: input.createdByUserId ?? existing?.created_by_user_id ?? null,
+    updated_by_user_id: input.updatedByUserId ?? existing?.updated_by_user_id ?? null,
+    created_at: existing?.created_at ?? timestamp,
+    updated_at: timestamp,
+  };
+
+  if (existing) {
+    db.prepare(
+      `UPDATE monthly_kpis
+       SET department_key = ?, metric_key = ?, month_key = ?, target_value = ?, target_text = ?, actual_value = ?, actual_text = ?, status = ?, difference_value = ?, difference_pct = ?, notes = ?, closed_at = ?, created_by_user_id = ?, updated_by_user_id = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      record.department_key,
+      record.metric_key,
+      record.month_key,
+      record.target_value,
+      record.target_text,
+      record.actual_value,
+      record.actual_text,
+      record.status,
+      record.difference_value,
+      record.difference_pct,
+      record.notes,
+      record.closed_at,
+      record.created_by_user_id,
+      record.updated_by_user_id,
+      record.updated_at,
+      record.id,
+    );
+  } else {
+    db.prepare(
+      `INSERT INTO monthly_kpis (
+        id, client_id, department_key, metric_key, month_key, target_value, target_text, actual_value, actual_text, status,
+        difference_value, difference_pct, notes, closed_at, created_by_user_id, updated_by_user_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.id,
+      record.client_id,
+      record.department_key,
+      record.metric_key,
+      record.month_key,
+      record.target_value,
+      record.target_text,
+      record.actual_value,
+      record.actual_text,
+      record.status,
+      record.difference_value,
+      record.difference_pct,
+      record.notes,
+      record.closed_at,
+      record.created_by_user_id,
+      record.updated_by_user_id,
+      record.created_at,
+      record.updated_at,
+    );
+  }
+
+  const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(record.id) as any;
+  return rowToMonthlyKpi(saved);
+}
+
+export function closeMonthlyKpi(id: string, closedAt = nowIso()) {
+  const db = getDatabase();
+  const existing = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  if (!existing) {
+    return null;
+  }
+
+  db.prepare(`UPDATE monthly_kpis SET closed_at = ?, updated_at = ? WHERE id = ?`).run(closedAt, nowIso(), id);
+  const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  return rowToMonthlyKpi(saved);
 }
 
 export function getDailyStatById(id: string) {

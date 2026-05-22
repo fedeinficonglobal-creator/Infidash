@@ -8,8 +8,8 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ isLoading, error, onLogin }: LoginScreenProps) {
-  const [email, setEmail] = useState('admin@infidash.local');
-  const [password, setPassword] = useState('admin1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

@@ -16,46 +16,54 @@ const baseTrafficData = [
 
 export function TrafficTab({ client }: { client: Client }) {
   const signals = buildClientSignals(client);
-  const adBudget = Math.max(signals.revenue * 0.18, 3200);
-  const spendScale = Math.max(signals.roas > 0 ? 4.2 / signals.roas : 1, 0.7);
+  const hasData = signals.hasData;
+  const adBudget = hasData ? Math.max(signals.revenue * 0.18, 3200) : 0;
+  const spendScale = hasData ? Math.max(signals.roas > 0 ? 4.2 / signals.roas : 1, 0.7) : 0;
   const trafficData = baseTrafficData.map((point, index) => ({
     ...point,
-    google: Math.round(point.google * spendScale),
-    meta: Math.round(point.meta * (1 + (signals.healthBand === 'critical' ? 0.22 : signals.healthBand === 'risk' ? 0.12 : 0.04)) - index * 8),
+    google: hasData ? Math.round(point.google * spendScale) : 0,
+    meta: hasData ? Math.round(point.meta * (1 + (signals.healthBand === 'critical' ? 0.22 : signals.healthBand === 'risk' ? 0.12 : 0.04)) - index * 8) : 0,
   }));
-  const conversionsAds = Math.max(Math.round(signals.conversions * 0.68), 1);
-  const cpa = signals.cpa || adBudget / conversionsAds;
-  const roas = signals.roas || 0;
+  const conversionsAds = hasData ? Math.max(Math.round(signals.conversions * 0.68), 1) : 0;
+  const cpa = hasData && signals.cpa > 0 ? signals.cpa : 0;
+  const roas = hasData ? signals.roas || 0 : 0;
 
   const channels = [
-    { channel: 'Paid Search', sessions: Math.round(adBudget * 3.2), share: signals.channelShare.search, trend: 'up' as const },
-    { channel: 'Social Paid', sessions: Math.round(adBudget * 2.1), share: signals.channelShare.social, trend: signals.healthBand === 'critical' ? 'down' as const : 'up' as const },
-    { channel: 'Direct', sessions: Math.round(adBudget * 1.4), share: signals.channelShare.direct, trend: 'up' as const },
-    { channel: 'Referral', sessions: Math.round(adBudget * 0.4), share: signals.channelShare.referral, trend: 'neutral' as const },
+    { channel: 'Paid Search', sessions: hasData ? Math.round(adBudget * 3.2) : 0, share: signals.channelShare.search, trend: hasData ? 'up' as const : 'neutral' as const },
+    { channel: 'Social Paid', sessions: hasData ? Math.round(adBudget * 2.1) : 0, share: signals.channelShare.social, trend: hasData && signals.healthBand === 'critical' ? 'down' as const : hasData ? 'up' as const : 'neutral' as const },
+    { channel: 'Direct', sessions: hasData ? Math.round(adBudget * 1.4) : 0, share: signals.channelShare.direct, trend: hasData ? 'up' as const : 'neutral' as const },
+    { channel: 'Referral', sessions: hasData ? Math.round(adBudget * 0.4) : 0, share: signals.channelShare.referral, trend: 'neutral' as const },
   ];
 
-  const campaigns = [
-    {
-      name: `${client.industry.includes('Moda') ? 'PMax' : 'Search'} - Core Performance`,
-      roas: `${Math.max(roas + 1.8, 1.6).toFixed(1)}x`,
-      spend: formatMoney(adBudget * 0.44),
-    },
-    {
-      name: `${client.industry.includes('B2B') ? 'LinkedIn' : 'Meta'} - Prospecting`,
-      roas: `${Math.max(roas + 1.1, 1.2).toFixed(1)}x`,
-      spend: formatMoney(adBudget * 0.24),
-    },
-    {
-      name: 'Brand Search / Retención',
-      roas: `${Math.max(roas + 3.2, 2.5).toFixed(1)}x`,
-      spend: formatMoney(adBudget * 0.14),
-    },
-    {
-      name: 'Remarketing Dinámico',
-      roas: `${Math.max(roas, 1.9).toFixed(1)}x`,
-      spend: formatMoney(adBudget * 0.18),
-    },
-  ];
+  const campaigns = hasData
+    ? [
+        {
+          name: `${client.industry.includes('Moda') ? 'PMax' : 'Search'} - Core Performance`,
+          roas: `${Math.max(roas + 1.8, 1.6).toFixed(1)}x`,
+          spend: formatMoney(adBudget * 0.44),
+        },
+        {
+          name: `${client.industry.includes('B2B') ? 'LinkedIn' : 'Meta'} - Prospecting`,
+          roas: `${Math.max(roas + 1.1, 1.2).toFixed(1)}x`,
+          spend: formatMoney(adBudget * 0.24),
+        },
+        {
+          name: 'Brand Search / Retención',
+          roas: `${Math.max(roas + 3.2, 2.5).toFixed(1)}x`,
+          spend: formatMoney(adBudget * 0.14),
+        },
+        {
+          name: 'Remarketing Dinámico',
+          roas: `${Math.max(roas, 1.9).toFixed(1)}x`,
+          spend: formatMoney(adBudget * 0.18),
+        },
+      ]
+    : [
+        { name: 'Search - Core Performance', roas: '0.0x', spend: formatMoney(0) },
+        { name: 'Meta - Prospecting', roas: '0.0x', spend: formatMoney(0) },
+        { name: 'Brand Search / Retención', roas: '0.0x', spend: formatMoney(0) },
+        { name: 'Remarketing Dinámico', roas: '0.0x', spend: formatMoney(0) },
+      ];
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -70,7 +78,7 @@ export function TrafficTab({ client }: { client: Client }) {
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold">{formatMoney(adBudget)}</h3>
             <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
-              {signals.healthBand === 'excellent' ? '+8.2%' : signals.healthBand === 'critical' ? '-7.4%' : '+2.1%'}
+              {hasData ? (signals.healthBand === 'excellent' ? '+8.2%' : signals.healthBand === 'critical' ? '-7.4%' : '+2.1%') : '0%'}
             </span>
           </div>
         </div>
@@ -78,22 +86,22 @@ export function TrafficTab({ client }: { client: Client }) {
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Conversiones Ads</p>
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold">{formatPlain(conversionsAds)}</h3>
-            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{signals.healthBand === 'critical' ? '-3.8%' : '+9.6%'}</span>
+            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{hasData ? (signals.healthBand === 'critical' ? '-3.8%' : '+9.6%') : '0%'}</span>
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">CPA Global</p>
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold">{formatMoney(cpa)}</h3>
-            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{signals.healthBand === 'critical' ? '-1.1%' : '-6.4%'}</span>
+            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">{hasData ? (signals.healthBand === 'critical' ? '-1.1%' : '-6.4%') : '0%'}</span>
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">ROAS Combinado</p>
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold">{roas > 0 ? `${roas.toFixed(1)}x` : '0.0x'}</h3>
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${signals.healthBand === 'critical' ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50'}`}>
-              {signals.healthBand === 'critical' ? '-2.1%' : '+4.9%'}
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${hasData && signals.healthBand === 'critical' ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50'}`}>
+              {hasData ? (signals.healthBand === 'critical' ? '-2.1%' : '+4.9%') : '0%'}
             </span>
           </div>
         </div>

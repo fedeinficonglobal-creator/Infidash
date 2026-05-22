@@ -1,5 +1,5 @@
-export type IntegrationProvider = 'clarity' | 'wordpress' | 'woocommerce';
-export type IntegrationCapability = 'analytics' | 'leads' | 'sales';
+export type IntegrationProvider = 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce';
+export type IntegrationCapability = 'analytics' | 'ads' | 'leads' | 'sales';
 export type IntegrationStatus = 'connected' | 'pending' | 'error' | 'disabled';
 export type IntegrationFieldType = 'text' | 'url' | 'password' | 'textarea';
 
@@ -25,7 +25,7 @@ export interface IntegrationProviderDefinition {
 export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
   {
     provider: 'clarity',
-    label: 'Microsoft Clarity',
+    label: 'Análisis/UX',
     description: 'Analítica de comportamiento, mapas de calor y sesiones para detectar fricción y optimizar conversión.',
     capabilities: ['analytics'],
     configFields: [
@@ -34,8 +34,8 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
         label: 'Project ID',
         type: 'text',
         required: true,
-        placeholder: 'clarity-project-id',
-        help: 'Identificador del proyecto de Clarity que se quiere conectar.',
+        placeholder: 'ux-project-id',
+        help: 'Identificador interno del proyecto de análisis/UX.',
       },
       {
         key: 'siteUrl',
@@ -43,7 +43,7 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
         type: 'url',
         required: true,
         placeholder: 'https://tudominio.com',
-        help: 'Dominio donde está instalado el script de Clarity.',
+        help: 'Dominio donde está instalado el script de comportamiento.',
       },
       {
         key: 'segmentName',
@@ -51,6 +51,13 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
         type: 'text',
         placeholder: 'Tienda principal',
         help: 'Etiqueta interna para reconocer la fuente dentro de Infidash.',
+      },
+      {
+        key: 'exportUrl',
+        label: 'URL de exportación',
+        type: 'url',
+        placeholder: 'https://api.clarity.example/export/{projectId}',
+        help: 'Opcional. Si no la rellenas, se usa CLARITY_EXPORT_URL del servidor.',
       },
     ],
     credentialFields: [
@@ -61,6 +68,112 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
         required: true,
         placeholder: '••••••••',
         help: 'Token privado guardado solo en backend.',
+      },
+    ],
+  },
+  {
+    provider: 'meta_ads',
+    label: 'Meta Ads',
+    description: 'Publicidad de Meta con métricas de campañas, anuncios y conversiones por cliente.',
+    capabilities: ['ads'],
+    configFields: [
+      {
+        key: 'adAccountId',
+        label: 'Ad Account ID',
+        type: 'text',
+        required: true,
+        placeholder: 'act_1234567890',
+        help: 'Cuenta publicitaria de Meta que se va a sincronizar.',
+      },
+      {
+        key: 'pixelId',
+        label: 'Pixel ID',
+        type: 'text',
+        placeholder: '1234567890',
+        help: 'Pixel asociado para atribución y conversiones.',
+      },
+      {
+        key: 'attributionWindow',
+        label: 'Ventana de atribución',
+        type: 'text',
+        defaultValue: '30d',
+        help: 'Ventana de atribución que se mostrará en el panel.',
+      },
+    ],
+    credentialFields: [
+      {
+        key: 'accessToken',
+        label: 'Access token',
+        type: 'password',
+        required: true,
+        placeholder: '••••••••',
+      },
+      {
+        key: 'appSecret',
+        label: 'App Secret',
+        type: 'password',
+        required: true,
+        placeholder: '••••••••',
+      },
+    ],
+  },
+  {
+    provider: 'google_ads',
+    label: 'Google Ads',
+    description: 'Publicidad de Google con datos de campañas, conversiones y coste por resultado.',
+    capabilities: ['ads'],
+    configFields: [
+      {
+        key: 'customerId',
+        label: 'Customer ID',
+        type: 'text',
+        required: true,
+        placeholder: '123-456-7890',
+        help: 'Cuenta de Google Ads que se va a conectar.',
+      },
+      {
+        key: 'conversionActionId',
+        label: 'Conversion Action ID',
+        type: 'text',
+        placeholder: '987654321',
+        help: 'Acción de conversión principal para el seguimiento.',
+      },
+      {
+        key: 'attributionWindow',
+        label: 'Ventana de atribución',
+        type: 'text',
+        defaultValue: '30d',
+        help: 'Ventana de atribución que se mostrará en el panel.',
+      },
+    ],
+    credentialFields: [
+      {
+        key: 'developerToken',
+        label: 'Developer Token',
+        type: 'password',
+        required: true,
+        placeholder: '••••••••',
+      },
+      {
+        key: 'clientId',
+        label: 'Client ID',
+        type: 'text',
+        required: true,
+        placeholder: '123.apps.googleusercontent.com',
+      },
+      {
+        key: 'clientSecret',
+        label: 'Client Secret',
+        type: 'password',
+        required: true,
+        placeholder: '••••••••',
+      },
+      {
+        key: 'refreshToken',
+        label: 'Refresh Token',
+        type: 'password',
+        required: true,
+        placeholder: '••••••••',
       },
     ],
   },
@@ -168,6 +281,7 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
 
 const CAPABILITY_LABELS: Record<IntegrationCapability, string> = {
   analytics: 'Analítica',
+  ads: 'Publicidad',
   leads: 'Leads',
   sales: 'Ventas',
 };
@@ -259,6 +373,20 @@ export function buildIntegrationDisplayName(
     }
     if (projectId) {
       return `${definition.label} · ${projectId}`;
+    }
+  }
+
+  if (definition.provider === 'meta_ads') {
+    const adAccountId = config.adAccountId?.trim();
+    if (adAccountId) {
+      return `${definition.label} · ${adAccountId}`;
+    }
+  }
+
+  if (definition.provider === 'google_ads') {
+    const customerId = config.customerId?.trim();
+    if (customerId) {
+      return `${definition.label} · ${customerId}`;
     }
   }
 

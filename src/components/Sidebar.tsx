@@ -34,8 +34,8 @@ export function Sidebar() {
             <Zap className="text-white size-6" />
           </div>
           <div>
-            <h1 className="text-lg font-bold leading-none group-hover:text-brand-primary transition-colors">Client Intelligence</h1>
-            <span className="text-xs text-slate-400 font-medium tracking-wide">AGENCY HUB</span>
+            <h1 className="text-lg font-bold leading-none group-hover:text-brand-primary transition-colors">Infidash</h1>
+            <span className="text-xs text-slate-400 font-medium tracking-wide">PANEL OPERATIVO</span>
           </div>
         </button>
 
@@ -52,7 +52,7 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto px-4 py-6">
         {activeClientId && (
           <div className="mb-6">
-            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Menu Cliente</h2>
+            <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Menú de cliente</h2>
             <nav className="space-y-1">
               {navItems.map((item) => (
                 <button
@@ -77,13 +77,14 @@ export function Sidebar() {
         )}
 
         <div>
-          <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Mis Clientes</h2>
+          <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Clientes</h2>
           <div className="space-y-1">
             {clients.map((client) => {
               const isActive = activeClientId === client.id;
               const clientSignals = buildClientSignals(client);
-              const alertText =
-                clientSignals.healthBand === 'excellent'
+              const alertText = !clientSignals.hasData
+                  ? 'Sin datos reales sincronizados'
+                : clientSignals.healthBand === 'excellent'
                   ? `ROAS de ${client.metrics.roas.value} y salud en ${client.health}%`
                   : clientSignals.healthBand === 'critical'
                     ? `Requiere atención: health ${client.health}%`

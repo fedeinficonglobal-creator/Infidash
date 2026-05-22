@@ -8,6 +8,7 @@ export interface ClientSignals {
   roas: number;
   conversions: number;
   cpa: number;
+  hasData: boolean;
   healthBand: HealthBand;
   primaryMessage: string;
   riskMessage: string;
@@ -78,7 +79,23 @@ export function buildClientSignals(client: Client): ClientSignals {
   const roas = parseLocaleNumber(client.metrics.roas.value);
   const conversions = parseLocaleNumber(client.metrics.conversions.value);
   const cpa = parseLocaleNumber(client.metrics.cpa.value);
+  const hasData = [revenue, roas, conversions, cpa].some((value) => value > 0);
   const healthBand = getHealthBand(client.health);
+
+  if (!hasData) {
+    return {
+      revenue: 0,
+      roas: 0,
+      conversions: 0,
+      cpa: 0,
+      hasData: false,
+      healthBand: 'critical',
+      primaryMessage: `${client.name} todavía no tiene datos sincronizados. Todas las métricas se muestran en 0 hasta recibir información real.`,
+      riskMessage: 'Sin datos reales de API o backend por el momento.',
+      actionMessage: 'Esperando sincronización de datos reales.',
+      channelShare: { search: 0, social: 0, direct: 0, referral: 0 },
+    };
+  }
 
   const primaryMessage =
     healthBand === 'excellent'
@@ -121,6 +138,7 @@ export function buildClientSignals(client: Client): ClientSignals {
     roas,
     conversions,
     cpa,
+    hasData: true,
     healthBand,
     primaryMessage,
     riskMessage,

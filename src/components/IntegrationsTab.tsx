@@ -5,11 +5,13 @@ import {
   deleteClientIntegration,
   getClientIntegrations,
   saveClientIntegration,
+  syncClientIntegration,
   testClientIntegration,
   type ApiIntegration,
 } from '../services/infidashApi.js';
 import {
   AlertCircle,
+  BarChart3,
   CheckCircle2,
   Eye,
   FileText,
@@ -86,6 +88,9 @@ function integrationCardIcon(provider: IntegrationProvider) {
   switch (provider) {
     case 'clarity':
       return Globe;
+    case 'meta_ads':
+    case 'google_ads':
+      return BarChart3;
     case 'wordpress':
       return FileText;
     case 'woocommerce':
@@ -99,6 +104,8 @@ function capabilityTone(capability: string) {
   switch (capability) {
     case 'analytics':
       return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'ads':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
     case 'leads':
       return 'bg-violet-50 text-violet-700 border-violet-200';
     case 'sales':
@@ -115,6 +122,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -287,6 +295,26 @@ export function IntegrationsTab({ client }: { client: Client }) {
     }
   };
 
+  const handleSync = async (integrationId: string) => {
+    if (!sessionToken) {
+      return;
+    }
+
+    setSyncingId(integrationId);
+    setFormError(null);
+    try {
+      const result = await syncClientIntegration(sessionToken, integrationId);
+      setIntegrations((current) => current.map((integration) => integration.id === integrationId ? result.integration : integration));
+      setFormSuccess(result.skipped
+        ? 'La integración no requiere sincronización automática.'
+        : `Sincronización completada con ${result.snapshots.length} punto${result.snapshots.length === 1 ? '' : 's'} de Análisis/UX.`);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No se pudo sincronizar Análisis/UX');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   const handleDelete = async (integrationId: string) => {
     if (!sessionToken) {
       return;
@@ -359,7 +387,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1">Integraciones por cliente</h2>
           <p className="text-slate-500 font-medium">
-            Conecta Clarity, WordPress y WooCommerce para ver leads, ventas y analítica real sin exponer secretos en el navegador.
+            Conecta Análisis/UX, WordPress y WooCommerce para ver leads, ventas y analítica real sin exponer secretos en el navegador.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -464,7 +492,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
                 </div>
                 <h4 className="text-lg font-bold text-slate-900 mb-2">Todavía no hay integraciones</h4>
                 <p className="text-sm text-slate-500 max-w-xl mx-auto">
-                  Añade primero Clarity para analítica, WordPress para capturar leads y WooCommerce para ventas.
+                  Añade primero Análisis/UX para analítica, WordPress para capturar leads y WooCommerce para ventas.
                 </p>
               </div>
             ) : (
@@ -520,6 +548,14 @@ export function IntegrationsTab({ client }: { client: Client }) {
                           className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-brand-primary transition hover:bg-brand-primary/5 disabled:cursor-wait"
                         >
                           {testingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} Probar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSync(integration.id)}
+                          disabled={syncingId === integration.id}
+                          className="inline-flex items-center gap-2 rounded-xl border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-50 disabled:cursor-wait"
+                        >
+                          {syncingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCcw className="size-3.5" />} Sincronizar
                         </button>
                         {isAdmin && (
                           <button
@@ -611,7 +647,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
             </div>
 
             <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-xs text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">Clarity</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> sincroniza ventas.
+              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> sincroniza ventas.
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">

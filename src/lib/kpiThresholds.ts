@@ -9,6 +9,7 @@ export interface KpiThresholds {
 
 export type KpiDirection = 'higher-is-better' | 'lower-is-better';
 export type KpiStatus = 'success' | 'failure';
+export type MonthlyKpiStatus = 'success' | 'warning' | 'fail' | 'unknown';
 
 export interface KpiThresholdState {
   key: KpiKey;
@@ -18,6 +19,17 @@ export interface KpiThresholdState {
   direction: KpiDirection;
   status: KpiStatus;
 }
+
+export interface MonthlyKpiComparison {
+  target: number;
+  current: number;
+  previous: number | null;
+  difference: number;
+  differencePct: number | null;
+  status: MonthlyKpiStatus;
+}
+
+export const MONTHLY_CLOSE_DAY = 25;
 
 export const DEFAULT_KPI_THRESHOLDS: KpiThresholds = {
   revenue: 10000,
@@ -103,4 +115,48 @@ export function evaluateKpiThresholds(values: Record<KpiKey, number>, thresholds
       status: values.cpa <= normalized.cpa ? 'success' : 'failure',
     },
   ];
+}
+
+export function evaluateMonthlyKpiComparison(current: number, target: number, previous: number | null, warningRatio = 0.2): MonthlyKpiComparison {
+  const safeTarget = Number.isFinite(target) ? target : 0;
+  const safeCurrent = Number.isFinite(current) ? current : 0;
+  const safePrevious = previous !== null && Number.isFinite(previous) ? previous : null;
+  const difference = safeCurrent - safeTarget;
+  const differencePct = safePrevious && safePrevious !== 0 ? ((safeCurrent - safePrevious) / safePrevious) * 100 : null;
+
+  if (safeTarget <= 0) {
+    return {
+      target: safeTarget,
+      current: safeCurrent,
+      previous: safePrevious,
+      difference,
+      differencePct,
+      status: 'unknown',
+    };
+  }
+
+  if (safeCurrent >= safeTarget) {
+    return {
+      target: safeTarget,
+      current: safeCurrent,
+      previous: safePrevious,
+      difference,
+      differencePct,
+      status: 'success',
+    };
+  }
+
+  const warningFloor = safeTarget * Math.max(0, 1 - warningRatio);
+  return {
+    target: safeTarget,
+    current: safeCurrent,
+    previous: safePrevious,
+    difference,
+    differencePct,
+    status: safeCurrent >= warningFloor ? 'warning' : 'fail',
+  };
+}
+
+export function shouldCloseMonthlyKpis(date = new Date()) {
+  return date.getDate() === MONTHLY_CLOSE_DAY;
 }

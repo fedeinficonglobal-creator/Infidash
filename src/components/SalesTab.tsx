@@ -46,21 +46,27 @@ function getCategoryPreset(industry: string) {
 
 export function SalesTab({ client }: { client: Client }) {
   const signals = buildClientSignals(client);
-  const scale = Math.max(signals.revenue / 52430, 0.35);
+  const hasData = signals.hasData;
+  const scale = hasData ? Math.max(signals.revenue / 52430, 0.35) : 0;
   const salesData = baseSalesData.map((item) => ({
     ...item,
-    sales: Math.round(item.sales * scale),
+    sales: hasData ? Math.round(item.sales * scale) : 0,
   }));
-  const categoryData = getCategoryPreset(client.industry);
-  const averageOrderValue = signals.conversions > 0 ? signals.revenue / signals.conversions : signals.revenue;
-  const recoverableRevenue = Math.round(Math.max(signals.revenue * (signals.healthBand === 'critical' ? 0.14 : signals.healthBand === 'risk' ? 0.1 : 0.06), 0));
+  const categoryData = getCategoryPreset(client.industry).map((item) => ({
+    ...item,
+    value: hasData ? item.value : 0,
+  }));
+  const averageOrderValue = hasData && signals.conversions > 0 ? signals.revenue / signals.conversions : 0;
+  const recoverableRevenue = hasData
+    ? Math.round(Math.max(signals.revenue * (signals.healthBand === 'critical' ? 0.14 : signals.healthBand === 'risk' ? 0.1 : 0.06), 0))
+    : 0;
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-8">
         <h2 className="text-3xl font-bold text-slate-900 mb-1">Rendimiento WooCommerce · {client.name}</h2>
         <p className="text-slate-500 font-medium">
-          {signals.primaryMessage} {signals.actionMessage}
+          {hasData ? `${signals.primaryMessage} ${signals.actionMessage}` : signals.primaryMessage}
         </p>
       </header>
 
@@ -70,17 +76,17 @@ export function SalesTab({ client }: { client: Client }) {
             <TrendingUp className="size-5" />
             <span className="text-xs font-bold uppercase tracking-widest">Ingresos Totales</span>
           </div>
-          <h3 className="text-2xl font-bold">{formatMoney(signals.revenue)}</h3>
-          <p className="text-xs text-slate-400 mt-1">Basado en las métricas reales del cliente</p>
+            <h3 className="text-2xl font-bold">{formatMoney(hasData ? signals.revenue : 0)}</h3>
+<p className="text-xs text-slate-400 mt-1">Basado en las métricas reales del cliente</p>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <div className="flex items-center gap-3 mb-4 text-blue-600">
             <Package className="size-5" />
             <span className="text-xs font-bold uppercase tracking-widest">Pedidos</span>
           </div>
-          <h3 className="text-2xl font-bold">{formatPlain(signals.conversions)}</h3>
-          <p className="text-xs text-slate-400 mt-1">{signals.roas > 0 ? `ROAS actual ${signals.roas.toFixed(1)}x` : 'Sin ROAS registrado todavía'}</p>
-        </div>
+            <h3 className="text-2xl font-bold">{formatPlain(hasData ? signals.conversions : 0)}</h3>
+            <p className="text-xs text-slate-400 mt-1">{hasData && signals.roas > 0 ? `ROAS actual ${signals.roas.toFixed(1)}x` : 'Sin ROAS registrado todavía'}</p>
+</div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <div className="flex items-center gap-3 mb-4 text-amber-600">
             <Users className="size-5" />

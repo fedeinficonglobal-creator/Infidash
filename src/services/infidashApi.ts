@@ -34,6 +34,32 @@ export interface DailyStat {
   updatedAt: string;
 }
 
+export interface UxSnapshot {
+  id: string;
+  clientId: string;
+  snapshotDate: string;
+  sessions: number;
+  pageViews: number;
+  rageClicks: number;
+  deadClicks: number;
+  scrollDepthAvg: number;
+  engagedSessions: number;
+  conversions: number;
+  conversionRate: number;
+  notes: string | null;
+  source: string;
+  payloadJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientDashboardResponse {
+  client: ApiClient;
+  dailyStats: DailyStat[];
+  uxSnapshots: UxSnapshot[];
+  latestUxSnapshot: UxSnapshot | null;
+}
+
 export interface ApiClient {
   id: string;
   name: string;
@@ -50,10 +76,10 @@ export interface ApiClient {
 export interface ApiIntegration {
   id: string;
   clientId: string;
-  provider: 'clarity' | 'wordpress' | 'woocommerce';
+  provider: 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce';
   label: string;
   status: 'connected' | 'pending' | 'error' | 'disabled';
-  capabilities: Array<'analytics' | 'leads' | 'sales'>;
+  capabilities: Array<'analytics' | 'ads' | 'leads' | 'sales'>;
   config: Record<string, string>;
   secretKeys: string[];
   lastSync: string | null;
@@ -205,6 +231,10 @@ export async function getDailyStats(token: string, clientId?: string) {
   return apiRequest<{ stats: DailyStat[] }>(path, {}, token);
 }
 
+export async function getClientDashboard(token: string, clientId: string) {
+  return apiRequest<ClientDashboardResponse>(`/api/clients/${encodeURIComponent(clientId)}/dashboard`, {}, token);
+}
+
 export async function createDailyStat(
   token: string,
   input: {
@@ -295,6 +325,16 @@ export async function testClientIntegration(token: string, integrationId: string
     missingFields: string[];
     summary: string;
   }>(`/api/integrations/${encodeURIComponent(integrationId)}/test`, {
+    method: 'POST',
+  }, token);
+}
+
+export async function syncClientIntegration(token: string, integrationId: string) {
+  return apiRequest<{
+    integration: ApiIntegration;
+    snapshots: UxSnapshot[];
+    skipped: boolean;
+  }>(`/api/integrations/${encodeURIComponent(integrationId)}/sync`, {
     method: 'POST',
   }, token);
 }

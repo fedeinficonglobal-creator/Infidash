@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { strict as assert } from 'node:assert';
 import {
   buildIntegrationCapabilitySummary,
   buildIntegrationDisplayName,
@@ -10,7 +10,9 @@ import {
 } from '../src/lib/integrationCatalog.js';
 
 test('integration catalog exposes the first priority providers', () => {
-  assert.equal(getIntegrationProviderDefinition('clarity')?.label, 'Microsoft Clarity');
+  assert.equal(getIntegrationProviderDefinition('clarity')?.label, 'Análisis/UX');
+  assert.deepEqual(getIntegrationProviderDefinition('meta_ads')?.capabilities, ['ads']);
+  assert.deepEqual(getIntegrationProviderDefinition('google_ads')?.capabilities, ['ads']);
   assert.deepEqual(getIntegrationProviderDefinition('wordpress')?.capabilities, ['leads']);
   assert.deepEqual(getIntegrationProviderDefinition('woocommerce')?.capabilities, ['sales']);
 });
@@ -33,7 +35,7 @@ test('integration catalog builds readable display names', () => {
   assert.ok(woocommerce);
   assert.equal(
     buildIntegrationDisplayName(clarity!, { projectId: 'abc-123', siteUrl: 'https://example.com', segmentName: 'Principal' }),
-    'Microsoft Clarity · Principal',
+    'Análisis/UX · Principal',
   );
   assert.equal(
     buildIntegrationDisplayName(woocommerce!, { storeUrl: 'https://tienda.ejemplo.com', currency: 'EUR', orderStatus: 'processing,completed' }),
