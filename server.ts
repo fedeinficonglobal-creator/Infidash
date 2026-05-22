@@ -10,6 +10,7 @@ import {
   createUser,
   createOrUpdateClientIntegration,
   deleteDailyStat,
+  deleteUser,
   getClientBySlug,
   getClientIntegrations,
   getDailyStatById,
@@ -283,6 +284,34 @@ app.patch('/api/users/:id', (req, res) => {
   }
 
   return res.json({ user: updated });
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const session = requireSession(req, res, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  if (req.params.id === session.user.id) {
+    return sendError(res, 400, 'No puedes eliminar tu propia cuenta', 'SELF_DELETE_FORBIDDEN');
+  }
+
+  const userToDelete = listUsers().find((user) => user.id === req.params.id);
+  if (!userToDelete) {
+    return sendError(res, 404, 'Usuario no encontrado', 'NOT_FOUND');
+  }
+
+  const adminCount = listUsers().filter((user) => user.role === 'admin').length;
+  if (userToDelete.role === 'admin' && adminCount <= 1) {
+    return sendError(res, 409, 'No puedes eliminar el último administrador', 'LAST_ADMIN_FORBIDDEN');
+  }
+
+  const deleted = deleteUser(req.params.id);
+  if (!deleted) {
+    return sendError(res, 404, 'Usuario no encontrado', 'NOT_FOUND');
+  }
+
+  return res.status(204).send();
 });
 
 app.get('/api/clients', (req, res) => {

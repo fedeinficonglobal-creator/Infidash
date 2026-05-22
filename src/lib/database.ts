@@ -857,6 +857,17 @@ export function updateUserRole(userId: string, updates: Partial<{ role: UserRole
   });
 }
 
+export function deleteUser(userId: string) {
+  const db = getDatabase();
+  const existing = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId) as any;
+  if (!existing) {
+    return null;
+  }
+
+  db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
+  return rowToUser(existing);
+}
+
 export function authenticateUser(email: string, password: string): LoginResult | null {
   const db = getDatabase();
   const row = db.prepare(`SELECT * FROM users WHERE email = ?`).get(normalizeEmail(email)) as any;

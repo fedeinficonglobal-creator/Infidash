@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { BadgeCheck, CircleAlert, LoaderCircle, Mail, RefreshCw, Shield, Settings2, UserPlus, Users } from 'lucide-react';
+import { BadgeCheck, CircleAlert, LoaderCircle, Mail, RefreshCw, Shield, Settings2, Trash2, UserPlus, Users } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useClientStore } from '../store/useClientStore';
-import { createUserAccount, getUsers, updateUserAccount, type SessionUser, type UserRole } from '../services/infidashApi.js';
+import { createUserAccount, deleteUserAccount, getUsers, updateUserAccount, type SessionUser, type UserRole } from '../services/infidashApi.js';
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string; hint: string }> = [
   { value: 'admin', label: 'Administrador', hint: 'Puede crear usuarios y gestionar permisos' },
@@ -125,6 +125,28 @@ export function UsersAdminTab() {
       setRefreshToken((value) => value + 1);
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : 'No se pudo actualizar el rol');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleDeleteUser(user: SessionUser) {
+    if (!sessionToken) {
+      return;
+    }
+
+    const confirmed = window.confirm(`¿Seguro que quieres eliminar a ${user.name}? Esta acción no se puede deshacer.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setSavingId(user.id);
+    setError(null);
+    try {
+      await deleteUserAccount(sessionToken, user.id);
+      setRefreshToken((value) => value + 1);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'No se pudo eliminar el usuario');
     } finally {
       setSavingId(null);
     }
@@ -314,6 +336,18 @@ export function UsersAdminTab() {
                     <BadgeCheck className="size-4" />
                     {user.active ? 'Desactivar' : 'Activar'}
                   </button>
+
+                  {!isCurrentUser && (
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteUser(user)}
+                      disabled={savingId === user.id}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-70"
+                    >
+                      <Trash2 className="size-4" />
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </article>
             );

@@ -348,7 +348,7 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(savedClient.latestStat.revenue, 15678);
 });
 
-test('admin can create and manage users from the management backend', async () => {
+test('admin can create, update, and delete users from the management backend', async () => {
   const uniqueEmail = `qa-${Date.now()}@infidash.local`;
   const uniqueName = `QA User ${Date.now()}`;
 
@@ -393,6 +393,24 @@ test('admin can create and manage users from the management backend', async () =
   assert.equal(updateBody.user.role, 'admin');
   assert.equal(updateBody.user.active, false);
   assert.equal(updateBody.user.name, `${uniqueName} Renovado`);
+
+  const { response: deleteResponse } = await request(`/api/users/${createBody.user.id}`, {
+    method: 'DELETE',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(deleteResponse.status, 204);
+
+  const { response: postDeleteListResponse, body: postDeleteListBody } = await request('/api/users', {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(postDeleteListResponse.status, 200);
+  assert.ok(!postDeleteListBody.users.some((user: any) => user.email === uniqueEmail));
 
   const { response: forbiddenResponse, body: forbiddenBody } = await request('/api/users', {
     headers: {

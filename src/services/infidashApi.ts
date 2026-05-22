@@ -222,6 +222,12 @@ export async function updateUserAccount(
   }, token);
 }
 
+export async function deleteUserAccount(token: string, userId: string) {
+  return apiRequest<void>(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  }, token);
+}
+
 export async function getClients(token: string) {
   return apiRequest<{ clients: ApiClient[] }>('/api/clients', {}, token);
 }
