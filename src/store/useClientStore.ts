@@ -213,12 +213,30 @@ export const useClientStore = create<ClientState>((set, get) => ({
     try {
       const response = await withSession(get, (token) => getClients(token));
       const mapped = response.clients.map(mapApiClientToUiClient);
-      set((state) => ({
-        clients: mapped.length > 0 ? mapped : FALLBACK_CLIENTS,
-        activeClientId: state.activeClientId && mapped.some((client) => client.id === state.activeClientId)
-          ? state.activeClientId
-          : mapped[0]?.id ?? state.activeClientId,
-      }));
+      set((state) => {
+        const currentActiveClient = mapped.find((client) => client.id === state.activeClientId) ?? null;
+        const currentHasRealData = Boolean(
+          currentActiveClient && (
+            currentActiveClient.metrics.revenue.value !== '0 €'
+            || currentActiveClient.metrics.conversions.value !== '0'
+            || currentActiveClient.metrics.cpa.value !== '0,00 €'
+          )
+        );
+
+        const preferredClient = mapped.find((client) => client.metrics.revenue.value !== '0 €')
+          ?? mapped.find((client) => client.metrics.conversions.value !== '0')
+          ?? mapped[0]
+          ?? null;
+
+        const nextActiveClientId = currentHasRealData
+          ? currentActiveClient?.id ?? preferredClient?.id ?? state.activeClientId
+          : preferredClient?.id ?? state.activeClientId;
+
+        return {
+          clients: mapped.length > 0 ? mapped : FALLBACK_CLIENTS,
+          activeClientId: nextActiveClientId,
+        };
+      });
     } catch (error) {
       set({
         dataError: error instanceof Error ? error.message : 'No se pudieron cargar los clientes',

@@ -623,31 +623,9 @@ function seedDefaults(db: Database.Database) {
     }
   }
 
-  const dailyStatsCount = db.prepare(`SELECT COUNT(*) as total FROM daily_stats`).get() as { total: number };
-  if (dailyStatsCount.total === 0) {
-    const seedStat = db.prepare(
-      `INSERT INTO daily_stats (
-        id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-
-    seedStat.run(
-      crypto.randomUUID(),
-      'matundy',
-      new Date().toISOString().slice(0, 10),
-      12450,
-      4.8,
-      1824,
-      138,
-      12.5,
-      240,
-      8320,
-      'Seed inicial para validar la nueva capa de persistencia.',
-      'seed',
-      timestamp,
-      timestamp,
-    );
-  }
+  // No se seedan métricas de ejemplo: la base debe arrancar vacía y
+  // poblarse únicamente con datos reales creados por usuarios o por la
+  // sincronización de Clarity.
 }
 
 export function getDatabase() {
@@ -1596,7 +1574,7 @@ export function getDashboardHealthSummary() {
 
 export function listClientsWithLatestStat() {
   const clients = listClients();
-  return clients.map((client) => {
+  const clientsWithStats = clients.map((client) => {
     const latestStat = getDatabase().prepare(
       `SELECT * FROM daily_stats WHERE client_id = ? ORDER BY stat_date DESC, created_at DESC LIMIT 1`
     ).get(client.id) as any;
@@ -1605,5 +1583,17 @@ export function listClientsWithLatestStat() {
       ...client,
       latestStat: latestStat ? rowToDailyStat(latestStat) : null,
     };
+  });
+
+  return clientsWithStats.sort((a, b) => {
+    const aHasStat = a.latestStat ? 0 : 1;
+    const bHasStat = b.latestStat ? 0 : 1;
+    if (aHasStat !== bHasStat) {
+      return aHasStat - bHasStat;
+    }
+
+    const aDate = a.latestStat?.statDate ?? a.updatedAt ?? a.createdAt;
+    const bDate = b.latestStat?.statDate ?? b.updatedAt ?? b.createdAt;
+    return bDate.localeCompare(aDate);
   });
 }
