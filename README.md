@@ -15,7 +15,7 @@ Infidash es un dashboard para agencias con autenticación local, SQLite persiste
 - `npm run preview` — preview del build
 - `npm run lint` — comprobación TypeScript para frontend y backend
 - `npm run test` — suite de regresión
-- `npm run clean` — borra `dist/`, `server.js` y `data/`
+- `npm run clean` — borra `dist/` y `server.js` (no toca `data/`)
 
 ## Variables de entorno
 

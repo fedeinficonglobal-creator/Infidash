@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "tsx server.ts",
-    "clean": "rm -rf dist server.js data",
+    "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "tsx --test tests/*.test.ts",
     "api": "tsx server.ts"

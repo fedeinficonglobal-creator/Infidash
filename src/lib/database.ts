@@ -195,8 +195,11 @@ export interface LoginResult {
   user: PublicUser;
 }
 
-const dbPath = process.env.INFIDASH_DB_PATH ?? path.join(process.cwd(), 'data', 'infidash.sqlite');
-const backupDir = process.env.INFIDASH_BACKUP_DIR ?? path.join(process.cwd(), 'data', 'backups');
+const isProduction = process.env.NODE_ENV === 'production';
+const defaultDbPath = isProduction ? '/data/infidash.sqlite' : path.join(process.cwd(), 'data', 'infidash.sqlite');
+const defaultBackupDir = isProduction ? '/data/backups' : path.join(process.cwd(), 'data', 'backups');
+const dbPath = process.env.INFIDASH_DB_PATH ?? defaultDbPath;
+const backupDir = process.env.INFIDASH_BACKUP_DIR ?? defaultBackupDir;
 let database: Database.Database | null = null;
 
 function ensureDirectoryExists(filePath: string) {
