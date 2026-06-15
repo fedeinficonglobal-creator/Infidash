@@ -240,7 +240,6 @@ export const useClientStore = create<ClientState>((set, get) => ({
     } catch (error) {
       set({
         dataError: error instanceof Error ? error.message : 'No se pudieron cargar los clientes',
-        clients: FALLBACK_CLIENTS,
       });
     } finally {
       set({ isRefreshingClients: false });
