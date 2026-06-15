@@ -1,6 +1,6 @@
 # Infidash
 
-Infidash es un dashboard para agencias con autenticación local, SQLite persistente y vistas operativas para clientes, ventas, tráfico, SEO, RRSS, insights IA, reportes e integraciones.
+Infidash es un dashboard para agencias con autenticación local y persistencia en PostgreSQL, con vistas operativas para clientes, ventas, tráfico, SEO, RRSS, insights IA, reportes e integraciones.
 
 ## Requisitos
 
@@ -23,8 +23,9 @@ Copia `.env.example` a tu entorno local y ajusta lo necesario:
 
 - `API_PORT` — puerto del backend Express
 - `PORT` — fallback del puerto en algunos entornos
-- `INFIDASH_DB_PATH` — ruta del fichero SQLite
-- `INFIDASH_BACKUP_DIR` — carpeta de backups SQLite
+- `DATABASE_URL` — conexión PostgreSQL principal en producción
+- `DATABASE_SSL` — modo SSL del cliente PostgreSQL (`disable`, `require`, etc.)
+- `INFIDASH_BACKUP_DIR` — carpeta de backups
 - `APP_URL` — URL pública/local del frontend cuando haga falta generar enlaces o callbacks
 
 ## Arranque local
@@ -45,8 +46,8 @@ Copia `.env.example` a tu entorno local y ajusta lo necesario:
 
 ## Datos y persistencia
 
-- La base de datos vive en `./data/infidash.sqlite` por defecto.
-- El contenido de `data/` se genera en tiempo de ejecución y no se versiona.
+- La app requiere `DATABASE_URL` para arrancar.
+- El contenido de `data/` se limita a backups y se genera en tiempo de ejecución cuando aplica.
 - La app se inicializa con datos semilla para poder probar login y dashboard desde el primer arranque.
 
 ## Verificación rápida
@@ -60,5 +61,4 @@ npm run build
 ## Notas operativas
 
 - La autenticación usa sesión/token con roles `admin` y `viewer`.
-- Los backups SQLite se crean desde la API y se guardan en `data/backups/` por defecto.
-- Si borras `data/`, la siguiente ejecución volverá a crear la base y las semillas.
+- Los backups se crean desde la API y se guardan en `data/backups/` por defecto.

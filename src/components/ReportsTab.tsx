@@ -229,7 +229,7 @@ export function ReportsTab({ client }: { client: Client }) {
         <div className="bg-brand-secondary/5 p-8 rounded-3xl border border-brand-secondary/10 shadow-sm relative overflow-hidden group">
           <div className="relative z-10">
             <h3 className="text-lg font-bold text-brand-secondary mb-2">Integración pendiente</h3>
-            <p className="text-sm text-slate-500 font-medium mb-6">La sincronización automática con Notion todavía no está conectada. Por ahora, el histórico vive en SQLite.</p>
+            <p className="text-sm text-slate-500 font-medium mb-6">La sincronización automática con Notion todavía no está conectada. Por ahora, el histórico vive en PostgreSQL.</p>
             <button className="text-brand-secondary font-bold text-xs flex items-center gap-2 hover:translate-x-1 transition-transform">
               Revisar roadmap <Share2 className="size-3" />
             </button>
@@ -245,7 +245,7 @@ export function ReportsTab({ client }: { client: Client }) {
           <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-4">
             <div>
               <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Registrar métrica diaria</h3>
-              <p className="text-xs text-slate-400 mt-1">Persistencia real en SQLite para {client.name}</p>
+              <p className="text-xs text-slate-400 mt-1">Persistencia real en PostgreSQL para {client.name}</p>
             </div>
             {currentUser?.role === 'admin' ? (
               <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">Solo administradores</span>

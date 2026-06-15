@@ -422,7 +422,7 @@ test('admin can create, update, and delete users from the management backend', a
   assert.equal(forbiddenBody.code, 'FORBIDDEN');
 });
 
-test('admin can create a sqlite backup and viewer cannot', async () => {
+test('admin can create a postgres backup and viewer cannot', async () => {
   const { response: forbiddenResponse, body: forbiddenBody } = await request('/api/admin/backup', {
     method: 'POST',
     headers: {
@@ -444,5 +444,6 @@ test('admin can create a sqlite backup and viewer cannot', async () => {
   assert.equal(response.status, 201, JSON.stringify(body));
   assert.equal(body.backup.label, 'regression-smoke');
   assert.equal(typeof body.backup.path, 'string');
+  assert.ok(body.backup.path.endsWith('.sql'));
   assert.equal(typeof body.backup.createdAt, 'string');
 });

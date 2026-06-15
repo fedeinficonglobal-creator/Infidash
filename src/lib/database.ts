@@ -1,7 +1,8 @@
 import * as crypto from 'node:crypto';
-import Database from 'better-sqlite3';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { config as loadDotenv } from 'dotenv';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
 import {
@@ -195,12 +196,33 @@ export interface LoginResult {
   user: PublicUser;
 }
 
+
+loadDotenv({ path: path.join(process.cwd(), '.env') });
+loadDotenv({ path: path.join(process.cwd(), '.env.local'), override: true });
+
 const isProduction = process.env.NODE_ENV === 'production';
-const defaultDbPath = isProduction ? '/data/infidash.sqlite' : path.join(process.cwd(), 'data', 'infidash.sqlite');
 const defaultBackupDir = isProduction ? '/data/backups' : path.join(process.cwd(), 'data', 'backups');
-const dbPath = process.env.INFIDASH_DB_PATH ?? defaultDbPath;
 const backupDir = process.env.INFIDASH_BACKUP_DIR ?? defaultBackupDir;
-let database: Database.Database | null = null;
+
+interface DbRunResult {
+  changes: number;
+}
+
+interface PreparedStatement {
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+  run(...params: unknown[]): DbRunResult;
+}
+
+interface AppDatabase {
+  kind: 'postgres';
+  prepare(sql: string): PreparedStatement;
+  exec(sql: string): void;
+  tableColumns(tableName: string): string[];
+  backup(filePath: string): Promise<void>;
+}
+
+let database: AppDatabase | null = null;
 
 function ensureDirectoryExists(filePath: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -221,19 +243,192 @@ function sanitizeBackupLabel(label?: string | null) {
     .slice(0, 48) || 'manual';
 }
 
+function escapeSqlLiteral(value: unknown) {
+  if (value === null || value === undefined) {
+    return 'NULL';
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : 'NULL';
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'TRUE' : 'FALSE';
+  }
+
+  if (value instanceof Date) {
+    return `'${value.toISOString().replace(/'/g, "''")}'`;
+  }
+
+  if (typeof value === 'object') {
+    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+  }
+
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function inlineSqlParams(sql: string, params: unknown[]) {
+  if (params.length === 1 && params[0] && typeof params[0] === 'object' && !Array.isArray(params[0]) && !(params[0] instanceof Date)) {
+    const record = params[0] as Record<string, unknown>;
+    return sql.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (_, key: string) => escapeSqlLiteral(record[key]));
+  }
+
+  let index = 0;
+  return sql.replace(/\?/g, () => {
+    if (index >= params.length) {
+      throw new Error(`Missing SQL parameter at position ${index + 1}`);
+    }
+
+    const value = params[index];
+    index += 1;
+    return escapeSqlLiteral(value);
+  });
+}
+
+function getPostgresConnectionString() {
+  const connectionString = process.env.DATABASE_URL ?? process.env.INFIDASH_DATABASE_URL ?? '';
+  return connectionString.trim() || null;
+}
+
+function getPostgresClientEnv() {
+  const env = { ...process.env };
+  if (!env.PGSSLMODE && env.DATABASE_SSL) {
+    env.PGSSLMODE = env.DATABASE_SSL;
+  }
+  if (!env.PGCONNECT_TIMEOUT) {
+    env.PGCONNECT_TIMEOUT = '5';
+  }
+  return env;
+}
+
+function runPostgresCommand(connectionString: string, sql: string) {
+  const result = spawnSync(
+    'psql',
+    [
+      '-X',
+      '--no-psqlrc',
+      '--set',
+      'ON_ERROR_STOP=1',
+      '--tuples-only',
+      '--no-align',
+      '--dbname',
+      connectionString,
+      '-c',
+      sql,
+    ],
+    {
+      encoding: 'utf8',
+      env: getPostgresClientEnv(),
+    }
+  );
+
+  if (result.status !== 0) {
+    const message = (result.stderr || result.stdout || 'unknown postgres error').trim();
+    throw new Error(message);
+  }
+
+  return (result.stdout || '').trim();
+}
+
+function runPostgresQuery<T = unknown>(connectionString: string, sql: string): T[] {
+  const wrapped = `SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) AS data FROM (${sql}) AS t`;
+  const raw = runPostgresCommand(connectionString, wrapped);
+  if (!raw) {
+    return [];
+  }
+
+  const parsed = JSON.parse(raw) as T[];
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function createPostgresDatabase(connectionString: string): AppDatabase {
+  return {
+    kind: 'postgres',
+    prepare(sql) {
+      return {
+        get: (...params: unknown[]) => {
+          const finalSql = inlineSqlParams(sql, params);
+          const rows = runPostgresQuery<Record<string, unknown>>(connectionString, finalSql);
+          return rows[0] ?? undefined;
+        },
+        all: (...params: unknown[]) => {
+          const finalSql = inlineSqlParams(sql, params);
+          return runPostgresQuery<Record<string, unknown>>(connectionString, finalSql);
+        },
+        run: (...params: unknown[]) => {
+          const finalSql = inlineSqlParams(sql, params).trim().replace(/;\s*$/, '');
+          const normalized = finalSql.replace(/\s+$/, '');
+          const dmlMatch = /^(insert|update|delete)/i.test(normalized);
+          if (!dmlMatch) {
+            runPostgresCommand(connectionString, normalized);
+            return { changes: 0 };
+          }
+
+          const wrapped = `WITH affected AS (${normalized} RETURNING 1) SELECT COUNT(*)::int AS changes FROM affected`;
+          const raw = runPostgresCommand(connectionString, wrapped);
+          return { changes: Number(raw || 0) };
+        },
+      };
+    },
+    exec(sql) {
+      runPostgresCommand(connectionString, sql);
+    },
+    tableColumns(tableName) {
+      const rows = runPostgresQuery<{ column_name: string }>(
+        connectionString,
+        `
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = ${escapeSqlLiteral(tableName)}
+          ORDER BY ordinal_position
+        `,
+      );
+      return rows.map((row) => row.column_name);
+    },
+    async backup(filePath) {
+      ensureDirectoryExists(filePath);
+      const result = spawnSync(
+        'pg_dump',
+        [
+          '--dbname',
+          connectionString,
+          '--format=plain',
+          '--no-owner',
+          '--no-privileges',
+        ],
+        {
+          encoding: 'utf8',
+          env: getPostgresClientEnv(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }
+      );
+
+      if (result.status !== 0) {
+        const message = (result.stderr || result.stdout || 'unknown pg_dump error').trim();
+        throw new Error(message);
+      }
+
+      fs.writeFileSync(filePath, result.stdout || '', 'utf8');
+    },
+  };
+}
+
 function createDatabase() {
-  ensureDirectoryExists(dbPath);
-  const instance = new Database(dbPath);
-  instance.pragma('journal_mode = WAL');
-  instance.pragma('foreign_keys = ON');
-  return instance;
+  const connectionString = getPostgresConnectionString();
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required to start Infidash');
+  }
+
+  runPostgresCommand(connectionString, 'SELECT 1');
+  return createPostgresDatabase(connectionString);
 }
 
 function getBackupFilePath(label?: string | null) {
-  ensureDirectoryExists(path.join(backupDir, 'backup.sqlite'));
+  ensureDirectoryExists(path.join(backupDir, 'backup.placeholder'));
   const stamp = nowIso().replace(/[:.]/g, '-');
   const safeLabel = sanitizeBackupLabel(label);
-  return path.join(backupDir, `infidash-${safeLabel}-${stamp}.sqlite`);
+  return path.join(backupDir, `infidash-${safeLabel}-${stamp}.sql`);
 }
 
 export async function createDatabaseBackup(label?: string | null) {
@@ -249,7 +444,8 @@ export async function createDatabaseBackup(label?: string | null) {
   };
 }
 
-function initializeSchema(db: Database.Database) {
+
+function initializeSchema(db: AppDatabase) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -387,13 +583,8 @@ function initializeSchema(db: Database.Database) {
   `);
 }
 
-function ensureUxSnapshotSchema(db: Database.Database) {
-  const columns = db.prepare(`PRAGMA table_info(ux_snapshots)`).all() as Array<{ name: string }>;
-  if (columns.length === 0) {
-    return;
-  }
-
-  const existingColumns = new Set(columns.map((column) => column.name));
+function ensureUxSnapshotSchema(db: AppDatabase) {
+  const existingColumns = new Set(db.tableColumns('ux_snapshots'));
   const addColumn = (definition: string) => db.exec(`ALTER TABLE ux_snapshots ADD COLUMN ${definition}`);
 
   if (!existingColumns.has('snapshot_date')) {
@@ -453,16 +644,14 @@ function ensureUxSnapshotSchema(db: Database.Database) {
   }
 }
 
-function ensureClientThresholdSchema(db: Database.Database) {
-  const columns = db.prepare(`PRAGMA table_info(clients)`).all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === 'kpi_thresholds_json')) {
+function ensureClientThresholdSchema(db: AppDatabase) {
+  if (!db.tableColumns('clients').includes('kpi_thresholds_json')) {
     db.exec(`ALTER TABLE clients ADD COLUMN kpi_thresholds_json TEXT NOT NULL DEFAULT '{}'`);
   }
 }
 
-function ensureIntegrationSchema(db: Database.Database) {
-  const columns = db.prepare(`PRAGMA table_info(integrations)`).all() as Array<{ name: string }>;
-  const existingColumns = new Set(columns.map((column) => column.name));
+function ensureIntegrationSchema(db: AppDatabase) {
+  const existingColumns = new Set(db.tableColumns('integrations'));
   const addColumn = (definition: string) => db.exec(`ALTER TABLE integrations ADD COLUMN ${definition}`);
 
   if (!existingColumns.has('provider')) {
@@ -556,7 +745,7 @@ function ensureIntegrationSchema(db: Database.Database) {
   }
 }
 
-function seedDefaults(db: Database.Database) {
+function seedDefaults(db: AppDatabase) {
   const timestamp = nowIso();
 
   const organization = db.prepare(`SELECT id FROM organizations WHERE slug = ?`).get('infidash') as { id: string } | undefined;
