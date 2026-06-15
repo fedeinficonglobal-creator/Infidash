@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { OverviewTab } from './components/OverviewTab';
 import { SalesTab } from './components/SalesTab';
 import { TrafficTab } from './components/TrafficTab';
+import { WebTab } from './components/WebTab';
 import { SeoTab } from './components/SeoTab';
 import { LeadsTab } from './components/LeadsTab';
 import { RrssTab } from './components/RrssTab';
@@ -75,6 +76,7 @@ export default function App() {
       case 'overview': return <OverviewTab client={activeClient} />;
       case 'sales': return <SalesTab client={activeClient} />;
       case 'traffic': return <TrafficTab client={activeClient} />;
+      case 'web': return <WebTab client={activeClient} />;
       case 'seo': return <SeoTab client={activeClient} />;
       case 'leads': return <LeadsTab client={activeClient} />;
       case 'rrss': return <RrssTab client={activeClient} />;

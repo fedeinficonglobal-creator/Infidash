@@ -61,7 +61,7 @@ interface ClientState {
   deleteClient: (clientId: string) => Promise<void>;
 }
 
-const DEFAULT_TABS = ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'];
+const DEFAULT_TABS = ['overview', 'sales', 'traffic', 'web', 'rrss', 'ai', 'reports', 'integrations'];
 
 const FALLBACK_CLIENTS: Client[] = [];
 

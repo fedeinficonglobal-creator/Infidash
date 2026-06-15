@@ -18,6 +18,7 @@ export function Sidebar() {
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'sales', label: 'Ventas (Woo)', icon: ShoppingBag },
     { id: 'traffic', label: 'Tráfico & Ads', icon: BarChart3 },
+    { id: 'web', label: 'Web', icon: SearchCode },
     { id: 'seo', label: 'SEO', icon: SearchCode },
     { id: 'leads', label: 'Leads', icon: Megaphone },
     { id: 'rrss', label: 'Redes Sociales', icon: Hash },
