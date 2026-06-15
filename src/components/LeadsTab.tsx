@@ -1,6 +1,7 @@
 import { Megaphone, TrendingUp, Filter, CheckCircle2, Clock, XCircle, MoreVertical } from 'lucide-react';
 import { type Client } from '../store/useClientStore';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
+import { buildLeadsCsv } from '../lib/leadsExport.js';
 
 function buildLeadNames(industry: string) {
   const text = industry.toLowerCase();
@@ -26,6 +27,17 @@ export function LeadsTab({ client }: { client: Client }) {
     { id: 3, name: leadNames[2], source: 'Email / Remarketing', status: 'Cerrado', value: formatMoney(cpl * 196), date: 'Ayer' },
     { id: 4, name: leadNames[3], source: 'Instagram Direct', status: 'Perdido', value: formatMoney(cpl * 22), date: 'Ayer' },
   ];
+
+  const handleExportCsv = () => {
+    const csv = buildLeadsCsv(dummyLeads);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `leads-${client.slug || client.id}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -76,7 +88,13 @@ export function LeadsTab({ client }: { client: Client }) {
             <button className="p-2 bg-slate-50 text-slate-400 rounded-lg border border-slate-100 hover:text-slate-600">
               <Filter className="size-4" />
             </button>
-            <button className="text-xs font-bold text-slate-600 px-3 py-1 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors">Exportar CSV</button>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="text-xs font-bold text-slate-600 px-3 py-1 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
+            >
+              Exportar CSV
+            </button>
           </div>
         </div>
         <div className="overflow-x-auto">
