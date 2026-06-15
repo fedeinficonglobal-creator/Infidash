@@ -242,7 +242,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
     <div>
       <div className="flex items-center gap-2 mb-1">
         <h3 className="text-lg font-bold text-slate-900">Análisis/UX sincronizado</h3>
-        <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Clarity</span>
+        <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Análisis/UX</span>
       </div>
       <p className="text-xs text-slate-400 font-medium tracking-wide">Datos reales del último sincronizado en base de datos</p>
     </div>

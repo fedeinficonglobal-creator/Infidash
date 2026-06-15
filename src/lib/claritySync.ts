@@ -208,7 +208,7 @@ export async function fetchClaritySnapshots(
   const exportUrl = resolveClarityExportUrl(context);
   const controller = new AbortController();
   const timeoutMs = Number(process.env.CLARITY_SYNC_TIMEOUT_MS ?? 15000);
-  const timeoutId = globalThis.setTimeout(() => controller.abort(new DOMException('Clarity sync timeout', 'AbortError')), Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000);
+  const timeoutId = globalThis.setTimeout(() => controller.abort(new DOMException('Análisis/UX sync timeout', 'AbortError')), Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000);
 
   try {
     const headers = new Headers({
@@ -227,7 +227,7 @@ export async function fetchClaritySnapshots(
 
     const responseText = await response.text();
     if (!response.ok) {
-      throw new Error(`Clarity respondió ${response.status}: ${responseText.slice(0, 200) || 'sin cuerpo'}`);
+      throw new Error(`Análisis/UX respondió ${response.status}: ${responseText.slice(0, 200) || 'sin cuerpo'}`);
     }
 
     let payload: unknown = null;

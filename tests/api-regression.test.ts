@@ -237,7 +237,7 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
       engagedSessions: 390,
       conversions: 27,
       conversionRate: 4.2,
-      notes: 'Importación de Clarity para el dashboard',
+      notes: 'Importación de Análisis/UX para el dashboard',
       source: 'clarity',
       payloadJson: JSON.stringify({ source: 'clarity', sessions: 640 }),
     }),
@@ -595,7 +595,7 @@ test('Análisis/UX integration can be created, tested, and synced against a live
     assert.equal(syncBody.snapshots[0].sessions, 321);
 
     const lastRequest = getLastRequest();
-    assert.ok(lastRequest, 'Expected the mock Clarity endpoint to be called');
+    assert.ok(lastRequest, 'Expected the mock Análisis/UX endpoint to be called');
     assert.match(lastRequest!.url, /\/export\/ux-project-1\?site=https%3A%2F%2Fexample\.com&segment=Principal/);
     assert.equal(lastRequest!.authorization, 'Bearer secret-token');
 
