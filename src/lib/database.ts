@@ -424,6 +424,378 @@ function createDatabase() {
   return createPostgresDatabase(connectionString);
 }
 
+const legacySqlitePath = path.join(process.cwd(), 'data', 'infidash.sqlite');
+const legacySqliteTables = [
+  'organizations',
+  'users',
+  'clients',
+  'integrations',
+  'daily_stats',
+  'ux_snapshots',
+  'rrss_channels',
+  'monthly_kpis',
+  'ai_insights',
+] as const;
+
+type LegacySqliteDump = Partial<Record<(typeof legacySqliteTables)[number], Array<Record<string, unknown>>>>;
+
+function readLegacySqliteDump(): LegacySqliteDump | null {
+  if (!fs.existsSync(legacySqlitePath)) {
+    return null;
+  }
+
+  const script = `
+import json
+import sqlite3
+import sys
+
+path = sys.argv[1]
+conn = sqlite3.connect(path)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+
+tables = ${JSON.stringify(legacySqliteTables)}
+out = {}
+for table in tables:
+    try:
+        rows = cur.execute(f'SELECT * FROM {table}').fetchall()
+        out[table] = [dict(row) for row in rows]
+    except sqlite3.Error:
+        out[table] = []
+
+print(json.dumps(out))
+`;
+
+  const result = spawnSync('python', ['-c', script, legacySqlitePath], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    const message = (result.stderr || result.stdout || 'unknown sqlite export error').trim();
+    throw new Error(message);
+  }
+
+  const raw = (result.stdout || '').trim();
+  if (!raw) {
+    return null;
+  }
+
+  return JSON.parse(raw) as LegacySqliteDump;
+}
+
+function importLegacySqliteData(db: AppDatabase) {
+  if (process.env.NODE_ENV === 'production') {
+    return;
+  }
+
+  const dump = readLegacySqliteDump();
+  if (!dump) {
+    return;
+  }
+
+  const importCounts = {
+    organizations: 0,
+    users: 0,
+    clients: 0,
+    integrations: 0,
+    dailyStats: 0,
+    uxSnapshots: 0,
+    rrssChannels: 0,
+    monthlyKpis: 0,
+    aiInsights: 0,
+  };
+
+  const orgIdMap = new Map<string, string>();
+  const userIdMap = new Map<string, string>();
+  const clientIdMap = new Map<string, string>();
+
+  const getOrgIdBySlug = (slug: string) => {
+    const row = db.prepare(`SELECT id FROM organizations WHERE slug = ?`).get(slug) as { id: string } | undefined;
+    return row?.id ?? null;
+  };
+
+  const getUserIdByEmail = (email: string) => {
+    const row = db.prepare(`SELECT id FROM users WHERE email = ?`).get(email) as { id: string } | undefined;
+    return row?.id ?? null;
+  };
+
+  const getClientIdBySlug = (slug: string) => {
+    const row = db.prepare(`SELECT id FROM clients WHERE slug = ?`).get(slug) as { id: string } | undefined;
+    return row?.id ?? null;
+  };
+
+  const insertOrganization = db.prepare(
+    `INSERT INTO organizations (id, name, slug, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(slug) DO NOTHING`
+  );
+  for (const row of dump.organizations ?? []) {
+    const slug = String(row.slug ?? '').trim();
+    if (!slug) {
+      continue;
+    }
+
+    const legacyId = String(row.id ?? '');
+    insertOrganization.run(
+      legacyId || crypto.randomUUID(),
+      String(row.name ?? slug),
+      slug,
+      String(row.created_at ?? nowIso()),
+    );
+    const destId = getOrgIdBySlug(slug) ?? legacyId;
+    if (legacyId && destId) {
+      orgIdMap.set(legacyId, destId);
+    }
+    importCounts.organizations += 1;
+  }
+
+  const insertUser = db.prepare(
+    `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(email) DO NOTHING`
+  );
+  for (const row of dump.users ?? []) {
+    const email = normalizeEmail(String(row.email ?? ''));
+    if (!email) {
+      continue;
+    }
+
+    const legacyId = String(row.id ?? '');
+    insertUser.run(
+      legacyId || crypto.randomUUID(),
+      email,
+      String(row.name ?? 'Usuario').trim() || 'Usuario',
+      String(row.password_hash ?? row.passwordHash ?? ''),
+      String(row.role ?? 'viewer'),
+      Number(row.active ?? 1) ? 1 : 0,
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    const destId = getUserIdByEmail(email) ?? legacyId;
+    if (legacyId && destId) {
+      userIdMap.set(legacyId, destId);
+    }
+    importCounts.users += 1;
+  }
+
+  const insertClient = db.prepare(
+    `INSERT INTO clients (id, org_id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(slug) DO NOTHING`
+  );
+  for (const row of dump.clients ?? []) {
+    const slug = String(row.slug ?? '').trim();
+    if (!slug) {
+      continue;
+    }
+
+    const legacyId = String(row.id ?? '');
+    const legacyOrgId = String(row.org_id ?? '').trim();
+    const orgId = legacyOrgId ? orgIdMap.get(legacyOrgId) ?? getOrgIdBySlug(legacyOrgId) ?? legacyOrgId : null;
+    insertClient.run(
+      legacyId || crypto.randomUUID(),
+      orgId,
+      String(row.name ?? slug).trim() || slug,
+      slug,
+      row.logo_url ?? null,
+      row.industry ?? null,
+      Number.isFinite(Number(row.health_score)) ? Number(row.health_score) : 0,
+      String(row.kpi_thresholds_json ?? '{}'),
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    const destId = getClientIdBySlug(slug) ?? legacyId;
+    if (legacyId && destId) {
+      clientIdMap.set(legacyId, destId);
+    }
+    importCounts.clients += 1;
+  }
+
+  const insertIntegration = db.prepare(
+    `INSERT INTO integrations (
+      id, client_id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(client_id, provider) DO NOTHING`
+  );
+  for (const row of dump.integrations ?? []) {
+    const legacyClientId = String(row.client_id ?? '').trim();
+    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
+    if (!clientId) {
+      continue;
+    }
+
+    insertIntegration.run(
+      String(row.id ?? crypto.randomUUID()),
+      clientId,
+      String(row.provider ?? 'clarity'),
+      String(row.label ?? 'Integración').trim() || 'Integración',
+      String(row.status ?? 'pending'),
+      String(row.config_json ?? '{}'),
+      String(row.credentials_json ?? '{}'),
+      Number(row.is_active ?? 1) ? 1 : 0,
+      row.last_sync ?? null,
+      row.last_error ?? null,
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    importCounts.integrations += 1;
+  }
+
+  const insertDailyStat = db.prepare(
+    `INSERT INTO daily_stats (
+      id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(client_id, stat_date) DO NOTHING`
+  );
+  for (const row of dump.daily_stats ?? []) {
+    const legacyClientId = String(row.client_id ?? '').trim();
+    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
+    if (!clientId) {
+      continue;
+    }
+
+    insertDailyStat.run(
+      String(row.id ?? crypto.randomUUID()),
+      clientId,
+      String(row.stat_date ?? '').trim(),
+      Number(row.revenue ?? 0),
+      Number(row.roas ?? 0),
+      Number(row.clicks ?? 0),
+      Number(row.conversions ?? 0),
+      Number(row.cpa ?? 0),
+      Number(row.leads ?? 0),
+      Number(row.traffic ?? 0),
+      row.notes ?? null,
+      String(row.source ?? 'manual'),
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    importCounts.dailyStats += 1;
+  }
+
+  const insertUxSnapshot = db.prepare(
+    `INSERT INTO ux_snapshots (
+      id, client_id, snapshot_date, sessions, page_views, rage_clicks, dead_clicks, scroll_depth_avg, engaged_sessions,
+      conversions, conversion_rate, notes, source, payload_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(client_id, snapshot_date) DO NOTHING`
+  );
+  for (const row of dump.ux_snapshots ?? []) {
+    const legacyClientId = String(row.client_id ?? '').trim();
+    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
+    if (!clientId) {
+      continue;
+    }
+
+    insertUxSnapshot.run(
+      String(row.id ?? crypto.randomUUID()),
+      clientId,
+      String(row.snapshot_date ?? '').trim(),
+      Number(row.sessions ?? 0),
+      Number(row.page_views ?? 0),
+      Number(row.rage_clicks ?? 0),
+      Number(row.dead_clicks ?? 0),
+      Number(row.scroll_depth_avg ?? 0),
+      Number(row.engaged_sessions ?? 0),
+      Number(row.conversions ?? 0),
+      Number(row.conversion_rate ?? 0),
+      row.notes ?? null,
+      String(row.source ?? 'clarity'),
+      String(row.payload_json ?? '{}'),
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    importCounts.uxSnapshots += 1;
+  }
+
+  const insertRrssChannel = db.prepare(
+    `INSERT INTO rrss_channels (
+      id, client_id, platform_key, label, is_active, sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(client_id, platform_key, label) DO NOTHING`
+  );
+  for (const row of dump.rrss_channels ?? []) {
+    const legacyClientId = String(row.client_id ?? '').trim();
+    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
+    if (!clientId) {
+      continue;
+    }
+
+    insertRrssChannel.run(
+      String(row.id ?? crypto.randomUUID()),
+      clientId,
+      String(row.platform_key ?? '').trim(),
+      String(row.label ?? '').trim(),
+      Number(row.is_active ?? 1) ? 1 : 0,
+      Number(row.sort_order ?? 0),
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    importCounts.rrssChannels += 1;
+  }
+
+  const insertMonthlyKpi = db.prepare(
+    `INSERT INTO monthly_kpis (
+      id, client_id, department_key, metric_key, month_key, target_value, target_text, actual_value, actual_text,
+      status, difference_value, difference_pct, notes, closed_at, created_by_user_id, updated_by_user_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(client_id, department_key, metric_key, month_key) DO NOTHING`
+  );
+  for (const row of dump.monthly_kpis ?? []) {
+    const legacyClientId = String(row.client_id ?? '').trim();
+    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
+    if (!clientId) {
+      continue;
+    }
+
+    const createdByLegacyId = String(row.created_by_user_id ?? '').trim();
+    const updatedByLegacyId = String(row.updated_by_user_id ?? '').trim();
+    const createdByUserId = createdByLegacyId ? userIdMap.get(createdByLegacyId) ?? createdByLegacyId : null;
+    const updatedByUserId = updatedByLegacyId ? userIdMap.get(updatedByLegacyId) ?? updatedByLegacyId : null;
+
+    insertMonthlyKpi.run(
+      String(row.id ?? crypto.randomUUID()),
+      clientId,
+      String(row.department_key ?? 'publicidad'),
+      String(row.metric_key ?? ''),
+      String(row.month_key ?? ''),
+      row.target_value ?? null,
+      row.target_text ?? null,
+      row.actual_value ?? null,
+      row.actual_text ?? null,
+      String(row.status ?? 'unknown'),
+      row.difference_value ?? null,
+      row.difference_pct ?? null,
+      row.notes ?? null,
+      row.closed_at ?? null,
+      createdByUserId,
+      updatedByUserId,
+      String(row.created_at ?? nowIso()),
+      String(row.updated_at ?? nowIso()),
+    );
+    importCounts.monthlyKpis += 1;
+  }
+
+  const insertAiInsight = db.prepare(
+    `INSERT INTO ai_insights (id, client_id, insight_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`
+  );
+  for (const row of dump.ai_insights ?? []) {
+    const legacyClientId = String(row.client_id ?? '').trim();
+    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
+    if (!clientId) {
+      continue;
+    }
+
+    insertAiInsight.run(
+      String(row.id ?? crypto.randomUUID()),
+      clientId,
+      String(row.insight_json ?? '{}'),
+      String(row.created_at ?? nowIso()),
+    );
+    importCounts.aiInsights += 1;
+  }
+
+  const importedAnything = Object.values(importCounts).some((count) => count > 0);
+  if (importedAnything) {
+    console.warn('[infidash] Migración legacy SQLite→Postgres completada', importCounts);
+  }
+}
+
 function getBackupFilePath(label?: string | null) {
   ensureDirectoryExists(path.join(backupDir, 'backup.placeholder'));
   const stamp = nowIso().replace(/[:.]/g, '-');
@@ -828,6 +1200,7 @@ export function getDatabase() {
     ensureIntegrationSchema(database);
     ensureUxSnapshotSchema(database);
     seedDefaults(database);
+    importLegacySqliteData(database);
   }
 
   return database;

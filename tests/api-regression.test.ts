@@ -6,6 +6,7 @@ const adminEmail = 'admin@infidash.local';
 const adminPassword = 'admin1234';
 const viewerEmail = 'viewer@infidash.local';
 const viewerPassword = 'viewer1234';
+const legacyClientSlug = 'regresion-1779451380395-469e91e8';
 
 let adminToken = '';
 let viewerToken = '';
@@ -420,6 +421,50 @@ test('admin can create, update, and delete users from the management backend', a
 
   assert.equal(forbiddenResponse.status, 403);
   assert.equal(forbiddenBody.code, 'FORBIDDEN');
+});
+
+test('legacy SQLite clients survive the Postgres migration with related data intact', async () => {
+  const { response, body } = await request('/api/clients', {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const legacyClient = body.clients.find((entry: any) => entry.slug === legacyClientSlug);
+  assert.ok(legacyClient, `Expected legacy client ${legacyClientSlug} to be present after migration`);
+  assert.equal(legacyClient.latestStat.revenue, 15678);
+
+  const { response: uxResponse, body: uxBody } = await request(`/api/clients/${legacyClient.id}/ux-snapshots`, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(uxResponse.status, 200);
+  assert.equal(uxBody.snapshots.length, 1);
+  assert.equal(uxBody.snapshots[0].sessions, 640);
+
+  const { response: rrssResponse, body: rrssBody } = await request(`/api/clients/${legacyClient.id}/rrss-channels`, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(rrssResponse.status, 200);
+  assert.equal(rrssBody.channels.length, 1);
+  assert.equal(rrssBody.channels[0].label, 'Instagram principal');
+
+  const { response: kpiResponse, body: kpiBody } = await request(`/api/clients/${legacyClient.id}/monthly-kpis?monthKey=2026-05`, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(kpiResponse.status, 200);
+  assert.equal(kpiBody.kpis.length, 1);
+  assert.equal(kpiBody.kpis[0].metricKey, 'followers');
+  assert.ok(kpiBody.kpis[0].closedAt, 'Expected the migrated KPI to preserve its closedAt timestamp');
 });
 
 test('admin can create a postgres backup and viewer cannot', async () => {
