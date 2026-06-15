@@ -3,7 +3,9 @@ import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, type KpiThresholds } fr
 import {
   clearStoredSession,
   createClient as apiCreateClient,
+  deleteClient as apiDeleteClient,
   getClients,
+  updateClient as apiUpdateClient,
   getCurrentSession,
   loadStoredSession,
   login as apiLogin,
@@ -55,6 +57,8 @@ interface ClientState {
   signOut: () => Promise<void>;
   refreshClients: () => Promise<void>;
   addClient: (client: Omit<Client, 'id' | 'slug' | 'health' | 'metrics'>) => Promise<void>;
+  updateClient: (clientId: string, input: { name?: string; industry?: string | null; logo?: string | null; kpiThresholds?: KpiThresholds | Partial<KpiThresholds> | null }) => Promise<void>;
+  deleteClient: (clientId: string) => Promise<void>;
 }
 
 const DEFAULT_TABS = ['overview', 'sales', 'traffic', 'rrss', 'ai', 'reports', 'integrations'];
@@ -269,6 +273,57 @@ export const useClientStore = create<ClientState>((set, get) => ({
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo crear el cliente';
+      set({ dataError: message });
+      throw error instanceof Error ? error : new Error(message);
+    }
+  },
+  updateClient: async (clientId, input) => {
+    const token = get().sessionToken;
+    if (!token) {
+      const error = new Error('Necesitas una sesión activa para editar un cliente real');
+      set({ dataError: error.message });
+      throw error;
+    }
+
+    try {
+      const response = await apiUpdateClient(token, clientId, {
+        name: input.name,
+        industry: input.industry,
+        logoUrl: input.logo,
+        kpiThresholds: input.kpiThresholds ? normalizeKpiThresholds(input.kpiThresholds) : undefined,
+      });
+      const mapped = mapApiClientToUiClient(response.client);
+      set((state) => ({
+        clients: state.clients.map((client) => (client.id === clientId ? mapped : client)),
+        activeClientId: state.activeClientId === clientId ? clientId : state.activeClientId,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo editar el cliente';
+      set({ dataError: message });
+      throw error instanceof Error ? error : new Error(message);
+    }
+  },
+  deleteClient: async (clientId) => {
+    const token = get().sessionToken;
+    if (!token) {
+      const error = new Error('Necesitas una sesión activa para eliminar un cliente real');
+      set({ dataError: error.message });
+      throw error;
+    }
+
+    try {
+      await apiDeleteClient(token, clientId);
+      set((state) => {
+        const clients = state.clients.filter((client) => client.id !== clientId);
+        const nextActiveClientId = state.activeClientId === clientId ? (clients[0]?.id ?? null) : state.activeClientId;
+        return {
+          clients,
+          activeClientId: nextActiveClientId,
+          activeTabId: nextActiveClientId ? state.activeTabId : 'overview',
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo eliminar el cliente';
       set({ dataError: message });
       throw error instanceof Error ? error : new Error(message);
     }

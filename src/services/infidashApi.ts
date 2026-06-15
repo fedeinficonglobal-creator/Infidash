@@ -284,6 +284,23 @@ export async function createClient(
   }, token);
 }
 
+export async function updateClient(
+  token: string,
+  clientId: string,
+  input: { name?: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null },
+) {
+  return apiRequest<{ client: ApiClient }>(`/api/clients/${encodeURIComponent(clientId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, token);
+}
+
+export async function deleteClient(token: string, clientId: string) {
+  return apiRequest<void>(`/api/clients/${encodeURIComponent(clientId)}`, {
+    method: 'DELETE',
+  }, token);
+}
+
 export async function getClientIntegrations(token: string, clientId: string) {
   return apiRequest<{ integrations: ApiIntegration[] }>(`/api/clients/${encodeURIComponent(clientId)}/integrations`, {}, token);
 }

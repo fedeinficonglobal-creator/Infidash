@@ -8,6 +8,8 @@ import {
   closeMonthlyKpi,
   createClient,
   createDatabaseBackup,
+  deleteClient,
+  updateClient,
   createUser,
   createOrUpdateClientIntegration,
   deleteDailyStat,
@@ -408,6 +410,54 @@ app.post('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
   });
 
   return reply.code(201).send({ client });
+});
+
+app.patch('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const { name, industry, logoUrl, healthScore, kpiThresholds } = (req.body ?? {}) as any;
+  const clientId = (req.params as any).clientId;
+
+  if (
+    name !== undefined && typeof name !== 'string'
+    || industry !== undefined && typeof industry !== 'string' && industry !== null
+    || logoUrl !== undefined && typeof logoUrl !== 'string' && logoUrl !== null
+    || healthScore !== undefined && typeof healthScore !== 'number'
+    || kpiThresholds !== undefined && (typeof kpiThresholds !== 'object' || kpiThresholds === null)
+  ) {
+    return sendError(reply, 400, 'Payload de cliente inválido', 'INVALID_PAYLOAD');
+  }
+
+  const client = updateClient(clientId, {
+    name: typeof name === 'string' && name.trim() ? name : undefined,
+    industry: industry === undefined ? undefined : (typeof industry === 'string' && industry.trim() ? industry : null),
+    logoUrl: logoUrl === undefined ? undefined : (typeof logoUrl === 'string' && logoUrl.trim() ? logoUrl : null),
+    healthScore: typeof healthScore === 'number' ? healthScore : undefined,
+    kpiThresholds: kpiThresholds && typeof kpiThresholds === 'object' ? kpiThresholds : null,
+  });
+
+  if (!client) {
+    return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+
+  return reply.send({ client });
+});
+
+app.delete('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  const deleted = deleteClient((req.params as any).clientId);
+  if (!deleted) {
+    return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+
+  return reply.code(204).send();
 });
 
 app.get('/api/clients/:clientId/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {

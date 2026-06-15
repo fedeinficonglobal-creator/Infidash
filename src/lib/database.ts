@@ -1474,17 +1474,22 @@ export function getClientBySlug(slug: string) {
   return row ? rowToClient(row) : null;
 }
 
-export function createClient(input: { name: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
-  const db = getDatabase();
-  const timestamp = nowIso();
-  const slugBase = input.name
+function buildClientSlug(name: string) {
+  const slugBase = name
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  const slug = `${slugBase || 'client'}-${crypto.randomUUID().slice(0, 8)}`;
+
+  return `${slugBase || 'client'}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+export function createClient(input: { name: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
+  const db = getDatabase();
+  const timestamp = nowIso();
+  const slug = buildClientSlug(input.name);
   const record = {
     id: crypto.randomUUID(),
     name: input.name.trim(),
@@ -1503,6 +1508,46 @@ export function createClient(input: { name: string; industry?: string | null; lo
   ).run(record);
 
   return rowToClient(record);
+}
+
+export function updateClient(clientId: string, input: { name?: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
+  const db = getDatabase();
+  const existing = getClientById(clientId);
+  if (!existing) {
+    return null;
+  }
+
+  const nextName = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : existing.name;
+  const nextIndustry = input.industry === undefined ? existing.industry : input.industry;
+  const nextLogoUrl = input.logoUrl === undefined ? existing.logoUrl : input.logoUrl;
+  const nextHealthScore = Number.isFinite(input.healthScore) ? Math.max(0, Math.min(100, input.healthScore ?? 0)) : existing.healthScore;
+  const nextThresholds = input.kpiThresholds ? normalizeKpiThresholds({ ...existing.kpiThresholds, ...input.kpiThresholds }) : existing.kpiThresholds;
+  const timestamp = nowIso();
+  const slug = nextName === existing.name ? existing.slug : buildClientSlug(nextName);
+
+  db.prepare(
+    `UPDATE clients
+     SET name = ?, slug = ?, logo_url = ?, industry = ?, health_score = ?, kpi_thresholds_json = ?, updated_at = ?
+     WHERE id = ?`
+  ).run(
+    nextName,
+    slug,
+    nextLogoUrl ?? null,
+    nextIndustry ?? null,
+    nextHealthScore,
+    JSON.stringify(nextThresholds),
+    timestamp,
+    clientId,
+  );
+
+  return getClientById(clientId);
+}
+
+export function deleteClient(clientId: string) {
+  const db = getDatabase();
+  const exists = db.prepare(`SELECT 1 FROM clients WHERE id = ?`).get(clientId);
+  db.prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
+  return Boolean(exists);
 }
 
 function getClientById(clientId: string) {

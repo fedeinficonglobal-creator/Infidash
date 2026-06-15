@@ -1,15 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { DEFAULT_KPI_THRESHOLDS } from '../lib/kpiThresholds.js';
-import { useClientStore } from '../store/useClientStore';
+import { useClientStore, type Client } from '../store/useClientStore';
 import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
-import { LayoutGrid, List, Plus, Search, Filter, TrendingUp, TrendingDown, ArrowRight, X } from 'lucide-react';
+import { LayoutGrid, List, Plus, Search, Filter, TrendingUp, TrendingDown, ArrowRight, X, PencilLine, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function AgencyDashboard() {
-  const { clients, setActiveClient, addClient } = useClientStore();
+  const { clients, setActiveClient, addClient, updateClient, deleteClient } = useClientStore();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isNewClientModalOpen, setNewClientModalOpen] = useState(false);
+  const [clientModalMode, setClientModalMode] = useState<'create' | 'edit'>('create');
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [isSavingClient, setIsSavingClient] = useState(false);
+  const [clientActionError, setClientActionError] = useState<string | null>(null);
   const [isLoadingHealthSummary, setIsLoadingHealthSummary] = useState(true);
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   
@@ -22,6 +25,102 @@ export function AgencyDashboard() {
     conversionsTarget: String(DEFAULT_KPI_THRESHOLDS.conversions),
     cpaTarget: String(DEFAULT_KPI_THRESHOLDS.cpa),
   });
+
+  const resetClientForm = () => {
+    setNewClientForm({
+      name: '',
+      industry: '',
+      logo: '',
+      revenueTarget: String(DEFAULT_KPI_THRESHOLDS.revenue),
+      roasTarget: String(DEFAULT_KPI_THRESHOLDS.roas),
+      conversionsTarget: String(DEFAULT_KPI_THRESHOLDS.conversions),
+      cpaTarget: String(DEFAULT_KPI_THRESHOLDS.cpa),
+    });
+  };
+
+  const openCreateClientModal = () => {
+    setClientModalMode('create');
+    setEditingClient(null);
+    setClientActionError(null);
+    resetClientForm();
+    setNewClientModalOpen(true);
+  };
+
+  const openEditClientModal = (client: Client) => {
+    setClientModalMode('edit');
+    setEditingClient(client);
+    setClientActionError(null);
+    setNewClientForm({
+      name: client.name,
+      industry: client.industry,
+      logo: client.logo,
+      revenueTarget: String(client.kpiThresholds.revenue),
+      roasTarget: String(client.kpiThresholds.roas),
+      conversionsTarget: String(client.kpiThresholds.conversions),
+      cpaTarget: String(client.kpiThresholds.cpa),
+    });
+    setNewClientModalOpen(true);
+  };
+
+  const closeClientModal = () => {
+    setNewClientModalOpen(false);
+    setEditingClient(null);
+    setClientActionError(null);
+    setClientModalMode('create');
+    resetClientForm();
+  };
+
+  const handleSubmitClientForm = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSavingClient(true);
+    setClientActionError(null);
+
+    try {
+      const payload = {
+        name: newClientForm.name.trim(),
+        industry: newClientForm.industry || 'General',
+        logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`,
+        kpiThresholds: {
+          revenue: Number(newClientForm.revenueTarget) || DEFAULT_KPI_THRESHOLDS.revenue,
+          roas: Number(newClientForm.roasTarget) || DEFAULT_KPI_THRESHOLDS.roas,
+          conversions: Number(newClientForm.conversionsTarget) || DEFAULT_KPI_THRESHOLDS.conversions,
+          cpa: Number(newClientForm.cpaTarget) || DEFAULT_KPI_THRESHOLDS.cpa,
+        },
+      };
+
+      if (clientModalMode === 'edit' && editingClient) {
+        await updateClient(editingClient.id, payload);
+      } else {
+        await addClient(payload);
+      }
+
+      closeClientModal();
+    } catch (error) {
+      setClientActionError(error instanceof Error ? error.message : 'No se pudo guardar el cliente');
+    } finally {
+      setIsSavingClient(false);
+    }
+  };
+
+  const handleDeleteClient = async (client: Client) => {
+    const confirmed = window.confirm(`¿Seguro que quieres eliminar a ${client.name}? Esta acción borrará también sus datos asociados.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setIsSavingClient(true);
+    setClientActionError(null);
+    try {
+      await deleteClient(client.id);
+      if (editingClient?.id === client.id) {
+        closeClientModal();
+      }
+    } catch (error) {
+      setClientActionError(error instanceof Error ? error.message : 'No se pudo eliminar el cliente');
+    } finally {
+      setIsSavingClient(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -50,36 +149,6 @@ export function AgencyDashboard() {
     };
   }, []);
 
-  const handleAddNewClient = async (e: FormEvent) => {
-    e.preventDefault();
-    setIsSavingClient(true);
-    try {
-      await addClient({
-        name: newClientForm.name,
-        industry: newClientForm.industry || 'General',
-        logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`,
-        kpiThresholds: {
-          revenue: Number(newClientForm.revenueTarget) || DEFAULT_KPI_THRESHOLDS.revenue,
-          roas: Number(newClientForm.roasTarget) || DEFAULT_KPI_THRESHOLDS.roas,
-          conversions: Number(newClientForm.conversionsTarget) || DEFAULT_KPI_THRESHOLDS.conversions,
-          cpa: Number(newClientForm.cpaTarget) || DEFAULT_KPI_THRESHOLDS.cpa,
-        },
-      });
-      setNewClientModalOpen(false);
-      setNewClientForm({
-        name: '',
-        industry: '',
-        logo: '',
-        revenueTarget: String(DEFAULT_KPI_THRESHOLDS.revenue),
-        roasTarget: String(DEFAULT_KPI_THRESHOLDS.roas),
-        conversionsTarget: String(DEFAULT_KPI_THRESHOLDS.conversions),
-        cpaTarget: String(DEFAULT_KPI_THRESHOLDS.cpa),
-      });
-    } finally {
-      setIsSavingClient(false);
-    }
-  };
-  
   const totalRevenue = clients.reduce((acc, client) => {
     // Basic parse for mock values like "52.430 €" to numbers
     const num = parseFloat(client.metrics.revenue.value.toString().replace(/[^\\d.,]/g, '').replace(/\\./g, '').replace(',', '.'));
@@ -111,7 +180,7 @@ export function AgencyDashboard() {
            <p className="text-slate-500 font-medium">Gestión integral de cartera y métricas globales de la agencia.</p>
         </div>
         <button 
-           onClick={() => setNewClientModalOpen(true)}
+           onClick={openCreateClientModal}
            className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-brand-primary/90 transition-all shadow-lg shadow-brand-primary/20"
         >
            <Plus className="size-4" /> Nuevo Cliente
@@ -223,11 +292,39 @@ export function AgencyDashboard() {
                            <div className="size-12 rounded-xl overflow-hidden shadow-sm">
                               <img src={client.logo} alt={client.name} className="size-full object-cover" />
                            </div>
-                           <div className={cn("px-2.5 py-1 rounded-full flex items-center gap-1.5", status.bg)}>
-                              <div className={cn("size-1.5 rounded-full", status.dot)} />
-                              <span className={cn("text-[10px] font-bold tracking-wide uppercase", status.text)}>
-                                 Score: {client.health}
-                              </span>
+                           <div className="flex items-start gap-2">
+                             <div className={cn("px-2.5 py-1 rounded-full flex items-center gap-1.5", status.bg)}>
+                                <div className={cn("size-1.5 rounded-full", status.dot)} />
+                                <span className={cn("text-[10px] font-bold tracking-wide uppercase", status.text)}>
+                                   Score: {client.health}
+                                </span>
+                             </div>
+                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                               <button
+                                 type="button"
+                                 onClick={(event) => {
+                                   event.stopPropagation();
+                                   openEditClientModal(client);
+                                 }}
+                                 className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 shadow-sm hover:text-brand-primary"
+                                 aria-label={`Editar cliente ${client.name}`}
+                                 title="Editar cliente"
+                               >
+                                 <PencilLine className="size-3.5" />
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={(event) => {
+                                   event.stopPropagation();
+                                   void handleDeleteClient(client);
+                                 }}
+                                 className="rounded-lg border border-rose-100 bg-white p-2 text-rose-500 shadow-sm hover:bg-rose-50"
+                                 aria-label={`Eliminar cliente ${client.name}`}
+                                 title="Eliminar cliente"
+                               >
+                                 <Trash2 className="size-3.5" />
+                               </button>
+                             </div>
                            </div>
                         </div>
                         <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1">{client.name}</h3>
@@ -321,9 +418,28 @@ export function AgencyDashboard() {
                               </div>
                            </td>
                            <td className="px-6 py-4 text-right">
-                              <button className="text-[10px] font-bold text-brand-primary uppercase tracking-widest bg-brand-primary/10 px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                                 Ver Detalles
-                              </button>
+                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                 <button
+                                   type="button"
+                                   onClick={(event) => {
+                                     event.stopPropagation();
+                                     openEditClientModal(client);
+                                   }}
+                                   className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:text-brand-primary hover:border-brand-primary/30"
+                                 >
+                                   <PencilLine className="size-3" /> Editar
+                                 </button>
+                                 <button
+                                   type="button"
+                                   onClick={(event) => {
+                                     event.stopPropagation();
+                                     void handleDeleteClient(client);
+                                   }}
+                                   className="inline-flex items-center gap-1 rounded-lg border border-rose-100 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-rose-600 hover:bg-rose-50"
+                                 >
+                                   <Trash2 className="size-3" /> Eliminar
+                                 </button>
+                              </div>
                            </td>
                         </tr>
                      );
@@ -338,17 +454,22 @@ export function AgencyDashboard() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between p-6 border-b border-slate-100">
-              <h3 className="text-xl font-bold text-slate-900">Añadir Nuevo Cliente</h3>
+              <h3 className="text-xl font-bold text-slate-900">{clientModalMode === 'edit' ? 'Editar Cliente' : 'Añadir Nuevo Cliente'}</h3>
               <button 
-                onClick={() => setNewClientModalOpen(false)}
+                onClick={closeClientModal}
                 className="text-slate-400 hover:text-slate-600 transition-colors"
               >
                 <X className="size-5" />
               </button>
             </div>
             
-            <form onSubmit={handleAddNewClient} className="p-6">
+            <form onSubmit={handleSubmitClientForm} className="p-6">
               <div className="space-y-4">
+                {clientActionError && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {clientActionError}
+                  </div>
+                )}
                 <div>
                   <label htmlFor="name" className="block text-sm font-bold text-slate-700 mb-1">Nombre del Cliente *</label>
                   <input
@@ -443,7 +564,7 @@ export function AgencyDashboard() {
                   disabled={!newClientForm.name.trim() || isSavingClient}
                   className="px-4 py-2 text-sm font-bold text-white bg-brand-primary hover:bg-brand-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-lg shadow-brand-primary/20"
                 >
-                  {isSavingClient ? 'Guardando...' : 'Añadir Cliente'}
+                  {isSavingClient ? (clientModalMode === 'edit' ? 'Guardando cambios...' : 'Guardando...') : (clientModalMode === 'edit' ? 'Guardar Cambios' : 'Añadir Cliente')}
                 </button>
               </div>
             </form>

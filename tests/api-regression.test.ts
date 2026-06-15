@@ -350,6 +350,102 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(savedClient.latestStat.revenue, 15678);
 });
 
+test('admin can create, update, and delete a client from the management backend', async () => {
+  const clientName = `Edicion ${Date.now()}`;
+  const { response: createResponse, body: createBody } = await request('/api/clients', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      name: clientName,
+      industry: 'Marketing',
+      healthScore: 77,
+      kpiThresholds: {
+        revenue: 9000,
+        roas: 3.8,
+        conversions: 55,
+        cpa: 21,
+      },
+    }),
+  });
+
+  assert.equal(createResponse.status, 201);
+  const clientId = createBody.client.id as string;
+
+  const { response: patchResponse, body: patchBody } = await request(`/api/clients/${clientId}`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      name: `${clientName} Actualizado`,
+      industry: 'Ecommerce',
+      logoUrl: 'https://example.com/logo.png',
+      healthScore: 91,
+      kpiThresholds: {
+        revenue: 12000,
+      },
+    }),
+  });
+
+  assert.equal(patchResponse.status, 200, JSON.stringify(patchBody));
+  assert.equal(patchBody.client.name, `${clientName} Actualizado`);
+  assert.equal(patchBody.client.industry, 'Ecommerce');
+  assert.equal(patchBody.client.healthScore, 91);
+  assert.equal(patchBody.client.kpiThresholds.revenue, 12000);
+  assert.equal(patchBody.client.kpiThresholds.roas, 3.8);
+
+  const { response: statCreateResponse, body: statCreateBody } = await request('/api/daily-stats', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify({
+      clientId,
+      statDate: '2026-05-20',
+      revenue: 5400,
+      roas: 4.1,
+      clicks: 420,
+      conversions: 24,
+      cpa: 18,
+      leads: 19,
+      traffic: 6200,
+      source: 'manual',
+    }),
+  });
+
+  assert.equal(statCreateResponse.status, 201);
+  assert.equal(statCreateBody.stat.clientId, clientId);
+
+  const { response: deleteResponse } = await request(`/api/clients/${clientId}`, {
+    method: 'DELETE',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(deleteResponse.status, 204);
+
+  const { response: listResponse, body: listBody } = await request('/api/clients', {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(listResponse.status, 200);
+  assert.ok(!listBody.clients.some((entry: any) => entry.id === clientId), 'The deleted client must not be present anymore');
+
+  const { response: statsResponse, body: statsBody } = await request(`/api/daily-stats?clientId=${clientId}`, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+    },
+  });
+
+  assert.equal(statsResponse.status, 200);
+  assert.equal(statsBody.stats.length, 0, 'Deleting a client should cascade to its daily stats');
+});
+
 test('admin can create, update, and delete users from the management backend', async () => {
   const uniqueEmail = `qa-${Date.now()}@infidash.local`;
   const uniqueName = `QA User ${Date.now()}`;
