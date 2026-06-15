@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert';
+import { createServer } from 'node:http';
 import { before, test } from 'node:test';
 
 const baseUrl = process.env.API_BASE_URL ?? 'http://127.0.0.1:4000';
@@ -465,6 +466,152 @@ test('legacy SQLite clients survive the Postgres migration with related data int
   assert.equal(kpiBody.kpis.length, 1);
   assert.equal(kpiBody.kpis[0].metricKey, 'followers');
   assert.ok(kpiBody.kpis[0].closedAt, 'Expected the migrated KPI to preserve its closedAt timestamp');
+});
+
+function createMockClarityServer() {
+  let lastRequest: { url: string; authorization?: string } | null = null;
+  const server = createServer((req, res) => {
+    lastRequest = {
+      url: req.url ?? '',
+      authorization: typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
+    };
+
+    const payload = [
+      {
+        date: '2026-05-19',
+        metrics: {
+          sessions: 321,
+          pageViews: 654,
+          rageClicks: 7,
+          deadClicks: 2,
+          scrollDepthAvg: 71.2,
+          engagedSessions: 210,
+          conversions: 18,
+          conversionRate: 5.6,
+        },
+      },
+    ];
+
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  });
+
+  return {
+    server,
+    getLastRequest: () => lastRequest,
+  };
+}
+
+test('Análisis/UX integration can be created, tested, and synced against a live export endpoint', async () => {
+  const { server, getLastRequest } = createMockClarityServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object' && typeof address.port === 'number');
+  const exportUrl = `http://127.0.0.1:${address.port}/export/{projectId}?site={siteUrl}&segment={segmentName}`;
+
+  try {
+    const clientName = `Integración APIs ${Date.now()}`;
+    const { response: createClientResponse, body: createClientBody } = await request('/api/clients', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        name: clientName,
+        industry: 'Integrations',
+        healthScore: 77,
+        kpiThresholds: {
+          revenue: 10000,
+          roas: 3.5,
+          conversions: 80,
+          cpa: 18,
+        },
+      }),
+    });
+
+    assert.equal(createClientResponse.status, 201, JSON.stringify(createClientBody));
+    const clientId = createClientBody.client.id as string;
+
+    const { response: createIntegrationResponse, body: createIntegrationBody } = await request('/api/integrations', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        clientId,
+        provider: 'clarity',
+        label: 'Análisis/UX · Principal',
+        config: {
+          projectId: 'ux-project-1',
+          siteUrl: 'https://example.com',
+          segmentName: 'Principal',
+          exportUrl,
+        },
+        credentials: {
+          accessToken: 'secret-token',
+        },
+      }),
+    });
+
+    assert.equal(createIntegrationResponse.status, 201, JSON.stringify(createIntegrationBody));
+    assert.equal(createIntegrationBody.integration.clientId, clientId);
+    assert.equal(createIntegrationBody.integration.provider, 'clarity');
+    assert.equal(createIntegrationBody.integration.status, 'connected');
+
+    const integrationId = createIntegrationBody.integration.id as string;
+
+    const { response: listResponse, body: listBody } = await request(`/api/clients/${clientId}/integrations`, {
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    assert.equal(listResponse.status, 200);
+    assert.equal(listBody.integrations.length, 1);
+    assert.equal(listBody.integrations[0].provider, 'clarity');
+
+    const { response: testResponse, body: testBody } = await request(`/api/integrations/${integrationId}/test`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    assert.equal(testResponse.status, 200, JSON.stringify(testBody));
+    assert.equal(testBody.ready, true);
+    assert.equal(Array.isArray(testBody.missingFields), true);
+
+    const { response: syncResponse, body: syncBody } = await request(`/api/integrations/${integrationId}/sync`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    assert.equal(syncResponse.status, 200, JSON.stringify(syncBody));
+    assert.equal(syncBody.skipped, false);
+    assert.equal(syncBody.snapshots.length, 1);
+    assert.equal(syncBody.integration.status, 'connected');
+    assert.equal(syncBody.snapshots[0].sessions, 321);
+
+    const lastRequest = getLastRequest();
+    assert.ok(lastRequest, 'Expected the mock Clarity endpoint to be called');
+    assert.match(lastRequest!.url, /\/export\/ux-project-1\?site=https%3A%2F%2Fexample\.com&segment=Principal/);
+    assert.equal(lastRequest!.authorization, 'Bearer secret-token');
+
+    const { response: uxResponse, body: uxBody } = await request(`/api/clients/${clientId}/ux-snapshots`, {
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    assert.equal(uxResponse.status, 200);
+    assert.equal(uxBody.snapshots.length, 1);
+    assert.equal(uxBody.snapshots[0].pageViews, 654);
+    assert.equal(uxBody.snapshots[0].rageClicks, 7);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('admin can create a postgres backup and viewer cannot', async () => {
