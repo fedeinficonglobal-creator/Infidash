@@ -1,6 +1,6 @@
 {
-  "phase": 1,
-  "phase_name": "Persistencia y migraciones",
+  "phase": 2,
+  "phase_name": "API y trabajos",
   "branch": "feature/contenidos-sin-sheets",
   "timestamp": "2026-09-15T00:00:00Z",
   "status": "complete"

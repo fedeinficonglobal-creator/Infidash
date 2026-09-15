@@ -1,0 +1,366 @@
+import { randomUUID } from 'node:crypto';
+import type { Pool, PoolClient, QueryResultRow } from 'pg';
+import { getEditorialPool, withEditorialTransaction } from './postgres.js';
+import { ContentApiError, encodeCursor, redactSecrets, requestHash, sanitizeError } from './contracts.js';
+import { assertContentTransition, assertPlanTransition, assertPublicationTransition } from './transitions.js';
+import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
+
+type Filters = { clientId?: string; from?: string; to?: string; status?: string; format?: string; cursor?: { at: string; id: string } | null; limit: number };
+
+function page<T extends Record<string, any>>(rows: T[], limit: number, atField = 'created_at') {
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
+  const last = items.at(-1);
+  return { items, nextCursor: hasMore && last ? encodeCursor({ at: new Date(last[atField]).toISOString(), id: last.id }) : null };
+}
+
+function json(value: unknown) { return JSON.stringify(value ?? {}); }
+
+export class EditorialApiRepository {
+  constructor(private readonly pool: Pool = getEditorialPool()) {}
+
+  async summary(filters: { clientId?: string; from?: string; to?: string }) {
+    const values: unknown[] = [];
+    const where: string[] = [];
+    if (filters.clientId) { values.push(filters.clientId); where.push(`client_id = $${values.length}`); }
+    if (filters.from) { values.push(filters.from); where.push(`created_at >= $${values.length}`); }
+    if (filters.to) { values.push(filters.to); where.push(`created_at < $${values.length}`); }
+    const suffix = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    const [plans, contents, publications, incidents] = await Promise.all([
+      this.pool.query(`SELECT status, count(*)::int count FROM editorial.plan_items${suffix} GROUP BY status`, values),
+      this.pool.query(`SELECT status, count(*)::int count FROM editorial.contents${suffix} GROUP BY status`, values),
+      this.pool.query(`SELECT status, count(*)::int count FROM editorial.publications${suffix} GROUP BY status`, values),
+      this.pool.query(`SELECT count(*)::int count FROM editorial.jobs${suffix}${where.length ? ' AND' : ' WHERE'} status IN ('failed','unknown')`, values),
+    ]);
+    const counts = (rows: any[]) => Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
+    return { planItems: counts(plans.rows), contents: counts(contents.rows), publications: counts(publications.rows), incidents: Number(incidents.rows[0]?.count ?? 0) };
+  }
+
+  async calendar(filters: Filters) {
+    const values: unknown[] = [];
+    const where: string[] = [];
+    if (filters.clientId) { values.push(filters.clientId); where.push(`p.client_id = $${values.length}`); }
+    if (filters.from) { values.push(filters.from); where.push(`p.planned_at >= $${values.length}`); }
+    if (filters.to) { values.push(filters.to); where.push(`p.planned_at < $${values.length}`); }
+    if (filters.status) { values.push(filters.status); where.push(`p.status = $${values.length}`); }
+    if (filters.format) { values.push(filters.format); where.push(`p.format = $${values.length}`); }
+    if (filters.cursor) { values.push(filters.cursor.at, filters.cursor.id); where.push(`(p.created_at, p.id) > ($${values.length - 1}, $${values.length}::uuid)`); }
+    values.push(filters.limit + 1);
+    const result = await this.pool.query(
+      `SELECT p.*, c.title calendar_title,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('id', pub.id, 'status', pub.status, 'desiredScheduledAt', pub.desired_scheduled_at, 'confirmedScheduledAt', pub.confirmed_scheduled_at))
+          FROM editorial.contents ci JOIN editorial.publications pub ON pub.client_id = ci.client_id AND pub.content_id = ci.id
+          WHERE ci.client_id = p.client_id AND ci.plan_item_id = p.id), '[]'::jsonb) publications
+       FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id = p.client_id AND c.id = p.calendar_id
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY p.created_at, p.id LIMIT $${values.length}`,
+      values,
+    );
+    return page(result.rows as any[], filters.limit);
+  }
+
+  async listCalendars(clientId: string, limit: number, cursor?: { at: string; id: string } | null) {
+    const values: unknown[] = [clientId];
+    const cursorSql = cursor ? (values.push(cursor.at, cursor.id), `AND (created_at, id) > ($2, $3::uuid)`) : '';
+    values.push(limit + 1);
+    const result = await this.pool.query(`SELECT * FROM editorial.calendars WHERE client_id = $1 ${cursorSql} ORDER BY created_at, id LIMIT $${values.length}`, values);
+    return page(result.rows as any[], limit);
+  }
+
+  async createCalendar(input: any, actorId: string | null) {
+    const id = randomUUID();
+    const result = await this.pool.query(
+      `INSERT INTO editorial.calendars (id, client_id, title, start_date, end_date, status, summary, insights, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) RETURNING *`,
+      [id, input.clientId, input.title, input.startDate ?? null, input.endDate ?? null, input.status ?? 'draft', input.summary ?? null, json(input.insights), actorId],
+    );
+    await this.audit(input.clientId, 'calendar', id, 'calendar.created', actorId, input);
+    return result.rows[0];
+  }
+
+  async listPlanItems(filters: Filters) { return this.calendar(filters); }
+
+  async getPlanItem(id: string) {
+    const result = await this.pool.query('SELECT * FROM editorial.plan_items WHERE id = $1', [id]);
+    return result.rows[0] ?? null;
+  }
+
+  async createPlanItem(input: any, actorId: string | null) {
+    const id = randomUUID();
+    const result = await this.pool.query(
+      `INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,entities,cta,priority,planned_at,status,source_context,source_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16) RETURNING *`,
+      [id,input.clientId,input.calendarId,input.title,input.theme??null,input.rationale??null,input.format??null,input.keywordPrimary??null,json(input.keywords??[]),json(input.entities??[]),input.cta??null,input.priority??null,input.plannedAt??null,input.status??'proposed',json(input.sourceContext),input.sourceKey??null],
+    );
+    await this.audit(input.clientId, 'plan_item', id, 'plan_item.created', actorId, input);
+    return result.rows[0];
+  }
+
+  async patchPlanItem(id: string, input: any, actorId: string | null) {
+    return withEditorialTransaction(async (client) => {
+      const current = await client.query('SELECT * FROM editorial.plan_items WHERE id=$1 FOR UPDATE', [id]);
+      const row = current.rows[0] as any;
+      if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      if (row.version !== input.version) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada por otra ejecución');
+      if (input.status) assertPlanTransition(row.status, input.status);
+      const result = await client.query(
+        `UPDATE editorial.plan_items SET title=COALESCE($2,title), theme=COALESCE($3,theme), rationale=COALESCE($4,rationale), format=COALESCE($5,format),
+          keyword_primary=COALESCE($6,keyword_primary), keywords=COALESCE($7::jsonb,keywords), entities=COALESCE($8::jsonb,entities), cta=COALESCE($9,cta), priority=COALESCE($10,priority),
+          planned_at=CASE WHEN $11::boolean THEN $12::timestamptz ELSE planned_at END, status=COALESCE($13,status), version=version+1, updated_at=now() WHERE id=$1 RETURNING *`,
+        [id,input.title??null,input.theme??null,input.rationale??null,input.format??null,input.keywordPrimary??null,input.keywords===undefined?null:json(input.keywords),input.entities===undefined?null:json(input.entities),input.cta??null,input.priority??null,Object.hasOwn(input,'plannedAt'),input.plannedAt??null,input.status??null],
+      );
+      await this.auditWith(client,row.client_id,'plan_item',id,'plan_item.updated',actorId,input);
+      return result.rows[0];
+    }, this.pool);
+  }
+
+  async getContent(id: string) {
+    const [content, revisions] = await Promise.all([
+      this.pool.query('SELECT * FROM editorial.contents WHERE id=$1', [id]),
+      this.pool.query('SELECT * FROM editorial.content_revisions WHERE content_id=$1 ORDER BY revision_number DESC LIMIT 50', [id]),
+    ]);
+    return content.rows[0] ? { ...content.rows[0], revisions: revisions.rows } : null;
+  }
+
+  async patchContent(id: string, input: any, actorId: string | null) {
+    return withEditorialTransaction(async (client) => {
+      const locked = await client.query('SELECT * FROM editorial.contents WHERE id=$1 FOR UPDATE', [id]);
+      const row = locked.rows[0] as any;
+      if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Contenido no encontrado');
+      if (row.version !== input.version) throw new ContentApiError(409, 'STALE_VERSION', 'El contenido fue modificado por otra ejecución');
+      const nextStatus = input.status ?? (row.status === 'approved' ? 'review' : row.status);
+      assertContentTransition(row.status, nextStatus);
+      const revisionNumber = Number(row.current_revision) + 1;
+      const revisionId = randomUUID();
+      const snapshot = { title: input.title ?? row.title, bodyHtml: input.bodyHtml ?? row.body_html, bodyText: input.bodyText ?? row.body_text, excerpt: input.excerpt ?? row.excerpt, seo: input.seo ?? row.seo };
+      await client.query(
+        `INSERT INTO editorial.content_revisions (id,client_id,content_id,revision_number,content_snapshot,source_references,author_type,author_id)
+         VALUES ($1,$2,$3,$4,$5::jsonb,'[]'::jsonb,'user',$6)`, [revisionId,row.client_id,id,revisionNumber,json(snapshot),actorId],
+      );
+      const result = await client.query(
+        `UPDATE editorial.contents SET title=$2,body_html=$3,body_text=$4,excerpt=$5,seo=$6::jsonb,status=$7,current_revision=$8,
+         approved_revision_id=CASE WHEN $7='approved' THEN approved_revision_id ELSE NULL END,version=version+1,updated_at=now() WHERE id=$1 RETURNING *`,
+        [id,snapshot.title,snapshot.bodyHtml,snapshot.bodyText,snapshot.excerpt,json(snapshot.seo),nextStatus,revisionNumber],
+      );
+      await this.auditWith(client,row.client_id,'content',id,'content.revised',actorId,{ revisionId, revisionNumber });
+      return { ...result.rows[0], revisionId };
+    }, this.pool);
+  }
+
+  async approveContent(id: string, revisionId: string, expectedVersion: number, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      const locked = await client.query('SELECT * FROM editorial.contents WHERE id=$1 FOR UPDATE', [id]);
+      const row = locked.rows[0] as any;
+      if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Contenido no encontrado');
+      if (row.version !== expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'El contenido fue modificado antes de aprobarse');
+      const revision = await client.query('SELECT id, revision_number FROM editorial.content_revisions WHERE client_id=$1 AND content_id=$2 AND id=$3', [row.client_id,id,revisionId]);
+      if (!revision.rowCount) throw new ContentApiError(409, 'REVISION_MISMATCH', 'La revisión no pertenece al contenido');
+      assertContentTransition(row.status, 'approved');
+      const result = await client.query(`UPDATE editorial.contents SET status='approved',approved_revision_id=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *`, [id,revisionId]);
+      await this.auditWith(client,row.client_id,'content',id,'content.approved',actorId,{ revisionId });
+      return result.rows[0];
+    }, this.pool);
+  }
+
+  async listPublications(contentId: string, limit: number, cursor?: { at: string; id: string } | null) {
+    const values: unknown[] = [contentId];
+    const cursorSql = cursor ? (values.push(cursor.at,cursor.id),`AND (p.created_at,p.id)>($2,$3::uuid)`) : '';
+    values.push(limit+1);
+    const result = await this.pool.query(`SELECT p.*,a.provider,a.platform,a.label account_label FROM editorial.publications p JOIN editorial.publishing_accounts a ON a.client_id=p.client_id AND a.id=p.account_id WHERE p.content_id=$1 ${cursorSql} ORDER BY p.created_at,p.id LIMIT $${values.length}`,values);
+    return page(result.rows as any[],limit);
+  }
+
+  async createJob(input: any, actorId: string | null) {
+    const hash = requestHash({ kind: input.kind, targetId: input.targetId ?? null, expectedVersion: input.expectedVersion ?? null, payload: input.payload ?? {} });
+    return withEditorialTransaction(async (client) => {
+      const existing = await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
+      if (existing.rows[0]) {
+        if ((existing.rows[0] as any).request_hash !== hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otro payload');
+        return { job: existing.rows[0], replayed: true };
+      }
+      await this.validateJobTarget(client, input);
+      const id=randomUUID();
+      const result=await client.query(`INSERT INTO editorial.jobs (id,client_id,kind,target_id,idempotency_key,request_hash,payload) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,[id,input.clientId,input.kind,input.targetId??null,input.idempotencyKey,hash,json(redactSecrets(input.payload))]);
+      await this.auditWith(client,input.clientId,'job',id,'job.created',actorId,{kind:input.kind,targetId:input.targetId??null});
+      return { job: result.rows[0], replayed: false };
+    },this.pool);
+  }
+
+  private async validateJobTarget(client: PoolClient, input: any) {
+    if (input.kind === 'generate_content') {
+      if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', 'generate_content requiere targetId y expectedVersion');
+      const result = await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE', [input.clientId, input.targetId]);
+      const item = result.rows[0] as any;
+      if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      if (item.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada antes de solicitar la generación');
+      assertPlanTransition(item.status, 'generating');
+      await client.query(`UPDATE editorial.plan_items SET status='generating',version=version+1,updated_at=now() WHERE id=$1`, [input.targetId]);
+      return;
+    }
+    if (['publish', 'reschedule', 'cancel'].includes(input.kind)) {
+      if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', `${input.kind} requiere targetId y expectedVersion`);
+      const result = await client.query(
+        `SELECT p.*,c.status content_status,c.approved_revision_id FROM editorial.publications p
+         JOIN editorial.contents c ON c.client_id=p.client_id AND c.id=p.content_id
+         WHERE p.client_id=$1 AND p.id=$2 FOR UPDATE OF p`, [input.clientId,input.targetId],
+      );
+      const publication = result.rows[0] as any;
+      if (!publication) throw new ContentApiError(404,'NOT_FOUND','Publicación no encontrada');
+      if (publication.version !== input.expectedVersion) throw new ContentApiError(409,'STALE_VERSION','La publicación fue modificada antes de solicitar la operación');
+      if (input.kind === 'publish' && (publication.content_status !== 'approved' || !publication.approved_revision_id || publication.content_revision_id !== publication.approved_revision_id)) {
+        throw new ContentApiError(409,'REVISION_NOT_APPROVED','La publicación no referencia la revisión aprobada');
+      }
+      if (input.kind === 'publish' && publication.status === 'unknown') throw new ContentApiError(409,'RECONCILIATION_REQUIRED','La publicación debe reconciliarse antes de reenviarse');
+      const reservedStatus = input.kind === 'cancel' ? 'cancel_requested' : 'sending';
+      assertPublicationTransition(publication.status, reservedStatus);
+      await client.query('UPDATE editorial.publications SET status=$2,version=version+1,updated_at=now() WHERE id=$1',[input.targetId,reservedStatus]);
+    }
+  }
+
+  async getJob(id:string){ const result=await this.pool.query('SELECT * FROM editorial.jobs WHERE id=$1',[id]); return result.rows[0]??null; }
+
+  async claimJob(input:{kinds?:string[];clientId?:string;leaseSeconds:number;executionId:string},allowedClientIds:string[]){
+    return withEditorialTransaction(async(client)=>{
+      const values:unknown[]=[input.kinds?.length?input.kinds:null,allowedClientIds.includes('*')?null:allowedClientIds,input.clientId??null];
+      const selected=await client.query(`SELECT * FROM editorial.jobs WHERE ((status IN ('pending','failed') AND next_attempt_at<=now()) OR (status='running' AND locked_until<=now())) AND attempt_count < 8
+        AND ($1::text[] IS NULL OR kind=ANY($1)) AND ($2::text[] IS NULL OR client_id=ANY($2)) AND ($3::text IS NULL OR client_id=$3)
+        ORDER BY next_attempt_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,values);
+      if(!selected.rows[0]) return null;
+      const selectedJob=selected.rows[0] as any;
+      if(selectedJob.kind==='generate_content' && selectedJob.target_id){
+        const plan=await client.query('SELECT status FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[selectedJob.client_id,selectedJob.target_id]);
+        const currentStatus=(plan.rows[0] as any)?.status;
+        if(currentStatus && currentStatus!=='generating'){
+          assertPlanTransition(currentStatus,'generating');
+          await client.query(`UPDATE editorial.plan_items SET status='generating',version=version+1,updated_at=now() WHERE id=$1`,[selectedJob.target_id]);
+        }
+      }
+      if(['publish','reschedule','cancel'].includes(selectedJob.kind) && selectedJob.target_id){
+        const publication=await client.query('SELECT status FROM editorial.publications WHERE client_id=$1 AND id=$2 FOR UPDATE',[selectedJob.client_id,selectedJob.target_id]);
+        const currentStatus=(publication.rows[0] as any)?.status;
+        const reservedStatus=selectedJob.kind==='cancel'?'cancel_requested':'sending';
+        if(currentStatus && currentStatus!==reservedStatus){
+          assertPublicationTransition(currentStatus,reservedStatus);
+          await client.query('UPDATE editorial.publications SET status=$2,version=version+1,updated_at=now() WHERE id=$1',[selectedJob.target_id,reservedStatus]);
+        }
+      }
+      const leaseToken=randomUUID();
+      const result=await client.query(`UPDATE editorial.jobs SET status='running',attempt_count=attempt_count+1,lease_token=$2,locked_until=now()+make_interval(secs=>$3),execution_id=$4,updated_at=now() WHERE id=$1 RETURNING *`,[selectedJob.id,leaseToken,input.leaseSeconds,input.executionId]);
+      return {...result.rows[0],leaseToken};
+    },this.pool);
+  }
+
+  async heartbeatJob(id:string,leaseToken:string,seconds:number){
+    const result=await this.pool.query(`UPDATE editorial.jobs SET locked_until=now()+make_interval(secs=>$3),updated_at=now() WHERE id=$1 AND lease_token=$2::uuid AND status='running' AND locked_until>now() RETURNING *`,[id,leaseToken,seconds]);
+    if(!result.rows[0]) throw new ContentApiError(409,'LEASE_LOST','La reserva caducó o pertenece a otra ejecución');
+    return result.rows[0];
+  }
+
+  async finishJob(id:string,leaseToken:string,input:any,serviceId:string){
+    return withEditorialTransaction(async(client)=>{
+      const completionHash=requestHash(input);
+      const locked=await client.query('SELECT * FROM editorial.jobs WHERE id=$1 FOR UPDATE',[id]);
+      const job=locked.rows[0] as any;
+      if(!job) throw new ContentApiError(404,'NOT_FOUND','Trabajo no encontrado');
+      if(job.client_id!==input.clientId) throw new ContentApiError(403,'SERVICE_FORBIDDEN','El trabajo no pertenece al cliente autorizado');
+      if(job.status==='succeeded' || job.status==='failed' || job.status==='unknown') {
+        if(job.result_hash!==completionHash) throw new ContentApiError(409,'RESULT_CONFLICT','El trabajo ya terminó con un resultado diferente');
+        return {job,replayed:true};
+      }
+      if(job.status!=='running' || job.lease_token!==leaseToken || new Date(job.locked_until).getTime()<=Date.now()) throw new ContentApiError(409,'LEASE_LOST','La reserva caducó o pertenece a otra ejecución');
+      if(input.status==='succeeded' && job.kind==='generate_plan' && !Array.isArray(input.planItems)) throw new ContentApiError(400,'INVALID_RESULT','generate_plan requiere planItems');
+      if(input.status==='succeeded' && job.kind==='generate_content' && !input.content) throw new ContentApiError(400,'INVALID_RESULT','generate_content requiere content');
+      if(input.status==='succeeded' && ['publish','reschedule','cancel','reconcile'].includes(job.kind) && !input.publication) throw new ContentApiError(400,'INVALID_RESULT',`${job.kind} requiere publication`);
+      if(input.planItems) await this.applyPlanResult(client,job,input.planItems);
+      if(input.content) await this.applyContentResult(client,job,input.content,serviceId);
+      if(input.publication) await this.applyPublicationResult(client,job,input.publication);
+      const status=input.status==='succeeded'?'succeeded':input.status==='unknown'?'unknown':'failed';
+      if(status==='failed' && job.kind==='generate_content') {
+        const plan=await client.query('SELECT status FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+        if((plan.rows[0] as any)?.status==='generating') await client.query(`UPDATE editorial.plan_items SET status='generation_failed',version=version+1,updated_at=now() WHERE id=$1`,[job.target_id]);
+      }
+      if(!input.publication && ['publish','reschedule','cancel','reconcile'].includes(job.kind) && job.target_id) {
+        const fallbackStatus=status==='unknown'?'unknown':status==='failed'?'failed':null;
+        if(fallbackStatus) {
+          const current=await client.query('SELECT status FROM editorial.publications WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+          const publicationStatus=(current.rows[0] as any)?.status;
+          if(publicationStatus) {
+            assertPublicationTransition(publicationStatus,fallbackStatus);
+            await client.query('UPDATE editorial.publications SET status=$3,error_message=$4,last_synced_at=now(),version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2',[job.client_id,job.target_id,fallbackStatus,sanitizeError(input.error)]);
+          }
+        }
+      }
+      const safeResult=redactSecrets(input.result??{});
+      const safeError=sanitizeError(input.error);
+      const result=await client.query(`UPDATE editorial.jobs SET status=$2,result=$3::jsonb,result_hash=$4,last_error=$5,lease_token=NULL,locked_until=NULL,
+        next_attempt_at=CASE WHEN $2='failed' THEN now()+make_interval(secs=>LEAST(3600,(30*power(2,LEAST(attempt_count,7)))::int)) ELSE next_attempt_at END,
+        completed_at=CASE WHEN $2 IN ('succeeded','unknown') THEN now() ELSE NULL END,updated_at=now() WHERE id=$1 RETURNING *`,[id,status,json(safeResult),completionHash,safeError]);
+      await this.auditWith(client,job.client_id,'job',id,`job.${status}`,null,{serviceId,result:safeResult,error:safeError});
+      return {job:result.rows[0],replayed:false};
+    },this.pool);
+  }
+
+  private async applyPlanResult(client:PoolClient,job:any,items:any[]){
+    if(job.kind!=='generate_plan') throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de plan no corresponde al trabajo');
+    for(const item of items){
+      await client.query(`INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,entities,cta,priority,planned_at,status,source_context,source_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,'proposed',$14::jsonb,$15)
+       ON CONFLICT (client_id,calendar_id,source_key) DO UPDATE SET title=EXCLUDED.title,theme=EXCLUDED.theme,rationale=EXCLUDED.rationale,format=EXCLUDED.format,keyword_primary=EXCLUDED.keyword_primary,keywords=EXCLUDED.keywords,entities=EXCLUDED.entities,cta=EXCLUDED.cta,priority=EXCLUDED.priority,planned_at=EXCLUDED.planned_at,source_context=EXCLUDED.source_context,version=editorial.plan_items.version+1,updated_at=now()`,[item.id??randomUUID(),job.client_id,item.calendarId??job.target_id,item.title,item.theme??null,item.rationale??null,item.format??null,item.keywordPrimary??null,json(item.keywords??[]),json(item.entities??[]),item.cta??null,item.priority??null,item.plannedAt??null,json(item.sourceContext),item.sourceKey]);
+    }
+  }
+
+  private async applyContentResult(client:PoolClient,job:any,item:any,serviceId:string){
+    if(job.kind!=='generate_content') throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de contenido no corresponde al trabajo');
+    const plan=await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+    if(!plan.rows[0]) throw new ContentApiError(409,'TARGET_MISSING','La propuesta ya no existe');
+    const contentId=item.contentId??randomUUID();
+    const current=await client.query('SELECT * FROM editorial.contents WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,contentId]);
+    const revisionNumber=current.rows[0]?Number((current.rows[0] as any).current_revision)+1:1;
+    const revisionId=randomUUID();
+    const snapshot={title:item.title,bodyHtml:item.bodyHtml??null,bodyText:item.bodyText??null,excerpt:item.excerpt??null,seo:item.seo??{}};
+    if(current.rows[0]) await client.query(`UPDATE editorial.contents SET title=$3,body_html=$4,body_text=$5,excerpt=$6,seo=$7::jsonb,status='review',current_revision=$8,approved_revision_id=NULL,version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`,[job.client_id,contentId,item.title,item.bodyHtml??null,item.bodyText??null,item.excerpt??null,json(item.seo),revisionNumber]);
+    else await client.query(`INSERT INTO editorial.contents(id,client_id,plan_item_id,title,body_html,body_text,excerpt,seo,status,current_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'review',1)`,[contentId,job.client_id,job.target_id,item.title,item.bodyHtml??null,item.bodyText??null,item.excerpt??null,json(item.seo)]);
+    await client.query(`INSERT INTO editorial.content_revisions(id,client_id,content_id,revision_number,content_snapshot,prompt_version,source_references,author_type,author_id) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,'system',NULL)`,[revisionId,job.client_id,contentId,revisionNumber,json(snapshot),item.promptVersion??null,json(item.sourceReferences??[])]);
+    assertPlanTransition((plan.rows[0] as any).status,'review');
+    await client.query(`UPDATE editorial.plan_items SET status='review',version=version+1,updated_at=now() WHERE id=$1`,[job.target_id]);
+    await this.auditWith(client,job.client_id,'content',contentId,'content.generated',null,{serviceId,revisionId,revisionNumber});
+  }
+
+  private async applyPublicationResult(client:PoolClient,job:any,item:any){
+    if(!['publish','reschedule','cancel','reconcile'].includes(job.kind)) throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de publicación no corresponde al trabajo');
+    const current=await client.query('SELECT * FROM editorial.publications WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+    const row=current.rows[0] as any;
+    if(!row) throw new ContentApiError(409,'TARGET_MISSING','La publicación ya no existe');
+    assertPublicationTransition(row.status,item.status);
+    await client.query(`UPDATE editorial.publications SET status=$3,confirmed_scheduled_at=COALESCE($4,confirmed_scheduled_at),postiz_post_id=COALESCE($5,postiz_post_id),provider_post_id=COALESCE($6,provider_post_id),external_url=COALESCE($7,external_url),published_at=COALESCE($8,published_at),last_synced_at=now(),error_code=$9,error_message=$10,version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`,[job.client_id,job.target_id,item.status,item.confirmedScheduledAt??null,item.postizPostId??null,item.providerPostId??null,item.externalUrl??null,item.publishedAt??null,item.errorCode??null,item.errorMessage??null]);
+  }
+
+  async context(clientId:string){
+    const [settings,accounts,recent,plans]=await Promise.all([
+      this.pool.query(`SELECT client_id,timezone,language,editorial_config,workflow_bindings,enabled FROM editorial.client_settings WHERE client_id=$1`,[clientId]),
+      this.pool.query(`SELECT id,provider,instance_key,external_account_id,platform,label,timezone,active FROM editorial.publishing_accounts WHERE client_id=$1 AND active=TRUE`,[clientId]),
+      this.pool.query(`SELECT id,title,status,updated_at FROM editorial.contents WHERE client_id=$1 ORDER BY updated_at DESC LIMIT 100`,[clientId]),
+      this.pool.query(`SELECT id,title,status,planned_at FROM editorial.plan_items WHERE client_id=$1 ORDER BY planned_at DESC NULLS LAST LIMIT 200`,[clientId]),
+    ]);
+    return {settings:settings.rows[0]??null,accounts:accounts.rows,recentContents:recent.rows,planItems:plans.rows};
+  }
+
+  async recordEvent(input:any,serviceId:string){
+    return withEditorialTransaction(async(client)=>{
+      const id=randomUUID();
+      const inserted=await client.query(`INSERT INTO editorial.events(id,client_id,entity_type,entity_id,event_type,source_event_id,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT (client_id,entity_type,source_event_id) WHERE source_event_id IS NOT NULL DO NOTHING RETURNING *`,[id,input.clientId,input.entityType,input.entityId??null,input.eventType,input.sourceEventId??null,json(redactSecrets(input.payload)),input.occurredAt]);
+      if(!inserted.rows[0] && input.sourceEventId){ const existing=await client.query('SELECT * FROM editorial.events WHERE client_id=$1 AND entity_type=$2 AND source_event_id=$3',[input.clientId,input.entityType,input.sourceEventId]); return {event:existing.rows[0],replayed:true}; }
+      if(input.entityType==='publication' && input.entityId && input.publicationStatus){
+        const publication=await client.query('SELECT * FROM editorial.publications WHERE client_id=$1 AND id=$2 FOR UPDATE',[input.clientId,input.entityId]);
+        const row=publication.rows[0] as any;
+        if(row && row.status!=='published'){ assertPublicationTransition(row.status,input.publicationStatus); await client.query(`UPDATE editorial.publications SET status=$3,last_synced_at=now(),version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`,[input.clientId,input.entityId,input.publicationStatus]); }
+      }
+      return {event:inserted.rows[0],replayed:false};
+    },this.pool);
+  }
+
+  async saveResearch(input:any){ const id=randomUUID(); const result=await this.pool.query(`INSERT INTO editorial.research_snapshots(id,client_id,source,period_start,period_end,fetched_at,payload,status) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING *`,[id,input.clientId,input.source,input.periodStart??null,input.periodEnd??null,input.fetchedAt,json(redactSecrets(input.payload)),input.status??'complete']); return result.rows[0]; }
+
+  private audit(clientId:string,entityType:string,entityId:string,eventType:string,actorId:string|null,payload:unknown){ return this.pool.query(`INSERT INTO editorial.events(id,client_id,entity_type,entity_id,event_type,payload,actor_id,occurred_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,now())`,[randomUUID(),clientId,entityType,entityId,eventType,json(redactSecrets(payload)),actorId]); }
+  private auditWith(client:PoolClient,clientId:string,entityType:string,entityId:string,eventType:string,actorId:string|null,payload:unknown){ return client.query(`INSERT INTO editorial.events(id,client_id,entity_type,entity_id,event_type,payload,actor_id,occurred_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,now())`,[randomUUID(),clientId,entityType,entityId,eventType,json(redactSecrets(payload)),actorId]); }
+}
