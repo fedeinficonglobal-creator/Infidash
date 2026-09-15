@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Search, LayoutDashboard, ShoppingBag, BarChart3, SearchCode, Megaphone, Zap, FileText, ChevronRight, AlertCircle, Users, Hash } from 'lucide-react';
+import { Search, LayoutDashboard, ShoppingBag, BarChart3, SearchCode, Megaphone, Zap, FileText, ChevronRight, AlertCircle, Users, Hash, CalendarDays } from 'lucide-react';
 import { useClientStore } from '../store/useClientStore';
 import { cn } from '../lib/utils.js';
 import { buildClientSignals } from '../lib/clientSignals.js';
@@ -22,6 +22,7 @@ export function Sidebar() {
     { id: 'seo', label: 'SEO', icon: SearchCode },
     { id: 'leads', label: 'Leads', icon: Megaphone },
     { id: 'rrss', label: 'Redes Sociales', icon: Hash },
+    { id: 'content', label: 'Contenidos', icon: CalendarDays },
     { id: 'ai', label: 'Insights IA', icon: Zap },
     { id: 'reports', label: 'Reportes', icon: FileText },
     { id: 'integrations', label: 'Integraciones', icon: Users },
@@ -51,6 +52,19 @@ export function Sidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => { setActiveClient(null); setActiveTab('content'); }}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold rounded-lg transition-colors',
+              !activeClientId && activeTabId === 'content' ? 'bg-brand-primary/10 text-brand-primary' : 'text-slate-600 hover:bg-slate-50',
+            )}
+          >
+            <CalendarDays className="size-4" />
+            Contenidos globales
+          </button>
+        </div>
         {activeClientId && (
           <div className="mb-6">
             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Menú de cliente</h2>

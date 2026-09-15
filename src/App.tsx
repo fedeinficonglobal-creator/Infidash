@@ -14,6 +14,7 @@ import { UserProfile } from './components/UserProfile';
 import { AgencyDashboard } from './components/AgencyDashboard';
 import { LoginScreen } from './components/LoginScreen';
 import { UsersAdminTab } from './components/UsersAdminTab';
+import { ContentTab } from './components/content/ContentTab';
 import { useClientStore } from './store/useClientStore';
 import { Zap, Bell, ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
 
@@ -66,6 +67,10 @@ export default function App() {
 
     if (activeTabId === 'profile') {
       return <UserProfile />;
+    }
+
+    if (activeTabId === 'content') {
+      return <ContentTab clientId={activeClient?.id ?? null} />;
     }
 
     if (!activeClient) {
@@ -155,7 +160,7 @@ export default function App() {
         </header>
 
         {/* Dashboard Content */}
-        <div className="p-8 max-w-7xl mx-auto w-full">
+        <div className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto w-full">
            {renderTab()}
         </div>
       </main>

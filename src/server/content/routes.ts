@@ -85,7 +85,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   app.get('/api/content/calendar', route(async (request, reply) => {
     await requireHuman(request);
     const query = queryOf(request);
-    const result = await repository.calendar({ clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined, from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) });
+    const result = await repository.calendar({ clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined, from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, includeUndated: query.includeUndated === 'true', cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) });
     return reply.send(result);
   }));
 
@@ -106,7 +106,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   app.get('/api/content/plan-items', route(async (request, reply) => {
     await requireHuman(request);
     const query=queryOf(request);
-    return reply.send(await repository.listPlanItems({clientId:optionalString(query.clientId,'clientId',200)??undefined,from:asDate(query.from,'from'),to:asDate(query.to,'to'),status:optionalString(query.status,'status',50)??undefined,format:optionalString(query.format,'format',100)??undefined,cursor:decodeCursor(query.cursor),limit:parseLimit(query.limit)}));
+    return reply.send(await repository.listPlanItems({clientId:optionalString(query.clientId,'clientId',200)??undefined,from:asDate(query.from,'from'),to:asDate(query.to,'to'),status:optionalString(query.status,'status',50)??undefined,format:optionalString(query.format,'format',100)??undefined,includeUndated:query.includeUndated==='true',cursor:decodeCursor(query.cursor),limit:parseLimit(query.limit)}));
   }));
 
   app.get('/api/content/plan-items/:id', route(async (request, reply) => {

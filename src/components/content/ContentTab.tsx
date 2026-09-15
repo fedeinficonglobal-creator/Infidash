@@ -1,0 +1,149 @@
+import { useEffect, useMemo, useState } from 'react';
+import { addMonths, format, isToday, parseISO, subMonths } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Clock3, FilePlus2, LayoutList, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from 'lucide-react';
+import { useClientStore } from '../../store/useClientStore.js';
+import { useContentStore } from '../../store/useContentStore.js';
+import { filterItems, formatEditorialDate, isOutsideMonth, itemsOnDay, monthDays, monthLabel, plainTextPreview, statusLabel } from '../../lib/content.js';
+import type { PlanItem } from '../../services/contentApi.js';
+import { cn } from '../../lib/utils.js';
+import { ContentStatusBadge } from './ContentStatusBadge.js';
+
+const PLAN_STATUSES = ['proposed', 'approved', 'generating', 'review', 'ready', 'generation_failed', 'archived'];
+
+function Button({ children, className, ...props }: { children?: unknown; className?: string; [key: string]: unknown }) {
+  return <button {...props} className={cn('inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-primary/40', className)}>{children}</button>;
+}
+
+function SummaryCards() {
+  const summary = useContentStore((state) => state.summary);
+  const cards = [
+    ['Piezas propuestas', summary?.planItems.proposed ?? 0, 'text-slate-700'],
+    ['En revisión', (summary?.planItems.review ?? 0) + (summary?.contents.review ?? 0), 'text-amber-700'],
+    ['Programaciones', summary?.publications.scheduled ?? 0, 'text-indigo-700'],
+    ['Publicadas', summary?.publications.published ?? 0, 'text-emerald-700'],
+    ['Incidencias', summary?.incidents ?? 0, 'text-rose-700'],
+  ] as const;
+  return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, color]) => <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">{label}</p><p className={cn('mt-2 text-3xl font-bold', color)}>{value}</p><p className="mt-1 text-[11px] text-slate-400">{label === 'Programaciones' || label === 'Publicadas' ? 'publicaciones' : label === 'Incidencias' ? 'trabajos' : 'piezas'}</p></div>)}</div>;
+}
+
+function Filters() {
+  const clients = useClientStore((state) => state.clients);
+  const { filters, setFilters, items } = useContentStore();
+  const formats = [...new Set(items.map((item) => item.format).filter(Boolean))] as string[];
+  return <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-5">
+    <label className="text-xs font-bold text-slate-500">Cliente<select aria-label="Filtrar por cliente" value={filters.clientId} onChange={(event) => setFilters({ clientId: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800"><option value="">Todos los clientes</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+    <label className="text-xs font-bold text-slate-500">Estado<select aria-label="Filtrar por estado" value={filters.status} onChange={(event) => setFilters({ status: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Todos</option>{PLAN_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
+    <label className="text-xs font-bold text-slate-500">Formato<select aria-label="Filtrar por formato" value={filters.format} onChange={(event) => setFilters({ format: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Todos</option>{formats.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+    <label className="relative text-xs font-bold text-slate-500 xl:col-span-2">Buscar<Search className="absolute bottom-3 left-3 size-4 text-slate-400" aria-hidden="true" /><input aria-label="Buscar contenidos" value={filters.search} onChange={(event) => setFilters({ search: event.target.value })} placeholder="Título, tema o palabra clave" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm" /></label>
+  </div>;
+}
+
+function ItemButton({ item, compact = false }: { key?: string; item: PlanItem; compact?: boolean }) {
+  const token = useClientStore((state) => state.sessionToken)!;
+  const selectedId = useContentStore((state) => state.selectedId);
+  const select = useContentStore((state) => state.select);
+  return <button type="button" onClick={() => void select(token, item)} className={cn('w-full rounded-xl border p-3 text-left transition hover:border-brand-primary/40 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/30', selectedId === item.id ? 'border-brand-primary bg-sky-50/60' : 'border-slate-200 bg-white', compact && 'p-2')} aria-current={selectedId === item.id ? 'true' : undefined}>
+    <div className="flex items-start justify-between gap-2"><p className={cn('font-bold text-slate-800', compact ? 'line-clamp-2 text-xs' : 'text-sm')}>{item.title}</p><ContentStatusBadge status={item.status} /></div>
+    {!compact && <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500"><span>{item.format ?? 'Sin formato'}</span><span>•</span><span>{formatEditorialDate(item.plannedAt)}</span></div>}
+  </button>;
+}
+
+function EditorialCalendar({ items }: { items: PlanItem[] }) {
+  const { month, setMonth } = useContentStore();
+  const days = monthDays(month);
+  return <section aria-label={`Calendario de ${monthLabel(month)}`} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex items-center justify-between border-b border-slate-100 p-4"><Button onClick={() => setMonth(subMonths(month, 1))} className="bg-slate-100 px-3 text-slate-700" aria-label="Mes anterior"><ChevronLeft className="size-4" /></Button><h2 className="capitalize text-lg font-bold text-slate-900">{monthLabel(month)}</h2><Button onClick={() => setMonth(addMonths(month, 1))} className="bg-slate-100 px-3 text-slate-700" aria-label="Mes siguiente"><ChevronRight className="size-4" /></Button></div>
+    <div className="hidden grid-cols-7 border-b border-slate-100 md:grid">{['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day) => <div key={day} className="p-2 text-center text-[11px] font-bold uppercase text-slate-400">{day}</div>)}</div>
+    <div className="hidden grid-cols-7 md:grid">{days.map((day) => { const dayItems = itemsOnDay(items, day); return <div key={day.toISOString()} className={cn('min-h-32 border-b border-r border-slate-100 p-2', isOutsideMonth(day, month) && 'bg-slate-50/60 text-slate-300')}><span className={cn('inline-flex size-7 items-center justify-center rounded-full text-xs font-bold', isToday(day) && 'bg-brand-primary text-white')}>{format(day, 'd')}</span><div className="mt-1 space-y-1">{dayItems.slice(0, 3).map((item) => <ItemButton key={item.id} item={item} compact />)}{dayItems.length > 3 && <p className="px-1 text-[11px] font-bold text-slate-400">+{dayItems.length - 3} más</p>}</div></div>; })}</div>
+    <div className="divide-y divide-slate-100 md:hidden">{items.filter((item) => item.plannedAt).length ? items.filter((item) => item.plannedAt).sort((a, b) => a.plannedAt!.localeCompare(b.plannedAt!)).map((item) => <div key={item.id} className="p-3"><ItemButton item={item} /></div>) : <Empty label="No hay piezas con fecha este mes" />}</div>
+  </section>;
+}
+
+function ContentTable({ items }: { items: PlanItem[] }) {
+  const { nextCursor, loadMore, isLoadingMore } = useContentStore();
+  const token = useClientStore((state) => state.sessionToken)!;
+  return <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Contenido</th><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Formato</th><th className="px-4 py-3">Estado</th></tr></thead><tbody className="divide-y divide-slate-100">{items.map((item) => <tr key={item.id} className="hover:bg-slate-50"><td className="px-4 py-3"><ItemButton item={item} /></td><td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatEditorialDate(item.plannedAt)}</td><td className="px-4 py-3 text-slate-600">{item.format ?? '—'}</td><td className="px-4 py-3"><ContentStatusBadge status={item.status} /></td></tr>)}</tbody></table></div>{nextCursor && <div className="border-t border-slate-100 p-4 text-center"><Button onClick={() => void loadMore(token)} disabled={isLoadingMore} className="bg-slate-100 text-slate-700">{isLoadingMore && <LoaderCircle className="size-4 animate-spin" />}Cargar más</Button></div>}</div>;
+}
+
+function Empty({ label }: { label: string }) { return <div className="p-8 text-center"><FilePlus2 className="mx-auto size-8 text-slate-300" /><p className="mt-3 text-sm font-semibold text-slate-500">{label}</p></div>; }
+
+function UndatedTray({ items }: { items: PlanItem[] }) {
+  if (!items.length) return null;
+  return <details className="rounded-2xl border border-amber-200 bg-amber-50/50" open><summary className="cursor-pointer p-4 text-sm font-bold text-amber-900">Sin fecha · {items.length} piezas</summary><div className="grid gap-2 border-t border-amber-100 p-4 sm:grid-cols-2 xl:grid-cols-3">{items.map((item) => <ItemButton key={item.id} item={item} />)}</div></details>;
+}
+
+function DetailPanel() {
+  const token = useClientStore((state) => state.sessionToken)!;
+  const role = useClientStore((state) => state.currentUser?.role);
+  const { items, selectedId, content, publications, jobs, isLoadingDetail, isSaving, detailError, conflict, select, savePlanItem, saveContent, approveContent, createJob, refresh, clearConflict } = useContentStore();
+  const item = items.find((candidate) => candidate.id === selectedId) ?? null;
+  const [tab, setTab] = useState<'brief' | 'content' | 'publications' | 'history'>('brief');
+  const [draft, setDraft] = useState({ title: '', theme: '', rationale: '', format: '', keywordPrimary: '', cta: '', plannedAt: '' });
+  const [contentDraft, setContentDraft] = useState({ title: '', bodyHtml: '', bodyText: '', excerpt: '' });
+  useEffect(() => { if (item) setDraft({ title: item.title, theme: item.theme ?? '', rationale: item.rationale ?? '', format: item.format ?? '', keywordPrimary: item.keywordPrimary ?? '', cta: item.cta ?? '', plannedAt: item.plannedAt ? format(parseISO(item.plannedAt), "yyyy-MM-dd'T'HH:mm") : '' }); }, [item]);
+  useEffect(() => { if (content) setContentDraft({ title: content.title, bodyHtml: content.bodyHtml ?? '', bodyText: content.bodyText ?? '', excerpt: content.excerpt ?? '' }); }, [content]);
+  if (!item) return null;
+  const admin = role === 'admin';
+  const latestRevision = content?.revisions[0];
+  const tabs = [['brief', 'Brief'], ['content', 'Contenido'], ['publications', 'Publicaciones'], ['history', 'Historial']] as const;
+  return <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" role="dialog" aria-modal="true" aria-label={`Detalle de ${item.title}`} onMouseDown={(event) => { if (event.currentTarget === event.target) void select(token, null); }}><aside className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
+    <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur"><div className="flex items-start justify-between gap-4"><div><ContentStatusBadge status={item.status} /><h2 className="mt-2 text-xl font-bold text-slate-900">{item.title}</h2><p className="mt-1 text-xs text-slate-500">{formatEditorialDate(item.plannedAt)}</p></div><Button onClick={() => void select(token, null)} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar detalle"><X className="size-4" /></Button></div><div className="mt-4 flex gap-1 overflow-x-auto" role="tablist">{tabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={cn('rounded-lg px-3 py-2 text-xs font-bold', tab === id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100')}>{label}</button>)}</div></div>
+    <div className="space-y-5 p-5">{conflict && <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex gap-2"><AlertCircle className="size-5 shrink-0" /><div><p className="font-bold">Hay una versión más reciente</p><p className="mt-1">{conflict}</p><Button className="mt-3 bg-amber-900 text-white" onClick={() => { clearConflict(); void refresh(token); }}>Recargar datos</Button></div></div></div>}{detailError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{detailError}</p>}{isLoadingDetail && <div className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />Cargando detalle…</div>}
+      {tab === 'brief' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (!admin) return; void savePlanItem(token, item.id, { ...draft, plannedAt: draft.plannedAt ? new Date(draft.plannedAt).toISOString() : null, version: item.version }); }}><Field label="Título" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} disabled={!admin} /><Field label="Tema" value={draft.theme} onChange={(theme) => setDraft({ ...draft, theme })} disabled={!admin} /><Field label="Justificación" value={draft.rationale} onChange={(rationale) => setDraft({ ...draft, rationale })} disabled={!admin} multiline /><div className="grid gap-3 sm:grid-cols-2"><Field label="Formato" value={draft.format} onChange={(formatValue) => setDraft({ ...draft, format: formatValue })} disabled={!admin} /><Field label="Palabra clave" value={draft.keywordPrimary} onChange={(keywordPrimary) => setDraft({ ...draft, keywordPrimary })} disabled={!admin} /><Field label="Fecha editorial" type="datetime-local" value={draft.plannedAt} onChange={(plannedAt) => setDraft({ ...draft, plannedAt })} disabled={!admin} /><Field label="CTA" value={draft.cta} onChange={(cta) => setDraft({ ...draft, cta })} disabled={!admin} /></div>{admin && <div className="flex flex-wrap gap-2"><Button type="submit" disabled={isSaving} className="bg-brand-primary text-white">Guardar cambios</Button><Button type="button" disabled={isSaving || item.status === 'generating'} onClick={() => void createJob(token, { clientId: item.clientId, kind: 'generate_content', targetId: item.id, expectedVersion: item.version })} className="bg-slate-900 text-white"><Sparkles className="size-4" />Generar contenido</Button></div>}</form>}
+      {tab === 'content' && (!content && !isLoadingDetail ? <Empty label="Esta propuesta todavía no tiene contenido generado" /> : content && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (!admin) return; void saveContent(token, content.id, { ...contentDraft, version: content.version }); }}><Field label="Título" value={contentDraft.title} onChange={(title) => setContentDraft({ ...contentDraft, title })} disabled={!admin} /><Field label="Extracto" value={contentDraft.excerpt} onChange={(excerpt) => setContentDraft({ ...contentDraft, excerpt })} disabled={!admin} multiline /><Field label="Contenido en texto" value={contentDraft.bodyText} onChange={(bodyText) => setContentDraft({ ...contentDraft, bodyText })} disabled={!admin} multiline rows={10} /><Field label="HTML de origen" value={contentDraft.bodyHtml} onChange={(bodyHtml) => setContentDraft({ ...contentDraft, bodyHtml })} disabled={!admin} multiline rows={8} /><div><p className="mb-2 text-xs font-bold uppercase text-slate-400">Vista previa segura</p><div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">{plainTextPreview(contentDraft.bodyHtml, contentDraft.bodyText) || 'Sin texto para mostrar'}</div></div>{admin && <div className="flex flex-wrap gap-2"><Button type="submit" disabled={isSaving} className="bg-brand-primary text-white">Guardar revisión</Button><Button type="button" disabled={isSaving || !latestRevision || content.status === 'approved'} onClick={() => latestRevision && void approveContent(token, content.id, latestRevision.id, content.version)} className="bg-emerald-600 text-white">Aprobar revisión</Button></div>}</form>)}
+      {tab === 'publications' && (publications.length ? <div className="space-y-3">{publications.map((publication) => <article key={publication.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-slate-800">{publication.accountLabel}</h3><p className="text-xs text-slate-500">{publication.provider}{publication.platform ? ` · ${publication.platform}` : ''}</p></div><ContentStatusBadge status={publication.status} /></div><dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2"><div><dt className="font-bold text-slate-400">Fecha deseada</dt><dd className="mt-1 text-slate-700">{formatEditorialDate(publication.desiredScheduledAt)}</dd></div><div><dt className="font-bold text-slate-400">Fecha confirmada</dt><dd className="mt-1 text-slate-700">{formatEditorialDate(publication.confirmedScheduledAt)}</dd></div></dl>{publication.errorMessage && <p className="mt-3 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{publication.errorMessage}</p>}{publication.externalUrl && <a className="mt-3 inline-block text-xs font-bold text-brand-primary hover:underline" href={publication.externalUrl} target="_blank" rel="noreferrer">Abrir publicación</a>}{admin && ['failed', 'unknown'].includes(publication.status) && <Button onClick={() => void createJob(token, { clientId: publication.clientId, kind: publication.status === 'unknown' ? 'reconcile' : 'publish', targetId: publication.id, expectedVersion: publication.version })} className="mt-3 bg-slate-900 text-white">{publication.status === 'unknown' ? 'Comprobar estado' : 'Reintentar'}</Button>}</article>)}</div> : <Empty label="Todavía no hay salidas de publicación" />)}
+      {tab === 'history' && <Timeline content={content} jobs={jobs} item={item} />}
+    </div></aside></div>;
+}
+
+function Timeline({ content, jobs, item }: { content: ReturnType<typeof useContentStore.getState>['content']; jobs: ReturnType<typeof useContentStore.getState>['jobs']; item: PlanItem }) {
+  const events = [...(content?.revisions ?? []).map((revision) => ({ id: revision.id, at: revision.createdAt, title: `Revisión ${revision.revisionNumber}`, detail: revision.authorType === 'user' ? 'Edición manual' : 'Generada por automatización' })), ...jobs.filter((job) => job.targetId === item.id || job.targetId === content?.id).map((job) => ({ id: job.id, at: job.updatedAt, title: statusLabel(job.status), detail: `Trabajo ${job.kind}` }))].sort((a, b) => b.at.localeCompare(a.at));
+  if (!events.length) return <Empty label="Sin actividad registrada" />;
+  return <div className="space-y-0">{events.map((event) => <div key={event.id} className="relative border-l-2 border-slate-200 pb-5 pl-5"><span className="absolute -left-2 top-0 size-3.5 rounded-full border-2 border-white bg-brand-primary" /><p className="text-sm font-bold text-slate-800">{event.title}</p><p className="text-xs text-slate-500">{event.detail} · {formatEditorialDate(event.at)}</p></div>)}</div>;
+}
+
+function Field({ label, value, onChange, disabled, multiline, rows = 4, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; multiline?: boolean; rows?: number; type?: string }) {
+  const className = 'mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 disabled:bg-slate-100 disabled:text-slate-500';
+  return <label className="block text-xs font-bold text-slate-500">{label}{multiline ? <textarea rows={rows} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={className} /> : <input type={type} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={className} />}</label>;
+}
+
+function CreatePanel({ onClose }: { onClose: () => void }) {
+  const token = useClientStore((state) => state.sessionToken)!;
+  const clients = useClientStore((state) => state.clients);
+  const { filters, calendars, loadCalendars, createPlanItem, isSaving, select } = useContentStore();
+  const [clientId, setClientId] = useState(filters.clientId);
+  const [calendarId, setCalendarId] = useState('');
+  const [title, setTitle] = useState('');
+  const [formatValue, setFormat] = useState('blog');
+  useEffect(() => { if (clientId) { setCalendarId(''); void loadCalendars(token, clientId); } }, [clientId, loadCalendars, token]);
+  return <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" role="dialog" aria-modal="true" aria-label="Nuevo contenido"><form className="h-full w-full max-w-md space-y-4 overflow-y-auto bg-white p-6 shadow-2xl" onSubmit={(event) => { event.preventDefault(); void createPlanItem(token, { clientId, calendarId, title, format: formatValue, status: 'proposed' }).then((item) => { onClose(); void select(token, item); }); }}><div className="flex items-center justify-between"><h2 className="text-xl font-bold">Nueva propuesta</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700"><X className="size-4" /></Button></div><label className="block text-xs font-bold text-slate-500">Cliente<select required value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label><label className="block text-xs font-bold text-slate-500">Calendario<select required value={calendarId} onChange={(event) => setCalendarId(event.target.value)} disabled={!clientId} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Selecciona un calendario</option>{calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.title}</option>)}</select></label><Field label="Título" value={title} onChange={setTitle} /><Field label="Formato" value={formatValue} onChange={setFormat} /><Button type="submit" disabled={isSaving || !calendarId || !title.trim()} className="w-full bg-brand-primary text-white">Crear propuesta</Button></form></div>;
+}
+
+export function ContentTab({ clientId }: { clientId?: string | null }) {
+  const token = useClientStore((state) => state.sessionToken)!;
+  const role = useClientStore((state) => state.currentUser?.role);
+  const { month, view, filters, items, isLoading, isRefreshing, error, lastUpdatedAt, setView, reset, setFilters, load, refresh, pollJobs, createJob } = useContentStore();
+  const [creating, setCreating] = useState(false);
+  useEffect(() => { reset(clientId ?? ''); }, [clientId, reset]);
+  useEffect(() => { void load(token); }, [token, month, filters.clientId, load]);
+  useEffect(() => {
+    let busy = false;
+    const tick = async () => { if (busy || document.visibilityState !== 'visible') return; busy = true; try { await pollJobs(token); await refresh(token); } finally { busy = false; } };
+    const timer = window.setInterval(() => void tick(), 30_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [pollJobs, refresh, token]);
+  const filtered = useMemo(() => filterItems(items, filters), [items, filters]);
+  const dated = filtered.filter((item) => item.plannedAt);
+  const undated = filtered.filter((item) => !item.plannedAt);
+  const admin = role === 'admin';
+  return <div className="space-y-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-brand-primary">Planificación editorial</p><h1 className="mt-1 text-3xl font-bold text-slate-900">Contenidos</h1><p className="mt-2 text-sm text-slate-500">{clientId ? 'Calendario, revisiones y publicaciones del cliente.' : 'Vista global de todos los clientes.'}</p></div>{admin && <div className="flex flex-wrap gap-2"><Button onClick={() => setCreating(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><Plus className="size-4" />Nuevo contenido</Button><Button disabled={!filters.clientId || isRefreshing} onClick={() => filters.clientId && void createJob(token, { clientId: filters.clientId, kind: 'generate_plan' })} className="bg-slate-900 text-white"><Sparkles className="size-4" />Generar plan</Button></div>}</div>
+    <Filters /><SummaryCards />
+    <div className="flex flex-wrap items-center justify-between gap-3"><div className="inline-flex rounded-xl border border-slate-200 bg-white p-1"><button onClick={() => setView('calendar')} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold', view === 'calendar' ? 'bg-slate-900 text-white' : 'text-slate-500')}><CalendarDays className="size-4" />Calendario</button><button onClick={() => setView('list')} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold', view === 'list' ? 'bg-slate-900 text-white' : 'text-slate-500')}><LayoutList className="size-4" />Lista</button></div><div className="flex items-center gap-2 text-xs text-slate-400"><Clock3 className="size-3.5" />{lastUpdatedAt ? `Actualizado ${format(parseISO(lastUpdatedAt), 'HH:mm:ss', { locale: es })}` : 'Pendiente de actualizar'}<button onClick={() => void refresh(token)} disabled={isRefreshing} aria-label="Actualizar contenidos" className="rounded-lg p-2 hover:bg-white"><RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} /></button></div></div>
+    {error && <div role="alert" className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{error}</span><Button onClick={() => void load(token)} className="bg-white px-3 text-rose-700">Reintentar</Button></div>}
+    {isLoading ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-28 animate-pulse rounded-2xl bg-slate-200" />)}</div> : filtered.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white"><Empty label={items.length ? 'Ningún contenido coincide con los filtros' : `No hay contenidos en ${monthLabel(month)}`} /></div> : <>{view === 'calendar' ? <EditorialCalendar items={dated} /> : <ContentTable items={filtered} />}<UndatedTray items={undated} /></>}
+    <DetailPanel />{creating && <CreatePanel onClose={() => setCreating(false)} />}
+  </div>;
+}

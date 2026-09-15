@@ -5,7 +5,7 @@ import { ContentApiError, encodeCursor, redactSecrets, requestHash, sanitizeErro
 import { assertContentTransition, assertPlanTransition, assertPublicationTransition } from './transitions.js';
 import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
 
-type Filters = { clientId?: string; from?: string; to?: string; status?: string; format?: string; cursor?: { at: string; id: string } | null; limit: number };
+type Filters = { clientId?: string; from?: string; to?: string; status?: string; format?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
 
 function page<T extends Record<string, any>>(rows: T[], limit: number, atField = 'created_at') {
   const hasMore = rows.length > limit;
@@ -40,18 +40,20 @@ export class EditorialApiRepository {
     const values: unknown[] = [];
     const where: string[] = [];
     if (filters.clientId) { values.push(filters.clientId); where.push(`p.client_id = $${values.length}`); }
-    if (filters.from) { values.push(filters.from); where.push(`p.planned_at >= $${values.length}`); }
-    if (filters.to) { values.push(filters.to); where.push(`p.planned_at < $${values.length}`); }
+    if (filters.from) { values.push(filters.from); where.push(`${filters.includeUndated ? '(p.planned_at IS NULL OR ' : ''}p.planned_at >= $${values.length}${filters.includeUndated ? ')' : ''}`); }
+    if (filters.to) { values.push(filters.to); where.push(`${filters.includeUndated ? '(p.planned_at IS NULL OR ' : ''}p.planned_at < $${values.length}${filters.includeUndated ? ')' : ''}`); }
     if (filters.status) { values.push(filters.status); where.push(`p.status = $${values.length}`); }
     if (filters.format) { values.push(filters.format); where.push(`p.format = $${values.length}`); }
     if (filters.cursor) { values.push(filters.cursor.at, filters.cursor.id); where.push(`(p.created_at, p.id) > ($${values.length - 1}, $${values.length}::uuid)`); }
     values.push(filters.limit + 1);
     const result = await this.pool.query(
       `SELECT p.*, c.title calendar_title,
+        ci.id content_id, ci.status content_status, ci.title content_title, ci.version content_version,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', pub.id, 'status', pub.status, 'desiredScheduledAt', pub.desired_scheduled_at, 'confirmedScheduledAt', pub.confirmed_scheduled_at))
-          FROM editorial.contents ci JOIN editorial.publications pub ON pub.client_id = ci.client_id AND pub.content_id = ci.id
-          WHERE ci.client_id = p.client_id AND ci.plan_item_id = p.id), '[]'::jsonb) publications
+          FROM editorial.contents content_for_publication JOIN editorial.publications pub ON pub.client_id = content_for_publication.client_id AND pub.content_id = content_for_publication.id
+          WHERE content_for_publication.client_id = p.client_id AND content_for_publication.plan_item_id = p.id), '[]'::jsonb) publications
        FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id = p.client_id AND c.id = p.calendar_id
+       LEFT JOIN LATERAL (SELECT id, status, title, version FROM editorial.contents WHERE client_id = p.client_id AND plan_item_id = p.id ORDER BY updated_at DESC LIMIT 1) ci ON true
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY p.created_at, p.id LIMIT $${values.length}`,
       values,
