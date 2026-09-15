@@ -11,6 +11,8 @@
   "include": [
     "server.ts",
     "vite.config.ts",
-    "src/lib/**/*.ts"
+    "src/lib/**/*.ts",
+    "src/server/**/*.ts",
+    "scripts/**/*.ts"
   ]
 }
