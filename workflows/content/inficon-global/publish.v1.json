@@ -1,0 +1,91 @@
+{
+  "name": "Content v1 - Inficon Global - Publish with Postiz",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-publish-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-760, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst job = input.job ?? input;\nif (job.kind !== 'publish' || !job.id || !job.client_id || !job.target_id || !job.leaseToken) throw new Error('Contrato publish v1 invalido');\nconst requested = job.payload?.publication;\nif (!requested?.desiredScheduledAt || Number.isNaN(Date.parse(requested.desiredScheduledAt))) throw new Error('desiredScheduledAt ISO-8601 es obligatorio; no se usa now + 5 minutos');\nreturn [{ json: { schemaVersion: 1, job } }];"
+      },
+      "id": "validate-publish-v1",
+      "name": "Validar trabajo y fecha",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-520, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo y fecha').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "options": {}
+      },
+      "id": "context-publish-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Validar trabajo y fecha').first().json.job;\nconst context = $input.first().json;\nconst requested = job.payload.publication;\nconst provider = job.payload?.providerResult;\nif (!provider?.postId) throw new Error('Inserta el nodo Postiz del workflow original y entrega payload.providerResult.postId');\nconst account = (context.accounts ?? []).find((item) => item.id === requested.accountId && item.provider === 'postiz');\nif (!account) throw new Error('La cuenta Postiz no pertenece al contexto del cliente');\nconst publication = { status: 'scheduled', confirmedScheduledAt: requested.desiredScheduledAt, postizPostId: String(provider.postId), providerPostId: provider.providerPostId ? String(provider.providerPostId) : null, externalUrl: provider.externalUrl ?? null, publishedAt: null, errorCode: null, errorMessage: null };\nconst event = { schemaVersion: 1, clientId: job.client_id, entityType: 'publication', entityId: job.target_id, eventType: 'postiz.scheduled', sourceEventId: `postiz:${account.id}:${provider.postId}:scheduled`, occurredAt: provider.occurredAt ?? new Date().toISOString(), publicationStatus: 'scheduled', payload: { accountId: account.id, desiredScheduledAt: requested.desiredScheduledAt, confirmedScheduledAt: requested.desiredScheduledAt, postizPostId: String(provider.postId), workflowVersion: 1 } };\nreturn [{ json: { schemaVersion: 1, clientId: job.client_id, status: 'succeeded', publication, event, result: { workflowVersion: 1, state: 'scheduled' }, leaseToken: job.leaseToken, jobId: job.id } }];"
+      },
+      "id": "normalize-publish-v1",
+      "name": "Normalizar respuesta Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-publish-v1",
+      "name": "Registrar evento programado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Normalizar respuesta Postiz').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion: $('Normalizar respuesta Postiz').first().json.schemaVersion, clientId: $('Normalizar respuesta Postiz').first().json.clientId, status: 'succeeded', publication: $('Normalizar respuesta Postiz').first().json.publication, result: $('Normalizar respuesta Postiz').first().json.result, leaseToken: $('Normalizar respuesta Postiz').first().json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-publish-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo y fecha", "type": "main", "index": 0 }]] },
+    "Validar trabajo y fecha": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
+    "Cargar contexto Infidash": { "main": [[{ "node": "Normalizar respuesta Postiz", "type": "main", "index": 0 }]] },
+    "Normalizar respuesta Postiz": { "main": [[{ "node": "Registrar evento programado", "type": "main", "index": 0 }]] },
+    "Registrar evento programado": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "active": false
+}

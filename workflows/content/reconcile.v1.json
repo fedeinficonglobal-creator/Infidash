@@ -1,0 +1,91 @@
+{
+  "name": "Content v1 - Reconcile Postiz",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-reconcile-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-760, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst job = input.job ?? input;\nif (job.kind !== 'reconcile' || !job.id || !job.client_id || !job.target_id || !job.leaseToken) throw new Error('Contrato reconcile v1 invalido');\nreturn [{ json: { schemaVersion: 1, job } }];"
+      },
+      "id": "validate-reconcile-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-520, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "options": {}
+      },
+      "id": "context-reconcile-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Validar trabajo').first().json.job;\nconst context = $input.first().json;\nconst provider = job.payload?.providerState;\nif (!provider) throw new Error('Conecta la consulta de Postiz y entrega payload.providerState');\nconst allowed = new Set(['scheduled', 'published', 'failed', 'cancelled', 'unknown']);\nif (!allowed.has(provider.status)) throw new Error('Estado Postiz no reconocido');\nif (provider.status === 'published' && (!provider.publishedAt || Number.isNaN(Date.parse(provider.publishedAt)))) throw new Error('published requiere publishedAt verificable');\nif (provider.status === 'scheduled' && (!provider.confirmedScheduledAt || Number.isNaN(Date.parse(provider.confirmedScheduledAt)))) throw new Error('scheduled requiere confirmedScheduledAt');\nconst publication = { status: provider.status, confirmedScheduledAt: provider.confirmedScheduledAt ?? null, postizPostId: provider.postizPostId ? String(provider.postizPostId) : null, providerPostId: provider.providerPostId ? String(provider.providerPostId) : null, externalUrl: provider.externalUrl ?? null, publishedAt: provider.publishedAt ?? null, errorCode: provider.errorCode ?? null, errorMessage: provider.errorMessage ?? null };\nconst event = { schemaVersion: 1, clientId: job.client_id, entityType: 'publication', entityId: job.target_id, eventType: `postiz.${provider.status}`, sourceEventId: provider.eventId ?? `reconcile:${job.id}:${provider.status}`, occurredAt: provider.occurredAt ?? new Date().toISOString(), publicationStatus: provider.status, payload: { ...publication, workflowVersion: 1, accountCount: (context.accounts ?? []).length } };\nreturn [{ json: { schemaVersion: 1, clientId: job.client_id, status: provider.status === 'unknown' ? 'unknown' : 'succeeded', publication, event, result: { workflowVersion: 1, reconciled: true }, leaseToken: job.leaseToken, jobId: job.id } }];"
+      },
+      "id": "normalize-reconcile-v1",
+      "name": "Normalizar estado externo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-reconcile-v1",
+      "name": "Registrar evento reconciliado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Normalizar estado externo').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion: $('Normalizar estado externo').first().json.schemaVersion, clientId: $('Normalizar estado externo').first().json.clientId, status: $('Normalizar estado externo').first().json.status, publication: $('Normalizar estado externo').first().json.publication, result: $('Normalizar estado externo').first().json.result, leaseToken: $('Normalizar estado externo').first().json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-reconcile-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo", "type": "main", "index": 0 }]] },
+    "Validar trabajo": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
+    "Cargar contexto Infidash": { "main": [[{ "node": "Normalizar estado externo", "type": "main", "index": 0 }]] },
+    "Normalizar estado externo": { "main": [[{ "node": "Registrar evento reconciliado", "type": "main", "index": 0 }]] },
+    "Registrar evento reconciliado": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "active": false
+}

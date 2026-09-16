@@ -1,0 +1,91 @@
+{
+  "name": "Content v1 - Inficon Global - Generate content",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-generate-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-760, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst job = input.job ?? input;\nif (job.kind !== 'generate_content' || !job.id || !job.client_id || !job.target_id || !job.leaseToken) throw new Error('Contrato generate_content v1 invalido');\nreturn [{ json: { schemaVersion: 1, job } }];"
+      },
+      "id": "validate-generate-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-520, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "options": {}
+      },
+      "id": "context-generate-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Validar trabajo').first().json.job;\nconst context = $input.first().json;\nconst raw = job.payload?.generatedContent ?? job.payload?.aiOutput;\nif (!raw || typeof raw.title !== 'string' || (!raw.bodyHtml && !raw.bodyText)) throw new Error('Inserta los nodos IA del workflow original y entrega payload.generatedContent');\nconst content = { contentId: raw.contentId ?? job.id, title: raw.title.trim(), bodyHtml: raw.bodyHtml ?? null, bodyText: raw.bodyText ?? null, excerpt: raw.excerpt ?? null, seo: raw.seo ?? {}, promptVersion: raw.promptVersion ?? 'inficon-generate-v1', sourceReferences: Array.isArray(raw.sourceReferences) ? raw.sourceReferences : [] };\nconst draft = job.payload?.wordpressDraft;\nconst event = draft ? { schemaVersion: 1, clientId: job.client_id, entityType: 'content', entityId: content.contentId, eventType: 'wordpress.draft_created', sourceEventId: draft.eventId ?? null, occurredAt: draft.occurredAt ?? new Date().toISOString(), payload: { siteKey: draft.siteKey ?? null, postId: draft.postId ?? null, editUrl: draft.editUrl ?? null, status: 'draft' } } : { schemaVersion: 1, clientId: job.client_id, entityType: 'content', entityId: content.contentId, eventType: 'content.generated', sourceEventId: `generate:${job.id}`, occurredAt: new Date().toISOString(), payload: { workflowVersion: 1, timezone: context.settings?.timezone ?? 'Europe/Madrid' } };\nreturn [{ json: { schemaVersion: 1, clientId: job.client_id, status: 'succeeded', content, result: { workflowVersion: 1, wordpressStatus: draft ? 'draft' : null }, event, leaseToken: job.leaseToken, jobId: job.id } }];"
+      },
+      "id": "normalize-generate-v1",
+      "name": "Validar contenido y borrador",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-generate-v1",
+      "name": "Registrar evento de contenido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar contenido y borrador').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion: $('Validar contenido y borrador').first().json.schemaVersion, clientId: $('Validar contenido y borrador').first().json.clientId, status: 'succeeded', content: $('Validar contenido y borrador').first().json.content, result: $('Validar contenido y borrador').first().json.result, leaseToken: $('Validar contenido y borrador').first().json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-generate-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo", "type": "main", "index": 0 }]] },
+    "Validar trabajo": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
+    "Cargar contexto Infidash": { "main": [[{ "node": "Validar contenido y borrador", "type": "main", "index": 0 }]] },
+    "Validar contenido y borrador": { "main": [[{ "node": "Registrar evento de contenido", "type": "main", "index": 0 }]] },
+    "Registrar evento de contenido": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "active": false
+}

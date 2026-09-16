@@ -1,0 +1,72 @@
+{
+  "name": "Content v1 - Inficon Global - Generate plan",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-plan-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-640, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst job = input.job ?? input;\nif (job.kind !== 'generate_plan' || !job.id || !job.client_id || !job.leaseToken) throw new Error('Contrato generate_plan v1 invalido');\nreturn [{ json: { schemaVersion: 1, job } }];"
+      },
+      "id": "validate-plan-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-400, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "options": {}
+      },
+      "id": "context-plan-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Validar trabajo').first().json.job;\nconst context = $input.first().json;\nconst raw = job.payload?.planItems ?? job.payload?.aiOutput;\nif (!Array.isArray(raw) || raw.length === 0) throw new Error('Inserta los nodos de fuentes/IA y entrega payload.planItems');\nconst planItems = raw.map((item, index) => {\n  if (!item || typeof item.title !== 'string' || !item.title.trim()) throw new Error(`planItems[${index}].title es obligatorio`);\n  if (item.plannedAt != null && Number.isNaN(Date.parse(item.plannedAt))) throw new Error(`planItems[${index}].plannedAt no es ISO-8601`);\n  const calendarId = item.calendarId ?? job.target_id;\n  if (!calendarId) throw new Error(`planItems[${index}].calendarId es obligatorio`);\n  return { ...item, calendarId, title: item.title.trim(), keywords: Array.isArray(item.keywords) ? item.keywords : [], entities: Array.isArray(item.entities) ? item.entities : [], sourceContext: { ...(item.sourceContext ?? {}), workflowVersion: 1, timezone: context.settings?.timezone ?? 'Europe/Madrid' }, sourceKey: item.sourceKey ?? `inficon-plan:${job.id}:${index}` };\n});\nreturn [{ json: { schemaVersion: 1, clientId: job.client_id, status: 'succeeded', planItems, result: { count: planItems.length, workflowVersion: 1 }, leaseToken: job.leaseToken, jobId: job.id } }];"
+      },
+      "id": "normalize-plan-v1",
+      "name": "Validar plan IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [80, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion: $json.schemaVersion, clientId: $json.clientId, status: $json.status, planItems: $json.planItems, result: $json.result, leaseToken: $json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-plan-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 0]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo", "type": "main", "index": 0 }]] },
+    "Validar trabajo": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
+    "Cargar contexto Infidash": { "main": [[{ "node": "Validar plan IA", "type": "main", "index": 0 }]] },
+    "Validar plan IA": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "active": false
+}

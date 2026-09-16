@@ -1,0 +1,88 @@
+{
+  "name": "Content v1 - Dispatcher",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
+      "id": "schedule-dispatcher-v1",
+      "name": "Cada minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [-720, 0]
+    },
+    {
+      "parameters": { "jsCode": "return [{ json: { executionId: String($execution.id), leaseSeconds: 600 } }];" },
+      "id": "execution-dispatcher-v1",
+      "name": "Preparar reserva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/claim' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ executionId: $json.executionId, leaseSeconds: $json.leaseSeconds }) }}",
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "id": "claim-dispatcher-v1",
+      "name": "Reservar siguiente trabajo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 0]
+    },
+    {
+      "parameters": { "conditions": { "options": { "version": 2 }, "conditions": [{ "leftValue": "={{ !!$json.job }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }], "combinator": "and" }, "options": {} },
+      "id": "if-dispatcher-v1",
+      "name": "Hay trabajo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }] },
+        "options": {}
+      },
+      "id": "context-dispatcher-v1",
+      "name": "Cargar binding del cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Reservar siguiente trabajo').first().json.job;\nconst context = $input.first().json;\nconst workflowId = context.settings?.workflow_bindings?.[job.kind];\nif (!workflowId || typeof workflowId !== 'string') throw new Error(`No hay workflow binding para ${job.kind} y ${job.client_id}`);\nreturn [{ json: { job, workflowId } }];"
+      },
+      "id": "binding-dispatcher-v1",
+      "name": "Resolver workflow autorizado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, -80]
+    },
+    {
+      "parameters": { "source": "database", "workflowId": { "__rl": true, "value": "={{ $json.workflowId }}", "mode": "id" }, "mode": "each", "options": { "waitForSubWorkflow": false } },
+      "id": "execute-dispatcher-v1",
+      "name": "Ejecutar workflow del cliente",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [720, -80]
+    }
+  ],
+  "connections": {
+    "Cada minuto": { "main": [[{ "node": "Preparar reserva", "type": "main", "index": 0 }]] },
+    "Preparar reserva": { "main": [[{ "node": "Reservar siguiente trabajo", "type": "main", "index": 0 }]] },
+    "Reservar siguiente trabajo": { "main": [[{ "node": "Hay trabajo", "type": "main", "index": 0 }]] },
+    "Hay trabajo": { "main": [[{ "node": "Cargar binding del cliente", "type": "main", "index": 0 }], []] },
+    "Cargar binding del cliente": { "main": [[{ "node": "Resolver workflow autorizado", "type": "main", "index": 0 }]] },
+    "Resolver workflow autorizado": { "main": [[{ "node": "Ejecutar workflow del cliente", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "active": false
+}
