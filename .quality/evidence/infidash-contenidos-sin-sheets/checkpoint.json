@@ -1,6 +1,6 @@
 {
-  "phase": 5,
-  "phase_name": "Workflows piloto y plantillas multi-cliente",
+  "phase": 6,
+  "phase_name": "QA y documentación",
   "branch": "feature/contenidos-sin-sheets",
   "timestamp": "2026-09-15T00:00:00Z",
   "status": "complete"

@@ -1,6 +1,6 @@
 # Persistencia editorial
 
-La primera fase añade el esquema PostgreSQL `editorial` sin modificar las tablas existentes de Infidash ni registrar rutas HTTP.
+El módulo añade el esquema PostgreSQL `editorial` sin modificar las tablas operativas existentes de Infidash. La API Fastify de contenidos usa un pool asíncrono separado sobre la misma `DATABASE_URL`.
 
 ## Migraciones
 
@@ -10,7 +10,7 @@ Configura `DATABASE_URL` y ejecuta:
 npm run db:migrate:editorial
 ```
 
-El runner toma un advisory lock de PostgreSQL, registra cada archivo y su checksum en `public.schema_migrations`, y aplica cada migración en una transacción. Debe ejecutarse una vez durante el despliegue, antes de arrancar workers o habilitar la futura API de contenidos.
+El runner toma un advisory lock de PostgreSQL, registra cada archivo y su checksum en `public.schema_migrations`, y aplica cada migración en una transacción. Debe ejecutarse durante el despliegue, antes de arrancar workers o habilitar la API de contenidos. Consulta [la guía de despliegue y rollback](content-deployment.md) antes del corte.
 
 ## Importación de Content Hub
 

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import type { Pool, QueryResult, QueryResultRow } from 'pg';
+import { EditorialApiRepository } from '../src/server/content/apiRepository.js';
 import { buildContentHubImportPlan, importContentHub, parseContentHubExport, sourceHash, stableImportUuid } from '../src/server/content/importContentHub.js';
 import { checksumMigration, discoverMigrations } from '../src/server/content/migrations.js';
 import { buildPostgresPoolConfig } from '../src/server/content/postgres.js';
@@ -109,6 +110,24 @@ test('repository sends user values separately from parameterized SQL', async () 
   assert.match(calls[0].sql, /VALUES \(\$1, \$2, \$3/);
   assert.equal(calls[0].values[2], title);
   assert.equal(calls[0].sql.includes(title), false);
+});
+
+test('job heartbeat is bound to the authorized client as well as the lease', async () => {
+  const calls: Array<{ sql: string; values: unknown[] }> = [];
+  const fake: Queryable = {
+    async query<T extends QueryResultRow>(sql: string, values: unknown[] = []) {
+      calls.push({ sql, values });
+      return {
+        command: 'UPDATE', rowCount: 1, oid: 0, fields: [],
+        rows: [{ id: values[0], client_id: values[1], status: 'running' }] as T[],
+      } satisfies QueryResult<T>;
+    },
+  };
+  const repository = new EditorialApiRepository(fake as unknown as Pool);
+  await repository.heartbeatJob('40789475-9d0d-47ae-b8f4-44b6761a12fd', 'client-a', '43daf834-6356-4642-9478-b43988c72878', 120);
+  assert.match(calls[0].sql, /client_id=\$2/);
+  assert.match(calls[0].sql, /lease_token=\$3::uuid/);
+  assert.deepEqual(calls[0].values, ['40789475-9d0d-47ae-b8f4-44b6761a12fd', 'client-a', '43daf834-6356-4642-9478-b43988c72878', 120]);
 });
 
 test('pool configuration is explicit and bounded', () => {

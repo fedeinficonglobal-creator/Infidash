@@ -173,7 +173,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   app.post('/api/internal/content/jobs/:id/heartbeat', route(async (request, reply) => {
     const body=requireObject(request.body); const clientId=requireString(body.clientId,'clientId',200); await requireService(request,'jobs:heartbeat',clientId);
     const leaseSeconds=Math.min(Math.max(Number(body.leaseSeconds??300),30),1800);
-    const job=await repository.heartbeatJob(requireString(paramsOf(request).id,'id',100),requireString(body.leaseToken,'leaseToken',100),leaseSeconds); return reply.send({job});
+    const job=await repository.heartbeatJob(requireString(paramsOf(request).id,'id',100),clientId,requireString(body.leaseToken,'leaseToken',100),leaseSeconds); return reply.send({job});
   }));
 
   app.post('/api/internal/content/jobs/:id/result', route(async (request, reply) => {

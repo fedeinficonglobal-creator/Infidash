@@ -252,8 +252,8 @@ export class EditorialApiRepository {
     },this.pool);
   }
 
-  async heartbeatJob(id:string,leaseToken:string,seconds:number){
-    const result=await this.pool.query(`UPDATE editorial.jobs SET locked_until=now()+make_interval(secs=>$3),updated_at=now() WHERE id=$1 AND lease_token=$2::uuid AND status='running' AND locked_until>now() RETURNING *`,[id,leaseToken,seconds]);
+  async heartbeatJob(id:string,clientId:string,leaseToken:string,seconds:number){
+    const result=await this.pool.query(`UPDATE editorial.jobs SET locked_until=now()+make_interval(secs=>$4),updated_at=now() WHERE id=$1 AND client_id=$2 AND lease_token=$3::uuid AND status='running' AND locked_until>now() RETURNING *`,[id,clientId,leaseToken,seconds]);
     if(!result.rows[0]) throw new ContentApiError(409,'LEASE_LOST','La reserva caducó o pertenece a otra ejecución');
     return result.rows[0];
   }
