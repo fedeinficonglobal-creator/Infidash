@@ -26,11 +26,15 @@ test('exports n8n v1 are sanitized and all connection references resolve', () =>
     assert.equal('pinData' in workflow, false, `${label} contains execution pinData`);
     assert.equal('credentials' in workflow, false, `${label} contains top-level credentials`);
     assert.doesNotMatch(source, /n8n-nodes-base\.googleSheets/i, `${label} still uses Google Sheets`);
+    assert.doesNotMatch(source, /65115a8785e4|jina_9bca|44e8ba9ce0|343634437|cmtk8o3zb|7aSyEMAM/i, `${label} contains a known source secret or installation id`);
     assert.doesNotMatch(source, /AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{16,}|Bearer\s+(?!['" +]*\$env)[A-Za-z0-9._-]{16,}/, `${label} appears to contain a secret`);
 
     const names = new Set<string>(workflow.nodes.map((node: any) => node.name));
     assert.equal(names.size, workflow.nodes.length, `${label} has duplicate node names`);
     for (const node of workflow.nodes) assert.equal('credentials' in node, false, `${label}/${node.name} contains credential ids`);
+    for (const reference of source.matchAll(/\$\('([^']+)'\)/g)) {
+      assert.ok(names.has(reference[1]), `${label} expression references missing node ${reference[1]}`);
+    }
     for (const [sourceName, outputs] of Object.entries<any>(workflow.connections ?? {})) {
       assert.ok(names.has(sourceName), `${label} connection source ${sourceName} is missing`);
       for (const channel of Object.values<any>(outputs)) {
@@ -57,12 +61,27 @@ test('Inficon workflows implement the versioned internal API contract', () => {
   }
   assert.match(plan, /generate_plan/);
   assert.match(plan, /planItems/);
+  assert.match(plan, /n8n-nodes-base\.googleAnalytics/);
+  assert.match(plan, /n8n-nodes-google-search-console\.googleSearchConsole/);
+  assert.match(plan, /@apify\/n8n-nodes-apify\.apify/);
+  assert.match(plan, /@n8n\/n8n-nodes-langchain/);
   assert.match(generate, /generate_content/);
   assert.match(generate, /wordpress\.draft_created/);
-  assert.match(generate, /status: 'draft'/);
-  assert.match(publish, /kind !== 'publish'/);
-  assert.match(publish, /status: 'scheduled'/);
-  assert.doesNotMatch(publish, /status: 'published'/);
+  assert.match(generate, /status\s*:\s*['"]draft/);
+  assert.match(generate, /n8n-nodes-base\.wordpress/);
+  assert.match(generate, /AI company researcher2/);
+  assert.match(generate, /SEO Content Writer2/);
+  assert.match(generate, /Humanizer IA2/);
+  assert.match(publish, /kind\s*!==\s*['"]publish/);
+  assert.match(publish, /status\s*:\s*['"]scheduled/);
+  assert.match(publish, /n8n-nodes-postiz\.postiz/);
+  assert.match(publish, /postiz\.ambiguous/);
+  assert.match(publish, /reconcileRequired/);
+  assert.doesNotMatch(publish, /status\s*:\s*['"]published/);
+  for (const source of [plan, generate, publish]) {
+    assert.match(source, /\/heartbeat/);
+    assert.doesNotMatch(source, /payload\.(?:planItems|generatedContent|providerResult)/);
+  }
 });
 
 test('dispatcher and reconciliation use claims, bindings, events and result callbacks', () => {
@@ -71,10 +90,15 @@ test('dispatcher and reconciliation use claims, bindings, events and result call
   assert.match(dispatcher, /\/api\/internal\/content\/jobs\/claim/);
   assert.match(dispatcher, /workflow_bindings/);
   assert.match(dispatcher, /n8n-nodes-base\.executeWorkflow/);
-  assert.match(reconcile, /kind !== 'reconcile'/);
+  assert.match(dispatcher, /waitForSubWorkflow[^\n]*true/);
+  assert.match(dispatcher, /\/heartbeat/);
+  assert.match(reconcile, /kind\s*!==\s*['"]reconcile/);
+  assert.match(reconcile, /POSTIZ_INTERNAL_API_URL/);
+  assert.match(reconcile, /\/public\/v1\/posts/);
   assert.match(reconcile, /\/api\/internal\/content\/events/);
   assert.match(reconcile, /publicationStatus/);
-  assert.match(reconcile, /publishedAt verificable/);
+  assert.match(reconcile, /publishedAt/);
+  assert.match(reconcile, /POSTIZ_RECONCILE_UNAVAILABLE/);
 });
 
 test('client manifest documents only the available pilot and uses environment references', () => {
