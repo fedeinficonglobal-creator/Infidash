@@ -91,6 +91,18 @@ export interface Publication {
   updatedAt: string;
 }
 
+export interface PublishingAccount {
+  id: string;
+  clientId: string;
+  provider: 'wordpress' | 'postiz';
+  instanceKey: string;
+  externalAccountId: string | null;
+  platform: string;
+  label: string;
+  timezone: string;
+  active: boolean;
+}
+
 export interface EditorialCalendar { id: string; clientId: string; title: string; status: string; startDate: string | null; endDate: string | null; }
 export interface ContentJob { id: string; clientId: string; kind: JobKind; status: string; targetId: string | null; lastError: string | null; createdAt: string; updatedAt: string; }
 export interface Page<T> { items: T[]; nextCursor: string | null; }
@@ -130,7 +142,7 @@ export function getContentSummary(token: string, filters: { clientId?: string; f
   return request<{ summary: ContentSummary }>(`/api/content/summary${queryString(filters)}`, token, { signal });
 }
 
-export function getPlanItems(token: string, filters: { clientId?: string; from?: string; to?: string; status?: string; format?: string; includeUndated?: boolean; cursor?: string; limit?: number }, signal?: AbortSignal) {
+export function getPlanItems(token: string, filters: { clientId?: string; from?: string; to?: string; status?: string; format?: string; search?: string; includeUndated?: boolean; cursor?: string; limit?: number }, signal?: AbortSignal) {
   return request<Page<PlanItem>>(`/api/content/plan-items${queryString(filters)}`, token, { signal });
 }
 
@@ -144,6 +156,14 @@ export function getContentItem(token: string, id: string, signal?: AbortSignal) 
 
 export function getPublications(token: string, id: string, signal?: AbortSignal) {
   return request<Page<Publication>>(`/api/content/items/${encodeURIComponent(id)}/publications?limit=100`, token, { signal });
+}
+
+export function getPublishingAccounts(token: string, clientId: string, signal?: AbortSignal) {
+  return request<{ accounts: PublishingAccount[] }>(`/api/clients/${encodeURIComponent(clientId)}/publishing-accounts`, token, { signal });
+}
+
+export function schedulePublication(token: string, contentId: string, input: { clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; occurrenceKey?: string; copy?: string; idempotencyKey: string }) {
+  return request<{ publication: Publication; job: ContentJob; replayed: boolean }>(`/api/content/items/${encodeURIComponent(contentId)}/publications`, token, { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function createPlanItem(token: string, input: Record<string, unknown>) {

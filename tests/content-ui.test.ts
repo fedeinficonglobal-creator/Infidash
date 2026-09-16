@@ -63,3 +63,31 @@ test('content store loads summary and rows and prevents overlapping refreshes', 
   await useContentStore.getState().refresh('token');
   assert.equal(calls, 2);
 });
+
+test('content store sends status, format and search before server pagination', async () => {
+  const urls:string[]=[];
+  globalThis.fetch=async(input)=>{
+    const url=String(input); urls.push(url);
+    return new Response(JSON.stringify(url.includes('/summary')?{summary:{plan_items:{},contents:{},publications:{},incidents:0}}:{items:[],next_cursor:null}),{status:200,headers:{'content-type':'application/json'}});
+  };
+  useContentStore.setState({filters:{clientId:'client-a',status:'review',format:'blog',search:'bombas'}});
+  await useContentStore.getState().load('token');
+  const listUrl=urls.find((url)=>url.includes('/plan-items'))!;
+  assert.match(listUrl,/status=review/);
+  assert.match(listUrl,/format=blog/);
+  assert.match(listUrl,/search=bombas/);
+  assert.match(listUrl,/limit=100/);
+});
+
+test('scheduling uses a stable idempotency key and stores publication plus job', async () => {
+  let requestBody:any=null;
+  globalThis.fetch=async(_input,init)=>{
+    requestBody=JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({publication:{id:'publication-1',client_id:'client-a',content_id:'content-1',account_id:'account-1',account_label:'Postiz',provider:'postiz',platform:'gmb',copy:null,status:'pending',desired_scheduled_at:'2026-10-01T09:00:00.000Z',confirmed_scheduled_at:null,external_url:null,published_at:null,last_synced_at:null,error_message:null,version:1,created_at:'2026-09-16T10:00:00.000Z',updated_at:'2026-09-16T10:00:00.000Z'},job:{id:'job-1',client_id:'client-a',kind:'publish',status:'pending',target_id:'publication-1',last_error:null,created_at:'2026-09-16T10:00:00.000Z',updated_at:'2026-09-16T10:00:00.000Z'},replayed:false}),{status:202,headers:{'content-type':'application/json'}});
+  };
+  const input={contentId:'content-1',clientId:'client-a',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z'};
+  await useContentStore.getState().schedulePublication('token',input);
+  assert.equal(requestBody.idempotencyKey,'schedule:content-1:3:account-1:2026-10-01T09:00:00.000Z');
+  assert.equal(useContentStore.getState().publications[0].id,'publication-1');
+  assert.equal(useContentStore.getState().jobs[0].id,'job-1');
+});

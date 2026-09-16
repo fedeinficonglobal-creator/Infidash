@@ -5,7 +5,7 @@ import { ContentApiError, encodeCursor, redactSecrets, requestHash, sanitizeErro
 import { assertContentTransition, assertPlanTransition, assertPublicationTransition } from './transitions.js';
 import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
 
-type Filters = { clientId?: string; from?: string; to?: string; status?: string; format?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
+type Filters = { clientId?: string; from?: string; to?: string; status?: string; format?: string; search?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
 
 function page<T extends Record<string, any>>(rows: T[], limit: number, atField = 'created_at') {
   const hasMore = rows.length > limit;
@@ -20,17 +20,23 @@ export class EditorialApiRepository {
   constructor(private readonly pool: Pool = getEditorialPool()) {}
 
   async summary(filters: { clientId?: string; from?: string; to?: string }) {
-    const values: unknown[] = [];
-    const where: string[] = [];
-    if (filters.clientId) { values.push(filters.clientId); where.push(`client_id = $${values.length}`); }
-    if (filters.from) { values.push(filters.from); where.push(`created_at >= $${values.length}`); }
-    if (filters.to) { values.push(filters.to); where.push(`created_at < $${values.length}`); }
-    const suffix = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    const scoped = (clientColumn: string, dateColumn: string) => {
+      const values: unknown[] = [];
+      const where: string[] = [];
+      if (filters.clientId) { values.push(filters.clientId); where.push(`${clientColumn} = $${values.length}`); }
+      if (filters.from) { values.push(filters.from); where.push(`${dateColumn} >= $${values.length}`); }
+      if (filters.to) { values.push(filters.to); where.push(`${dateColumn} < $${values.length}`); }
+      return { values, sql: where.length ? ` WHERE ${where.join(' AND ')}` : '' };
+    };
+    const plansFilter = scoped('p.client_id', 'p.planned_at');
+    const contentsFilter = scoped('ci.client_id', 'p.planned_at');
+    const publicationsFilter = scoped('pub.client_id', 'pub.desired_scheduled_at');
+    const incidentsFilter = scoped('j.client_id', 'j.created_at');
     const [plans, contents, publications, incidents] = await Promise.all([
-      this.pool.query(`SELECT status, count(*)::int count FROM editorial.plan_items${suffix} GROUP BY status`, values),
-      this.pool.query(`SELECT status, count(*)::int count FROM editorial.contents${suffix} GROUP BY status`, values),
-      this.pool.query(`SELECT status, count(*)::int count FROM editorial.publications${suffix} GROUP BY status`, values),
-      this.pool.query(`SELECT count(*)::int count FROM editorial.jobs${suffix}${where.length ? ' AND' : ' WHERE'} status IN ('failed','unknown')`, values),
+      this.pool.query(`SELECT p.status, count(*)::int count FROM editorial.plan_items p${plansFilter.sql} GROUP BY p.status`, plansFilter.values),
+      this.pool.query(`SELECT ci.status, count(*)::int count FROM editorial.contents ci LEFT JOIN editorial.plan_items p ON p.client_id=ci.client_id AND p.id=ci.plan_item_id${contentsFilter.sql} GROUP BY ci.status`, contentsFilter.values),
+      this.pool.query(`SELECT pub.status, count(*)::int count FROM editorial.publications pub${publicationsFilter.sql} GROUP BY pub.status`, publicationsFilter.values),
+      this.pool.query(`SELECT count(*)::int count FROM editorial.jobs j${incidentsFilter.sql}${incidentsFilter.sql ? ' AND' : ' WHERE'} j.status IN ('failed','unknown')`, incidentsFilter.values),
     ]);
     const counts = (rows: any[]) => Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
     return { planItems: counts(plans.rows), contents: counts(contents.rows), publications: counts(publications.rows), incidents: Number(incidents.rows[0]?.count ?? 0) };
@@ -44,6 +50,7 @@ export class EditorialApiRepository {
     if (filters.to) { values.push(filters.to); where.push(`${filters.includeUndated ? '(p.planned_at IS NULL OR ' : ''}p.planned_at < $${values.length}${filters.includeUndated ? ')' : ''}`); }
     if (filters.status) { values.push(filters.status); where.push(`p.status = $${values.length}`); }
     if (filters.format) { values.push(filters.format); where.push(`p.format = $${values.length}`); }
+    if (filters.search) { values.push(`%${filters.search.replace(/[\\%_]/g, '\\$&')}%`); where.push(`(p.title ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.theme,'') ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.keyword_primary,'') ILIKE $${values.length} ESCAPE '\\')`); }
     if (filters.cursor) { values.push(filters.cursor.at, filters.cursor.id); where.push(`(p.created_at, p.id) > ($${values.length - 1}, $${values.length}::uuid)`); }
     values.push(filters.limit + 1);
     const result = await this.pool.query(
@@ -172,9 +179,60 @@ export class EditorialApiRepository {
     return page(result.rows as any[],limit);
   }
 
+  async listPublishingAccounts(clientId: string) {
+    const result = await this.pool.query(
+      `SELECT id,client_id,provider,instance_key,external_account_id,platform,label,timezone,active
+       FROM editorial.publishing_accounts WHERE client_id=$1 AND active=TRUE ORDER BY label,id`, [clientId],
+    );
+    return result.rows;
+  }
+
+  async schedulePublication(input: any, actorId: string) {
+    const occurrenceKey=input.occurrenceKey??'primary';
+    const hash=requestHash({kind:'publish',contentId:input.contentId,accountId:input.accountId,desiredScheduledAt:input.desiredScheduledAt,occurrenceKey,copy:input.copy??null,media:input.media??[],expectedVersion:input.expectedVersion});
+    return withEditorialTransaction(async(client)=>{
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`job:${input.clientId}:${input.idempotencyKey}`]);
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`publication:${input.contentId}:${input.accountId}:${occurrenceKey}`]);
+      await this.requireEnabledClient(client,input.clientId);
+      const contentResult=await client.query('SELECT * FROM editorial.contents WHERE client_id=$1 AND id=$2 FOR UPDATE',[input.clientId,input.contentId]);
+      const content=contentResult.rows[0] as any;
+      if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
+      if(content.version!==input.expectedVersion) throw new ContentApiError(409,'STALE_VERSION','El contenido fue modificado antes de programarse');
+      if(content.status!=='approved' || !content.approved_revision_id) throw new ContentApiError(409,'REVISION_NOT_APPROVED','El contenido debe tener una revisión aprobada');
+      const accountResult=await client.query('SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE FOR SHARE',[input.clientId,input.accountId]);
+      if(!accountResult.rows[0]) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','La cuenta no pertenece al cliente o está desactivada');
+      const existingJob=await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
+      if(existingJob.rows[0]){
+        const job=existingJob.rows[0] as any;
+        if(job.request_hash!==hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otra programación');
+        const publication=await client.query(`SELECT p.*,a.provider,a.platform,a.label account_label FROM editorial.publications p JOIN editorial.publishing_accounts a ON a.client_id=p.client_id AND a.id=p.account_id WHERE p.client_id=$1 AND p.id=$2`,[input.clientId,job.target_id]);
+        return {publication:publication.rows[0],job,replayed:true};
+      }
+      const duplicate=await client.query('SELECT id FROM editorial.publications WHERE content_id=$1 AND account_id=$2 AND occurrence_key=$3 FOR UPDATE',[input.contentId,input.accountId,occurrenceKey]);
+      if(duplicate.rows[0]) throw new ContentApiError(409,'PUBLICATION_EXISTS','Ya existe una publicación para esa cuenta y ocurrencia');
+      const publicationId=randomUUID();
+      const publicationResult=await client.query(
+        `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9) RETURNING *`,
+        [publicationId,input.clientId,input.contentId,input.accountId,occurrenceKey,content.approved_revision_id,input.copy??null,json(input.media??[]),input.desiredScheduledAt],
+      );
+      const jobId=randomUUID();
+      const jobResult=await client.query(
+        `INSERT INTO editorial.jobs(id,client_id,kind,target_id,idempotency_key,request_hash,payload)
+         VALUES($1,$2,'publish',$3,$4,$5,$6::jsonb) RETURNING *`,
+        [jobId,input.clientId,publicationId,input.idempotencyKey,hash,json({schemaVersion:1,publicationId,desiredScheduledAt:input.desiredScheduledAt})],
+      );
+      await this.auditWith(client,input.clientId,'publication',publicationId,'publication.queued',actorId,{accountId:input.accountId,desiredScheduledAt:input.desiredScheduledAt,jobId});
+      const account=accountResult.rows[0] as any;
+      return {publication:{...publicationResult.rows[0],provider:account.provider,platform:account.platform,account_label:account.label},job:jobResult.rows[0],replayed:false};
+    },this.pool);
+  }
+
   async createJob(input: any, actorId: string | null) {
     const hash = requestHash({ kind: input.kind, targetId: input.targetId ?? null, expectedVersion: input.expectedVersion ?? null, payload: input.payload ?? {} });
     return withEditorialTransaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`job:${input.clientId}:${input.idempotencyKey}`]);
+      await this.requireEnabledClient(client,input.clientId);
       const existing = await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
       if (existing.rows[0]) {
         if ((existing.rows[0] as any).request_hash !== hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otro payload');
@@ -186,6 +244,11 @@ export class EditorialApiRepository {
       await this.auditWith(client,input.clientId,'job',id,'job.created',actorId,{kind:input.kind,targetId:input.targetId??null});
       return { job: result.rows[0], replayed: false };
     },this.pool);
+  }
+
+  private async requireEnabledClient(client: PoolClient, clientId: string) {
+    const result=await client.query('SELECT enabled FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
+    if(!result.rows[0] || !(result.rows[0] as any).enabled) throw new ContentApiError(409,'EDITORIAL_DISABLED','La automatización editorial del cliente está desactivada');
   }
 
   private async validateJobTarget(client: PoolClient, input: any) {
@@ -224,9 +287,9 @@ export class EditorialApiRepository {
   async claimJob(input:{kinds?:string[];clientId?:string;leaseSeconds:number;executionId:string},allowedClientIds:string[]){
     return withEditorialTransaction(async(client)=>{
       const values:unknown[]=[input.kinds?.length?input.kinds:null,allowedClientIds.includes('*')?null:allowedClientIds,input.clientId??null];
-      const selected=await client.query(`SELECT * FROM editorial.jobs WHERE ((status IN ('pending','failed') AND next_attempt_at<=now()) OR (status='running' AND locked_until<=now())) AND attempt_count < 8
-        AND ($1::text[] IS NULL OR kind=ANY($1)) AND ($2::text[] IS NULL OR client_id=ANY($2)) AND ($3::text IS NULL OR client_id=$3)
-        ORDER BY next_attempt_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,values);
+      const selected=await client.query(`SELECT j.* FROM editorial.jobs j JOIN editorial.client_settings settings ON settings.client_id=j.client_id AND settings.enabled=TRUE WHERE ((j.status IN ('pending','failed') AND j.next_attempt_at<=now()) OR (j.status='running' AND j.locked_until<=now())) AND j.attempt_count < 8
+        AND ($1::text[] IS NULL OR j.kind=ANY($1)) AND ($2::text[] IS NULL OR j.client_id=ANY($2)) AND ($3::text IS NULL OR j.client_id=$3)
+        ORDER BY j.next_attempt_at,j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,values);
       if(!selected.rows[0]) return null;
       const selectedJob=selected.rows[0] as any;
       if(selectedJob.kind==='generate_content' && selectedJob.target_id){

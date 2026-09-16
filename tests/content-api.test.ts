@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
-import type { QueryResult, QueryResultRow } from 'pg';
+import type { Pool, QueryResult, QueryResultRow } from 'pg';
+import { EditorialApiRepository } from '../src/server/content/apiRepository.js';
 import { ContentApiError, decodeCursor, encodeCursor, redactSecrets, requestHash } from '../src/server/content/contracts.js';
 import { contentRoutes } from '../src/server/content/routes.js';
 import { authenticateServiceToken, hashServiceToken, serviceCan } from '../src/server/content/serviceAuth.js';
@@ -54,6 +55,8 @@ function fakeRepository() {
     async createJob(input: any) { return { job: { id: 'job-1', ...input }, replayed: false }; },
     async getJob() { return null; },
     async listPublications() { return { items: [], nextCursor: null }; },
+    async listPublishingAccounts() { return [{ id: 'account-1', client_id: 'client-a', label: 'Postiz', provider: 'postiz', active: true }]; },
+    async schedulePublication(input: any) { return { publication: { id: 'publication-1', content_id: input.contentId, account_id: input.accountId, status: 'pending' }, job: { id: 'job-publish', status: 'pending' }, replayed: false }; },
     async claimJob(input: any) { return { id: 'job-1', client_id: input.clientId, leaseToken: 'lease-1' }; },
     async heartbeatJob() { return {}; },
     async finishJob() { return { job: { status: 'succeeded' }, replayed: false }; },
@@ -103,4 +106,76 @@ test('internal routes enforce service scopes, client allowlists and schema versi
   assert.equal(invalidResult.statusCode, 400);
   assert.equal(invalidResult.json().code, 'UNSUPPORTED_SCHEMA_VERSION');
   await app.close();
+});
+
+test('admin can list accounts and atomically request a publication while viewer cannot', async () => {
+  const app=await buildApp();
+  const accounts=await app.inject({method:'GET',url:'/api/clients/client-a/publishing-accounts',headers:{authorization:'Bearer viewer'}});
+  assert.equal(accounts.statusCode,200);
+  assert.equal(accounts.json().accounts[0].id,'account-1');
+  const payload={clientId:'client-a',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',idempotencyKey:'schedule:content-1:3:account-1:2026-10-01'};
+  const forbidden=await app.inject({method:'POST',url:'/api/content/items/content-1/publications',headers:{authorization:'Bearer viewer'},payload});
+  assert.equal(forbidden.statusCode,403);
+  const scheduled=await app.inject({method:'POST',url:'/api/content/items/content-1/publications',headers:{authorization:'Bearer admin'},payload});
+  assert.equal(scheduled.statusCode,202);
+  assert.equal(scheduled.json().publication.status,'pending');
+  assert.equal(scheduled.json().job.id,'job-publish');
+  await app.close();
+});
+
+function poolWithClient(query: (sql: string, values?: unknown[]) => Promise<{ rows: any[]; rowCount?: number }>) {
+  const client={query,release(){}};
+  return {connect:async()=>client,query} as unknown as Pool;
+}
+
+test('disabled clients cannot create or claim editorial jobs', async () => {
+  const statements:string[]=[];
+  const pool=poolWithClient(async(sql)=>{
+    statements.push(sql);
+    if(sql.includes('SELECT enabled FROM editorial.client_settings')) return {rows:[{enabled:false}],rowCount:1};
+    if(sql.includes('SELECT j.* FROM editorial.jobs')) return {rows:[],rowCount:0};
+    return {rows:[],rowCount:0};
+  });
+  const repository=new EditorialApiRepository(pool);
+  await assert.rejects(()=>repository.createJob({clientId:'client-disabled',kind:'generate_plan',idempotencyKey:'disabled-1',payload:{}},'user-1'),(error:any)=>error.code==='EDITORIAL_DISABLED'&&error.statusCode===409);
+  assert.equal(await repository.claimJob({leaseSeconds:60,executionId:'run-1'},['*']),null);
+  assert.ok(statements.some((sql)=>sql.includes('JOIN editorial.client_settings settings')&&sql.includes('settings.enabled=TRUE')));
+});
+
+test('scheduling pins the approved revision and creates publication and job in one transaction', async () => {
+  const statements:string[]=[];
+  const pool=poolWithClient(async(sql,values=[])=>{
+    statements.push(sql);
+    if(sql.includes('SELECT enabled FROM editorial.client_settings')) return {rows:[{enabled:true}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.contents')) return {rows:[{id:'content-1',client_id:'client-a',version:3,status:'approved',approved_revision_id:'revision-2'}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.publishing_accounts')) return {rows:[{id:'account-1',client_id:'client-a',active:true}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.jobs')) return {rows:[],rowCount:0};
+    if(sql.includes('SELECT id FROM editorial.publications')) return {rows:[],rowCount:0};
+    if(sql.includes('INSERT INTO editorial.publications')) return {rows:[{id:values[0],client_id:values[1],content_id:values[2],account_id:values[3],content_revision_id:values[5],status:'pending'}],rowCount:1};
+    if(sql.includes('INSERT INTO editorial.jobs')) return {rows:[{id:values[0],client_id:values[1],kind:'publish',target_id:values[2],status:'pending'}],rowCount:1};
+    return {rows:[],rowCount:0};
+  });
+  const repository=new EditorialApiRepository(pool);
+  const result=await repository.schedulePublication({clientId:'client-a',contentId:'content-1',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',idempotencyKey:'schedule-1'},'user-1');
+  assert.equal((result.publication as any).content_revision_id,'revision-2');
+  assert.equal((result.job as any).target_id,(result.publication as any).id);
+  assert.ok(statements.includes('BEGIN'));
+  assert.ok(statements.includes('COMMIT'));
+});
+
+test('summary and paginated search use editorial dates and SQL filters before LIMIT', async () => {
+  const statements:Array<{sql:string;values:unknown[]}>=[];
+  const pool={query:async(sql:string,values:unknown[]=[])=>{statements.push({sql,values});return {rows:[],rowCount:0};}} as unknown as Pool;
+  const repository=new EditorialApiRepository(pool);
+  await repository.summary({clientId:'client-a',from:'2026-09-01T00:00:00.000Z',to:'2026-10-01T00:00:00.000Z'});
+  assert.ok(statements.some(({sql})=>sql.includes('p.planned_at >= $2')));
+  assert.ok(statements.some(({sql})=>sql.includes('pub.desired_scheduled_at >= $2')));
+  statements.length=0;
+  await repository.calendar({clientId:'client-a',status:'ready',format:'blog',search:'seguridad',limit:25});
+  const query=statements[0];
+  assert.match(query.sql,/p\.status = \$2/);
+  assert.match(query.sql,/p\.format = \$3/);
+  assert.match(query.sql,/p\.title ILIKE \$4/);
+  assert.ok(query.sql.indexOf('ILIKE')<query.sql.lastIndexOf('LIMIT'));
+  assert.equal(query.values.at(-1),26);
 });

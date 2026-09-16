@@ -10,6 +10,8 @@ import {
   getEditorialCalendars,
   getPlanItems,
   getPublications,
+  getPublishingAccounts,
+  schedulePublication as schedulePublicationRequest,
   updateContentItem,
   updatePlanItem,
   type ContentItem,
@@ -20,6 +22,7 @@ import {
   type JobKind,
   type PlanItem,
   type Publication,
+  type PublishingAccount,
 } from '../services/contentApi.js';
 import type { ContentFilters } from '../lib/content.js';
 
@@ -33,6 +36,7 @@ interface ContentState {
   selectedId: string | null;
   content: ContentItem | null;
   publications: Publication[];
+  publishingAccounts: PublishingAccount[];
   calendars: EditorialCalendar[];
   jobs: ContentJob[];
   isLoading: boolean;
@@ -57,6 +61,7 @@ interface ContentState {
   savePlanItem: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
   saveContent: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
   approveContent: (token: string, id: string, revisionId: string, version: number) => Promise<void>;
+  schedulePublication: (token: string, input: { contentId: string; clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; copy?: string }) => Promise<void>;
   createJob: (token: string, input: { clientId: string; kind: JobKind; targetId?: string; expectedVersion?: number; payload?: Record<string, unknown> }) => Promise<void>;
   pollJobs: (token: string) => Promise<void>;
   clearConflict: () => void;
@@ -85,6 +90,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   selectedId: null,
   content: null,
   publications: [],
+  publishingAccounts: [],
   calendars: [],
   jobs: [],
   isLoading: false,
@@ -101,7 +107,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   setFilters: (partial) => set((state) => ({ filters: { ...state.filters, ...partial } })),
   reset: (clientId = '') => {
     listController?.abort(); detailController?.abort();
-    set({ filters: { ...EMPTY_FILTERS, clientId }, items: [], summary: null, nextCursor: null, selectedId: null, content: null, publications: [], calendars: [], jobs: [], error: null, detailError: null, conflict: null });
+    set({ filters: { ...EMPTY_FILTERS, clientId }, items: [], summary: null, nextCursor: null, selectedId: null, content: null, publications: [], publishingAccounts: [], calendars: [], jobs: [], error: null, detailError: null, conflict: null });
   },
   load: async (token) => {
     listController?.abort();
@@ -109,7 +115,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const serial = ++requestSerial;
     set({ isLoading: true, error: null });
     const state = get();
-    const filters = { clientId: state.filters.clientId || undefined, ...range(state.month) };
+    const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
     try {
       const [page, summary] = await Promise.all([
         getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }, listController.signal),
@@ -127,7 +133,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     if (get().isRefreshing || get().isLoading) return;
     set({ isRefreshing: true });
     const state = get();
-    const filters = { clientId: state.filters.clientId || undefined, ...range(state.month) };
+    const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
     try {
       const [page, summary] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }), getContentSummary(token, filters)]);
       set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, lastUpdatedAt: new Date().toISOString(), error: null });
@@ -139,7 +145,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     if (!state.nextCursor || state.isLoadingMore) return;
     set({ isLoadingMore: true });
     try {
-      const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, ...range(state.month), includeUndated: true, cursor: state.nextCursor, limit: 100 });
+      const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month), includeUndated: true, cursor: state.nextCursor, limit: 100 });
       set((current) => ({ items: [...current.items, ...page.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: page.nextCursor }));
     } catch (error) { set({ error: message(error) }); }
     finally { set({ isLoadingMore: false }); }
@@ -150,14 +156,14 @@ export const useContentStore = create<ContentState>((set, get) => ({
   },
   select: async (token, item) => {
     detailController?.abort();
-    if (!item) { set({ selectedId: null, content: null, publications: [], detailError: null }); return; }
-    set({ selectedId: item.id, content: null, publications: [], detailError: null });
+    if (!item) { set({ selectedId: null, content: null, publications: [], publishingAccounts: [], detailError: null }); return; }
+    set({ selectedId: item.id, content: null, publications: [], publishingAccounts: [], detailError: null });
     if (!item.contentId) return;
     detailController = new AbortController();
     set({ isLoadingDetail: true });
     try {
-      const [content, publications] = await Promise.all([getContentItem(token, item.contentId, detailController.signal), getPublications(token, item.contentId, detailController.signal)]);
-      if (get().selectedId === item.id) set({ content: content.content, publications: publications.items });
+      const [content, publications, accounts] = await Promise.all([getContentItem(token, item.contentId, detailController.signal), getPublications(token, item.contentId, detailController.signal), getPublishingAccounts(token, item.clientId, detailController.signal)]);
+      if (get().selectedId === item.id) set({ content: content.content, publications: publications.items, publishingAccounts: accounts.accounts });
     } catch (error) {
       if ((error as Error).name !== 'AbortError') set({ detailError: message(error) });
     } finally { set({ isLoadingDetail: false }); }
@@ -193,6 +199,17 @@ export const useContentStore = create<ContentState>((set, get) => ({
     try { const response = await approveContentItem(token, id, revisionId, version); set((state) => ({ content: state.content ? { ...state.content, ...response.content } : response.content })); }
     catch (error) { if (isConflict(error)) set({ conflict: 'La revisión cambió antes de aprobarse. Recarga y comprueba la versión activa.' }); else set({ detailError: message(error) }); throw error; }
     finally { set({ isSaving: false }); }
+  },
+  schedulePublication: async (token,input) => {
+    set({isSaving:true,conflict:null,detailError:null});
+    try {
+      const idempotencyKey=`schedule:${input.contentId}:${input.expectedVersion}:${input.accountId}:${input.desiredScheduledAt}`;
+      const response=await schedulePublicationRequest(token,input.contentId,{...input,idempotencyKey});
+      set((state)=>({publications:[response.publication,...state.publications.filter((item)=>item.id!==response.publication.id)],jobs:[response.job,...state.jobs.filter((job)=>job.id!==response.job.id)]}));
+    } catch(error) {
+      if(isConflict(error)) set({conflict:message(error)}); else set({detailError:message(error)});
+      throw error;
+    } finally { set({isSaving:false}); }
   },
   createJob: async (token, input) => {
     set({ isSaving: true, conflict: null });

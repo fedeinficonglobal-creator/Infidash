@@ -85,7 +85,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   app.get('/api/content/calendar', route(async (request, reply) => {
     await requireHuman(request);
     const query = queryOf(request);
-    const result = await repository.calendar({ clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined, from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, includeUndated: query.includeUndated === 'true', cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) });
+    const result = await repository.calendar({ clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined, from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, search: optionalString(query.search, 'search', 200) ?? undefined, includeUndated: query.includeUndated === 'true', cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) });
     return reply.send(result);
   }));
 
@@ -106,7 +106,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   app.get('/api/content/plan-items', route(async (request, reply) => {
     await requireHuman(request);
     const query=queryOf(request);
-    return reply.send(await repository.listPlanItems({clientId:optionalString(query.clientId,'clientId',200)??undefined,from:asDate(query.from,'from'),to:asDate(query.to,'to'),status:optionalString(query.status,'status',50)??undefined,format:optionalString(query.format,'format',100)??undefined,includeUndated:query.includeUndated==='true',cursor:decodeCursor(query.cursor),limit:parseLimit(query.limit)}));
+    return reply.send(await repository.listPlanItems({clientId:optionalString(query.clientId,'clientId',200)??undefined,from:asDate(query.from,'from'),to:asDate(query.to,'to'),status:optionalString(query.status,'status',50)??undefined,format:optionalString(query.format,'format',100)??undefined,search:optionalString(query.search,'search',200)??undefined,includeUndated:query.includeUndated==='true',cursor:decodeCursor(query.cursor),limit:parseLimit(query.limit)}));
   }));
 
   app.get('/api/content/plan-items/:id', route(async (request, reply) => {
@@ -158,6 +158,30 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
 
   app.get('/api/content/items/:id/publications', route(async (request, reply) => {
     await requireHuman(request); return reply.send(await repository.listPublications(requireString(paramsOf(request).id,'id',100),parseLimit(queryOf(request).limit),decodeCursor(queryOf(request).cursor)));
+  }));
+
+  app.get('/api/clients/:clientId/publishing-accounts', route(async (request, reply) => {
+    await requireHuman(request);
+    const clientId=requireString(paramsOf(request).clientId,'clientId',200);
+    return reply.send({accounts:await repository.listPublishingAccounts(clientId)});
+  }));
+
+  app.post('/api/content/items/:id/publications', route(async (request, reply) => {
+    const session=await requireHuman(request,'admin');
+    const body=requireObject(request.body);
+    if(body.media!==undefined&&!Array.isArray(body.media)) throw new ContentApiError(400,'INVALID_PAYLOAD','media debe ser una lista');
+    const scheduled=await repository.schedulePublication({
+      clientId:requireString(body.clientId,'clientId',200),
+      contentId:requireString(paramsOf(request).id,'id',100),
+      expectedVersion:requirePositiveVersion(body.expectedVersion),
+      accountId:requireString(body.accountId,'accountId',100),
+      desiredScheduledAt:asDate(body.desiredScheduledAt,'desiredScheduledAt')??requireString(body.desiredScheduledAt,'desiredScheduledAt',100),
+      occurrenceKey:body.occurrenceKey===undefined?undefined:requireString(body.occurrenceKey,'occurrenceKey',100),
+      copy:optionalString(body.copy,'copy',20_000),
+      media:Array.isArray(body.media)?body.media:[],
+      idempotencyKey:requireString(body.idempotencyKey,'idempotencyKey',300),
+    },session.user.id);
+    return reply.code(scheduled.replayed?200:202).send(scheduled);
   }));
 
   app.post('/api/internal/content/jobs/claim', route(async (request, reply) => {
