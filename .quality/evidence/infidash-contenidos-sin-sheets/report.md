@@ -1,28 +1,26 @@
-# Quality Gate Report
+# Auditoría final: Contenidos sin Sheets
 
-**Project**: Infidash — Contenidos sin Sheets  
-**Date**: 2026-09-16  
-**Branch**: `feature/contenidos-sin-sheets`  
-**Base**: `main` (`e3a97ad`)
+**Rama:** `feature/contenidos-sin-sheets`
+**Commit revisado:** `9862bf0`
+**Veredicto:** 🟡 **CONDITIONAL GO** para revisión de código; no habilita el corte de producción.
 
-## Results
+## Evidencia local
 
-| Gate | Policy | Result | Details |
-|---|---|---|---|
-| Typecheck | zero-tolerance | PASS | `npm run lint`; TypeScript frontend and backend, 0 errors |
-| Build | production | PASS | `npm run build`; Vite completed. Existing bundle-size warning: 912.35 kB main chunk |
-| Editorial tests | no-regression | PASS | 22 passing, 0 failing |
-| Tests without PostgreSQL fixtures | no-regression | PASS | 43 passing, 0 failing |
-| Complete suite | environment-dependent | BLOCKED | 42 passing, 11 failing: 10 API regression cases cannot start/fetch and 1 model test reports missing `DATABASE_URL` |
-| Coverage | ratchet | NOT CONFIGURED | The repository has no coverage script or baseline; no percentage can be compared |
-| E2E | — | SKIP | No Playwright configuration found |
+- `npx tsx --test tests/content-api.test.ts tests/content-persistence.test.ts tests/content-ui.test.ts tests/content-workflows.test.ts`: **32/32** pruebas superadas.
+- `npm run lint`: superado.
+- `npm run build`: superado. Vite informa únicamente del tamaño del bundle principal.
 
-## Review findings
+La revisión confirma aislamiento por cliente, migraciones con FK e índices, importación idempotente, permisos humanos y de servicio, leases de trabajos, estados de publicación, UI paginada y sin vista HTML insegura, y exports n8n sin Sheets ni secretos.
 
-- Fixed a cross-client authorization gap in job heartbeat renewal. The SQL now binds both `client_id` and `lease_token`, with a regression test.
-- The Content Hub schema JSON available beside the repository contains schema metadata but no row export; import is tested as dry-run only.
-- Database migrations, Content Hub apply mode, n8n, WordPress and Postiz were not executed or contacted during QA.
+## Correcciones verificadas
 
-## Overall
+- `generate_plan` crea un calendario durable si no recibe uno y lo fija en `targetId` y en el contrato del trabajo.
+- Las operaciones de publicación, reintento y reconciliación obtienen el snapshot de cuenta/publicación desde la base de datos antes de enviarlo a n8n.
+- Una respuesta ambigua de WordPress cambia a `unknown` y exige reconciliación, evitando repetir a ciegas la creación del borrador.
 
-The implementation-specific gates pass. Production readiness still requires running the complete suite against an isolated PostgreSQL test database and performing the documented staging workflow checks.
+## Antes del corte
+
+1. Ejecutar migraciones y pruebas de concurrencia sobre PostgreSQL de staging.
+2. Incorporar los catorce exports y los mapeos de clientes que no estaban disponibles en el directorio recibido.
+3. Importar los workflows desactivados en n8n y configurar secretos mediante variables/credenciales del VPS.
+4. Realizar una prueba real de Postiz/WordPress, incluida una respuesta de timeout y su reconciliación.
