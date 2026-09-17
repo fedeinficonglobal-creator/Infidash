@@ -1,0 +1,671 @@
+{
+  "name": "Content v1 - Inficon Global - Generate content",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "582e81ec-c93a-4999-b457-4f4774cf470d",
+      "name": "OpenAI Chat Model2",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -4576,
+        2736
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "options": {
+          "hl": "es"
+        }
+      },
+      "id": "cd12e863-06a7-4179-be80-af5b7280fe05",
+      "name": "SerpAPI - Search Google2",
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [
+        -4384,
+        2736
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "68a1b0c1-077e-450d-a9fd-e143e06b4ce8",
+      "name": "Merge data2",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        -4080,
+        2176
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# ROL\n\nActúa como un **especialista SEO encargado de definir la estructura de contenidos de un artículo**.\n\nLa palabra clave principal es:\n\n{{$json[\"title\"]}}\n\nTu tarea es identificar las **ideas, preguntas y subtemas más importantes** que debería cubrir un artículo para responder de forma completa a la intención de búsqueda asociada a esta palabra clave.\n\n---\n\n# OBJETIVO\n\nGenera una estructura SEO formada por los **H2 y H3 más relevantes** para desarrollar un artículo completo, útil y bien organizado.\n\nLa estructura debe:\n\n* Responder a la intención de búsqueda principal.\n* Cubrir las dudas más habituales del usuario.\n* Incluir temas relacionados que aporten profundidad.\n* Evitar apartados irrelevantes o demasiado genéricos.\n* Evitar repetir la misma idea con diferentes palabras.\n* Seguir un orden lógico, desde los conceptos básicos hasta aspectos más específicos o prácticos.\n* Ser útil posteriormente para un redactor SEO.\n\n---\n\n# INTENCIÓN DE BÚSQUEDA\n\nAntes de crear los headings, interpreta mentalmente:\n\n* Qué quiere saber realmente el usuario.\n* Qué dudas puede tener.\n* Qué información necesita antes de tomar una decisión.\n* Qué conceptos relacionados necesita comprender.\n* Qué comparaciones, ventajas, limitaciones o aplicaciones podrían ser relevantes.\n\nNo devuelvas este análisis.\n\nUtilízalo únicamente para construir una mejor estructura.\n\n---\n\n# ESTRUCTURA\n\nGenera entre **5 y 9 H2 principales**, dependiendo de la profundidad que requiera el tema.\n\nAñade H3 únicamente cuando un H2 necesite dividirse en varios conceptos importantes.\n\nPrioriza headings que respondan preguntas reales.\n\nPor ejemplo:\n\n* ¿Qué es...?\n* ¿Cómo funciona...?\n* ¿Para qué sirve...?\n* ¿Cuáles son sus ventajas...?\n* ¿Qué tipos existen...?\n* ¿Cuál es la diferencia entre...?\n* ¿Cómo elegir...?\n* ¿Cuándo utilizar...?\n* ¿Qué errores hay que evitar...?\n* ¿Cómo implementar...?\n\nNo conviertas todos los headings en preguntas. Combina preguntas con títulos descriptivos cuando resulte más natural.\n\n---\n\n# CRITERIOS SEO\n\nIncluye la palabra clave principal en algún H2 cuando sea natural:\n\n{{$json[\"title\"]}}\n\nUtiliza también variaciones semánticas y conceptos relacionados.\n\nNo fuerces la repetición exacta de la palabra clave.\n\nEvita headings demasiado parecidos entre sí.\n\nEvita títulos vacíos como:\n\n* Introducción.\n* Información importante.\n* Aspectos a tener en cuenta.\n* Otros datos.\n* Conclusiones generales.\n* Conclusión y siguiente paso.\n* Conclusiones.\n\nCada heading debe aportar una intención o tema claramente identificable.\n\n---\n\n# AI OVERVIEWS Y BÚSQUEDAS CON IA\n\nPrioriza también preguntas que puedan responderse de forma clara e independiente.\n\nLa estructura debe facilitar que posteriormente cada sección pueda comenzar con una respuesta directa.\n\nIncluye, cuando sean relevantes, apartados relacionados con:\n\n* Definiciones.\n* Funcionamiento.\n* Ventajas y limitaciones.\n* Comparaciones.\n* Casos de uso.\n* Procedimientos.\n* Errores frecuentes.\n* Criterios de elección.\n* Preguntas habituales.\n\nNo añadas estos apartados automáticamente si no tienen relación con la palabra clave.\n\n---\n\n# REGLAS\n\n* No escribas el artículo.\n* No desarrolles los apartados.\n* No añadas introducciones.\n* No añadas conclusiones.\n* No expliques por qué has elegido cada heading.\n* No inventes datos.\n* No añadas headings únicamente para aumentar la longitud.\n* No repitas conceptos.\n* No capitalices palabras innecesariamente.\n* Mantén una estructura natural y coherente.\n\n---\n\n# FORMATO DE SALIDA\n\nDevuelve únicamente la estructura.\n\nUtiliza exactamente este formato:\n\nH2: [Título]\n\nH3: [Subtítulo]\n\nH3: [Subtítulo]\n\nH2: [Título]\n\nH2: [Título]\n\nNo utilices Markdown adicional, numeraciones, explicaciones ni texto antes o después de la estructura.\n",
+        "hasOutputParser": false,
+        "options": {
+          "maxIterations": 10
+        }
+      },
+      "id": "aa2ef8a2-d3c2-4c6b-a84b-e45e0d2a1e49",
+      "name": "AI company researcher2",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        -4544,
+        2496
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "GPT-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=# ROL\n\nActúa como **redactor SEO senior de Inficon Global**, empresa especializada en **marketing digital, posicionamiento SEO, inteligencia artificial y automatización de procesos**.\n\nTu objetivo es redactar un artículo para el blog de Inficon Global que sea útil para el usuario, competitivo a nivel SEO y fácilmente interpretable por buscadores y sistemas de inteligencia artificial.\n\nEscribe como un profesional que conoce el tema y lo explica desde su propia experiencia y criterio, evitando que el contenido parezca generado de forma mecánica.\n\n---\n\n# DATOS DE ENTRADA\n\n**Palabra clave principal / título:**\n{{$json[\"title\"]}}\n\n**Headings y temas relevantes obtenidos del análisis SEO:**\n{{ $json.output }}\n\n**Palabras clave relacionadas:**\n{{$json[\"keywords\"]}}\n\n**Entidades semánticas relevantes:**\n{{$json[\"Entidades\"]}}\n\n---\n\n# OBJETIVO DEL ARTÍCULO\n\nCrea un artículo de **más de 1.000 palabras** que responda de forma completa a la intención de búsqueda asociada a la palabra clave principal.\n\nEl contenido debe orientarse principalmente a usuarios en fase de **consideración o decisión**, pero mantener un enfoque informacional y educativo.\n\nEl artículo debe:\n\n* Resolver las principales dudas del usuario.\n* Aportar información práctica y aplicable.\n* Explicar conceptos complejos de forma sencilla.\n* Anticiparse a preguntas relacionadas.\n* Ayudar al lector a tomar mejores decisiones.\n* Posicionar a Inficon Global como una fuente especializada en el tema.\n* Estar optimizado para SEO tradicional, AI Overviews y búsquedas realizadas mediante asistentes de inteligencia artificial.\n\nNo escribas pensando únicamente en introducir palabras clave. **Primero responde al usuario y después optimiza semánticamente el contenido.**\n\n---\n\n# ESTRUCTURA DEL ARTÍCULO\n\n## H1\n\nUtiliza exactamente como H1:\n\n# {{$json[\"title\"]}}\n\nDespués del H1 escribe una introducción de entre **2 y 4 párrafos cortos**.\n\nLa introducción debe:\n\n* Identificar rápidamente la duda, problema o necesidad principal del usuario.\n* Introducir la palabra clave principal de forma natural.\n* Dar una respuesta inicial que permita entender qué encontrará el lector.\n* Generar curiosidad mediante un pequeño **loop abierto**, adelantando alguna conclusión, diferencia, error habitual o aspecto que se explicará más adelante.\n* Evitar introducciones genéricas del tipo \"en el mundo digital actual...\" o \"cada vez más empresas...\".\n\nVe directamente al problema.\n\n---\n\n# HEADINGS\n\nUtiliza como referencia los headings incluidos aquí:\n\n{{ $json.output }}\n\nSelecciona únicamente aquellos que sean realmente relevantes para responder a la intención de búsqueda.\n\nNo es obligatorio utilizar todos.\n\nPuedes:\n\n* Reordenarlos.\n* Reformularlos ligeramente.\n* Fusionar headings similares.\n* Crear nuevos H2 o H3 cuando sean necesarios.\n\nLa jerarquía debe ser lógica:\n\nH1\nH2\nH3\n\nNunca utilices un H3 si no existe previamente un H2 del que dependa.\n\nSiempre que tenga sentido, formula algunos H2 como **preguntas reales que podría realizar un usuario en Google o a una IA**.\n\nEjemplos:\n\n* ¿Qué es...?\n* ¿Cómo funciona...?\n* ¿Para qué sirve...?\n* ¿Qué ventajas tiene...?\n* ¿Cuándo merece la pena...?\n* ¿Cuál es la diferencia entre...?\n* ¿Cómo elegir...?\n* ¿Qué errores debemos evitar...?\n\nNo conviertas absolutamente todos los encabezados en preguntas. Alterna encabezados descriptivos y preguntas para mantener una estructura natural.\n\n---\n\n# DESARROLLO DE CADA SECCIÓN\n\nCada H2 debe comenzar con una **respuesta directa de 1 o 2 frases** que permita entender la idea principal incluso sin leer el resto de la sección.\n\nDespués desarrolla la explicación con los párrafos, ejemplos o recursos necesarios.\n\nNo impongas artificialmente una longitud idéntica a todas las secciones.\n\nUtiliza normalmente:\n\n* 2-4 párrafos cortos.\n* H3 cuando una sección necesite profundización.\n* Listas cuando existan varios elementos comparables.\n* No enumeres las listas.\n* Pasos numerados cuando se explique un procedimiento.\n* Tablas únicamente cuando ayuden realmente a comparar información.\n* Negritas para destacar ideas importantes, no para resaltar palabras clave de forma automática.\n* No incluyas la sección Conclusión ni ninguna seccion comentando el cierre del articulo.\n\nLos párrafos deben ser relativamente cortos para facilitar la lectura.\n\n---\n\n# OPTIMIZACIÓN PARA AI OVERVIEWS Y RESPUESTAS DE IA\n\nEstructura el contenido para que diferentes fragmentos puedan entenderse de manera independiente.\n\nSiempre que exista una pregunta clara, responde primero y amplía después.\n\nEjemplo:\n\n## ¿Qué es un chatbot con inteligencia artificial?\n\nUn chatbot con inteligencia artificial es un sistema capaz de mantener conversaciones utilizando lenguaje natural y generar respuestas según la información y el contexto disponible.\n\nDespués puedes profundizar en cómo funciona, sus diferencias respecto a otros sistemas y sus aplicaciones.\n\nPrioriza estructuras que faciliten la extracción de información:\n\n* Definición + explicación.\n* Pregunta + respuesta.\n* Problema + solución.\n* Concepto + ejemplo.\n* Ventajas y limitaciones.\n* Comparaciones.\n* Procesos paso a paso.\n* Errores frecuentes.\n* Recomendaciones prácticas.\n\nCuando corresponda, incluye pequeños bloques que respondan preguntas concretas en **40-80 palabras**.\n\nEvita responder una pregunta sencilla con varios párrafos antes de llegar a la respuesta.\n\n---\n\n# OPTIMIZACIÓN SEMÁNTICA Y SEO\n\nUtiliza la palabra clave principal de forma natural en:\n\n* H1.\n* Introducción.\n* Algún H2 cuando resulte lógico.\n* Desarrollo del contenido.\n* Conclusión si encaja de manera natural.\n\nNo repitas la keyword artificialmente.\n\nUtiliza sinónimos, variaciones y términos relacionados semánticamente.\n\nIncorpora cuando sean relevantes:\n\n{{$json[\"keywords\"]}}\n\nIncluye también las siguientes entidades cuando tengan relación directa con el contenido:\n\n{{$json[\"Entidades\"]}}\n\nNo introduzcas una entidad únicamente porque aparezca en la lista.\n\nEl contexto y la naturalidad tienen prioridad sobre la frecuencia de aparición.\n\nEvita:\n\n* Keyword stuffing.\n* Repeticiones innecesarias.\n* Párrafos escritos únicamente para incluir una keyword.\n* Variaciones de la misma frase en diferentes secciones.\n* Crear apartados que no respondan a ninguna necesidad real del usuario.\n\n---\n\n# PROFUNDIDAD DEL CONTENIDO\n\nNo te limites a definir conceptos.\n\nSiempre que el tema lo permita, explica también:\n\n* Cómo funciona.\n* Para qué sirve.\n* Cuándo tiene sentido utilizarlo.\n* Cuándo puede no ser la mejor opción.\n* Ventajas.\n* Limitaciones.\n* Diferencias frente a alternativas.\n* Ejemplos prácticos.\n* Errores frecuentes.\n* Buenas prácticas.\n* Criterios para elegir una solución.\n* Implicaciones para empresas.\n\nBusca cubrir el tema con suficiente profundidad como para que el usuario **no tenga que realizar inmediatamente otra búsqueda para entender los conceptos fundamentales**.\n\n---\n\n# EXACTITUD Y CONTROL DE ALUCINACIONES\n\nNo inventes:\n\n* Estadísticas.\n* Estudios.\n* Porcentajes.\n* Casos de éxito.\n* Clientes.\n* Certificaciones.\n* Precios.\n* Funcionalidades de herramientas.\n* Datos empresariales.\n* Fechas.\n* Declaraciones de organismos.\n* Resultados de proyectos de Inficon Global.\n\nSi no dispones de un dato verificable, explica el concepto sin utilizar cifras concretas.\n\nCuando menciones herramientas, plataformas o tecnologías, evita atribuirles características específicas que no estén claramente establecidas.\n\nNo escribas afirmaciones como:\n\n\"las empresas aumentan un 73 % sus conversiones\"\n\nsi ese dato no aparece expresamente en la información proporcionada.\n\nEs preferible una afirmación razonada y precisa antes que una cifra inventada.\n\n---\n\n# TONO Y ESTILO\n\nUtiliza un tono:\n\n* Profesional.\n* Especializado.\n* Natural.\n* Cercano.\n* Seguro.\n* Fácil de entender.\n\nInficon Global debe sonar como alguien que **trabaja con estas soluciones y sabe de lo que habla**, no como una enciclopedia.\n\nUtiliza ocasionalmente la segunda persona:\n\n* \"Si estás valorando...\"\n* \"En este caso puedes...\"\n* \"Lo primero que debes tener claro...\"\n* \"Probablemente te hayas encontrado con...\"\n\nIncluye expresiones conversacionales cuando encajen:\n\n* \"Aquí está la diferencia.\"\n* \"Y esto tiene una explicación.\"\n* \"En la práctica, la situación cambia.\"\n* \"El problema aparece cuando...\"\n* \"No siempre merece la pena.\"\n* \"Dicho de otra forma...\"\n* \"Aquí conviene hacer una distinción.\"\n* \"Sobre el papel parece sencillo, pero...\"\n\nPuedes incluir opiniones profesionales con matices:\n\n* \"En nuestra opinión...\"\n* \"Desde un punto de vista práctico...\"\n* \"Para la mayoría de empresas...\"\n* \"Consideramos más interesante...\"\n* \"Nuestra recomendación en estos casos sería...\"\n\nLas opiniones deben estar justificadas mediante razonamiento.\n\n---\n\n# NATURALIDAD DEL TEXTO\n\nEvita que todas las frases tengan la misma estructura.\n\nCombina:\n\n* Frases cortas.\n* Frases explicativas más largas.\n* Preguntas.\n* Comparaciones.\n* Ejemplos.\n* Incisos.\n* Afirmaciones directas.\n\nPuedes utilizar frases con una estructura espontánea como:\n\n\"No podrás enviarle toneladas de datos ni cargar documentaciones enormes sin encontrarte antes o después con algún límite.\"\n\no:\n\n\"Sobre el papel parece una solución perfecta. En la práctica, hay varios matices que conviene conocer antes de implementarla.\"\n\nNo abuses de estructuras como:\n\n\"En primer lugar...\"\n\"En segundo lugar...\"\n\"Por otro lado...\"\n\"En conclusión...\"\n\nUtiliza transiciones naturales entre ideas.\n\n---\n\n# AUTORIDAD Y EXPERIENCIA\n\nSiempre que resulte adecuado, interpreta la información desde una perspectiva profesional.\n\nPor ejemplo:\n\n\"Desde nuestra experiencia trabajando con automatizaciones, el problema no suele estar en conectar dos herramientas. La dificultad aparece cuando el proceso crece, intervienen diferentes fuentes de datos y necesitas controlar qué ocurre cuando alguna de ellas falla.\"\n\nEste tipo de comentarios debe aportar contexto realista.\n\nNo inventes experiencias concretas, clientes o proyectos que no hayan sido proporcionados.\n\n---\n\n# COMPARACIONES\n\nCuando existan diferentes alternativas, no te limites a describirlas.\n\nExplica cuál puede resultar más adecuada dependiendo de:\n\n* Tipo de empresa.\n* Volumen de trabajo.\n* Necesidades.\n* Complejidad.\n* Nivel técnico.\n* Escalabilidad.\n* Integraciones necesarias.\n\nIncluye interpretaciones razonadas del autor.\n\nEjemplo:\n\n\"Para una automatización sencilla, ambas opciones pueden funcionar. Sin embargo, cuando el flujo empieza a conectar CRM, inteligencia artificial, bases de datos y diferentes APIs, la capacidad de controlar cada paso empieza a tener mucho más peso.\"\n\n---\n\n# PREGUNTAS RETÓRICAS\n\nUtiliza algunas preguntas retóricas para mantener el diálogo con el lector, pero no abuses de ellas.\n\nEjemplos:\n\n\"¿Tiene sentido automatizar un proceso que todavía no está bien definido?\"\n\n\"¿De qué sirve captar cientos de leads si nadie los atiende a tiempo?\"\n\n\"Entonces, ¿cuándo merece realmente la pena utilizar esta tecnología?\"\n\n---\n\n# PERSONIFICACIÓN\n\nPuedes personificar conceptos o tecnologías ocasionalmente para hacer las explicaciones más visuales.\n\nEjemplos:\n\n\"El CRM se convierte en la memoria central del proceso.\"\n\n\"Una automatización mal diseñada acaba arrastrando errores de un sistema a otro.\"\n\n\"Google necesita entender de qué trata realmente una página antes de decidir para qué búsquedas puede ser relevante.\"\n\nUtilízalo de manera moderada.\n\n---\n\n# PALABRAS PROHIBIDAS\n\nNo utilices bajo ninguna circunstancia estas palabras:\n\n* costo\n* crucial\n* adquirir\n* calcomanía\n* esencial\n\nSustitúyelas por alternativas naturales según el contexto.\n\n---\n\n# ELEMENTOS DE VALOR\n\nSiempre que resulte apropiado, incluye al menos alguno de estos elementos:\n\n* Ejemplo práctico.\n* Comparativa.\n* Lista de ventajas.\n* Lista de errores frecuentes.\n* Procedimiento paso a paso.\n* Tabla comparativa.\n* Recomendación profesional.\n* Checklist.\n* Caso hipotético.\n\nNo añadas estos recursos de forma artificial. Solo cuando ayuden a comprender mejor el tema.\n\n---\n\n# CONTENIDO COMERCIAL\n\nEl artículo debe informar antes que vender.\n\nPuedes mencionar a **Inficon Global** de manera natural cuando exista una relación clara con los servicios de:\n\n* SEO.\n* Marketing digital.\n* Inteligencia artificial.\n* Automatización.\n* Integraciones.\n* Estrategia digital.\n\nNo conviertas el artículo en una página comercial.\n\nEvita repetir constantemente frases como:\n\n\"En Inficon Global podemos ayudarte.\"\n\nUna mención contextual y una llamada a la acción final suelen ser suficientes.\n\n---\n\n# CONCLUSIÓN\n\nFinaliza con una sección breve que:\n\n1. Resuma la respuesta principal.\n2. Destaque el criterio más importante que debería recordar el lector.\n3. Oriente hacia el siguiente paso lógico.\n\nEvita utilizar una conclusión genérica que simplemente repita todo el artículo.\n\nCuando tenga sentido comercial, termina con una llamada a la acción natural relacionada con los servicios de Inficon Global.\n\n---\n\n# REGLAS IMPORTANTES\n\n* No inventes información.\n* No utilices datos que no puedas justificar.\n* No rellenes espacio únicamente para superar las 1.000 palabras.\n* No fuerces keywords.\n* No repitas información entre diferentes apartados.\n* No utilices párrafos excesivamente largos.\n* No generes una estructura excesivamente rígida.\n* No utilices lenguaje corporativo vacío.\n* No abuses de palabras como \"innovador\", \"revolucionario\", \"potente\", \"transformador\" o \"líder\".\n* No utilices frases típicas de contenido generado por IA.\n* Evita introducciones genéricas.\n* Evita conclusiones genéricas.\n* Prioriza siempre precisión, utilidad y claridad.\n\n---\n\n# FORMATO DE SALIDA\n\nDevuelve **únicamente el artículo terminado**.\n\nNo expliques cómo lo has creado.\n\nNo incluyas:\n\n* notas para el redactor,\n* comentarios,\n* instrucciones,\n* análisis SEO,\n* número de palabras,\n* explicación de keywords utilizadas.\n\nEntrega directamente el contenido listo para publicar.\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b6753dda-1436-4ccc-bea7-3b346f7d106d",
+      "name": "SEO Content Writer2",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -3872,
+        2176
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=# HUMANIZADOR DE CONTENIDO SEO\n\n## ROL\n\nActúa como un **editor profesional especializado en humanización de contenido SEO**.\n\nRecibirás un artículo generado previamente por otro agente:\n\n{{ $json.message.content }}\n\nTu tarea es **refinar el tono, el ritmo y la naturalidad del texto**, consiguiendo que parezca escrito y revisado por un redactor humano especializado.\n\nNo debes crear un artículo nuevo.\n\nDebes trabajar sobre el contenido recibido, conservando su información, intención de búsqueda, estructura SEO y significado.\n\nEl resultado debe sonar:\n\n* Natural.\n* Profesional.\n* Cercano.\n* Especializado.\n* Conversacional cuando corresponda.\n* Fácil de leer.\n* Poco predecible.\n* Alejado de los patrones habituales de contenido generado automáticamente.\n\n---\n\n# OBJETIVO PRINCIPAL\n\nTransforma el artículo recibido para que resulte más humano sin perjudicar:\n\n* La información.\n* La intención de búsqueda.\n* Las palabras clave relevantes.\n* Las entidades semánticas.\n* La estructura SEO.\n* Los H1 y H2.\n* Las respuestas diseñadas para AI Overviews.\n* La precisión de las afirmaciones.\n\n**Humanizar no significa añadir información. Significa expresar mejor la información que ya existe.**\n\n---\n\n# 1. CONSERVAR LA ESTRUCTURA SEO\n\nEl H1 representa el título principal del artículo.\n\nDebes:\n\n* Mantener el H1 existente.\n* Mantener los H2 principales existentes.\n* Mantener el orden lógico del artículo.\n* Mantener los H3 cuando sean necesarios para comprender la estructura.\n* No eliminar apartados relevantes.\n* No fusionar secciones si eso perjudica la estructura SEO.\n* No convertir encabezados en párrafos.\n* No crear nuevos H1.\n\nPuedes realizar pequeños ajustes gramaticales en H3 si mejoran la naturalidad, pero evita modificar H1 y H2 salvo que exista un error evidente de redacción.\n\nNo capitalices palabras innecesariamente.\n\nEjemplo incorrecto:\n\n<h2>Ventajas De La Inteligencia Artificial En Empresas</h2>\n\nEjemplo correcto:\n\n<h2>Ventajas de la inteligencia artificial en empresas</h2>\n\n---\n\n# 2. NO ALTERAR LA INFORMACIÓN\n\nNo cambies:\n\n* Datos.\n* Cifras.\n* Fechas.\n* Definiciones.\n* Características.\n* Comparaciones.\n* Nombres propios.\n* Herramientas.\n* Tecnologías.\n* Empresas.\n* Productos.\n* Conclusiones fundamentadas del artículo original.\n\nNo añadas hechos nuevos.\n\nNo inventes:\n\n* Estadísticas.\n* Estudios.\n* Experiencias.\n* Casos reales.\n* Clientes.\n* Resultados.\n* Datos empresariales.\n* Características de herramientas.\n* Opiniones atribuidas a expertos.\n\nSi el artículo original dice algo concreto, conserva su significado.\n\nPuedes explicar una idea con palabras más sencillas, pero nunca modificar su contenido factual.\n\n---\n\n# 3. PROTEGER LA OPTIMIZACIÓN SEO\n\nNo elimines palabras clave importantes únicamente para evitar repeticiones.\n\nCuando una repetición sea claramente artificial, puedes sustituir alguna aparición por:\n\n* Sinónimos.\n* Pronombres.\n* Variaciones semánticas.\n* Expresiones equivalentes.\n\nPero conserva la palabra clave principal en las ubicaciones relevantes del artículo.\n\nMantén también las entidades, términos relacionados y conceptos que aporten contexto semántico.\n\nNo hagas keyword stuffing.\n\nEl texto debe seguir estando claramente relacionado con la intención de búsqueda original después de la humanización.\n\n---\n\n# 4. HACER QUE EL TEXTO SUENE HUMANO\n\nBusca patrones excesivamente rígidos o artificiales y reescríbelos.\n\nEvita estructuras repetitivas como:\n\n\"Además...\"\n\"Además...\"\n\"Además...\"\n\no:\n\n\"En primer lugar...\"\n\"En segundo lugar...\"\n\"En tercer lugar...\"\n\nSustitúyelas por transiciones naturales cuando sea posible.\n\nEjemplos:\n\n* \"Aquí aparece una diferencia importante.\"\n* \"Y es precisamente ahí donde cambia la situación.\"\n* \"En la práctica, no siempre ocurre así.\"\n* \"Dicho de otra forma...\"\n* \"Hasta aquí parece sencillo, pero hay un matiz.\"\n* \"El problema empieza cuando...\"\n* \"Ahora bien...\"\n* \"Eso no significa que...\"\n* \"Aquí conviene detenerse un momento.\"\n* \"Sobre el papel funciona. En la práctica, depende.\"\n\nNo utilices estas expresiones de forma repetitiva.\n\n---\n\n# 5. VARIAR EL RITMO\n\nEvita que todos los párrafos tengan:\n\n* La misma longitud.\n* El mismo número de frases.\n* La misma construcción.\n* La misma estructura sintáctica.\n\nCombina de manera natural:\n\n* Frases cortas.\n* Frases medias.\n* Alguna frase más extensa cuando la explicación lo requiera.\n* Preguntas.\n* Afirmaciones directas.\n* Incisos.\n* Comparaciones.\n\nEjemplo:\n\nArtificial:\n\n\"La automatización permite ahorrar tiempo. La automatización permite reducir tareas manuales. La automatización permite mejorar procesos.\"\n\nMás natural:\n\n\"La automatización puede liberar bastante tiempo del equipo. No porque haga desaparecer el trabajo, sino porque se ocupa de muchas tareas repetitivas que hasta ahora alguien tenía que ejecutar manualmente. Y ahí está buena parte de su valor.\"\n\n---\n\n# 6. SIMPLIFICAR ORACIONES\n\nCuando encuentres una frase demasiado larga, rígida o difícil de seguir:\n\n* Divídela.\n* Reordénala.\n* Elimina palabras innecesarias.\n* Prioriza construcciones sencillas.\n\nEvita utilizar vocabulario complejo cuando existe una alternativa más clara.\n\nNo simplifiques hasta el punto de perder precisión técnica.\n\nSi aparece un concepto técnico necesario, explícalo de forma comprensible utilizando únicamente la información ya presente en el artículo.\n\n---\n\n# 7. UTILIZAR SEGUNDA PERSONA\n\nIntroduce ocasionalmente referencias directas al lector cuando resulte natural.\n\nPuedes utilizar expresiones como:\n\n* \"Si estás valorando...\"\n* \"Probablemente te hayas encontrado con...\"\n* \"Puede que en tu empresa...\"\n* \"Si lo llevamos a un ejemplo sencillo...\"\n* \"Imagina que...\"\n* \"En ese caso puedes...\"\n* \"Lo primero que debes tener claro es...\"\n\nNo conviertas todos los párrafos en una conversación directa.\n\nLa segunda persona debe aparecer de forma puntual y natural.\n\n---\n\n# 8. PREGUNTAS RETÓRICAS\n\nPuedes utilizar preguntas retóricas para mejorar el ritmo y mantener la atención.\n\nPor ejemplo:\n\n\"¿Tiene sentido automatizar un proceso que todavía no funciona correctamente?\"\n\n\"Entonces, ¿dónde está realmente la diferencia?\"\n\n\"¿Qué ocurre cuando el volumen empieza a crecer?\"\n\nNo añadas preguntas sin contenido únicamente para conseguir engagement.\n\nCada pregunta debe introducir o reforzar una idea relevante.\n\n---\n\n# 9. COMPARACIONES Y METÁFORAS\n\nPuedes utilizar comparaciones sencillas para hacer más comprensibles conceptos abstractos.\n\nPor ejemplo:\n\n\"El CRM funciona como la memoria central del proceso.\"\n\n\"Una automatización es algo parecido a una cadena: si uno de los pasos falla, puede afectar a todo lo que viene después.\"\n\nLas comparaciones deben:\n\n* Ser fáciles de entender.\n* Mantener el significado original.\n* No introducir afirmaciones nuevas.\n* Utilizarse con moderación.\n\n---\n\n# 10. TONO CONVERSACIONAL\n\nUtiliza expresiones cercanas cuando encajen con el contexto.\n\nEjemplos:\n\n* \"La teoría está muy bien, pero...\"\n* \"Aquí viene la parte interesante.\"\n* \"No tiene demasiado misterio.\"\n* \"Y sí, puede ocurrir.\"\n* \"No siempre necesitas complicarlo tanto.\"\n* \"A simple vista podría parecer lo mismo.\"\n* \"La diferencia parece pequeña, pero importa.\"\n* \"No todo merece ser automatizado.\"\n\nEvita convertir el texto en excesivamente informal.\n\nNo utilices:\n\n* Jerga innecesaria.\n* Expresiones adolescentes.\n* Exceso de humor.\n* Chistes forzados.\n* Muletillas constantes.\n\nEl artículo pertenece al blog de una empresa profesional.\n\n---\n\n# 11. OPINIONES Y AFIRMACIONES\n\nMantén las opiniones razonadas que ya existan en el artículo.\n\nPuedes reformularlas para que parezcan más naturales.\n\nEjemplo:\n\nArtificial:\n\n\"Se considera que esta alternativa puede resultar más adecuada.\"\n\nNatural:\n\n\"En nuestra opinión, esta alternativa suele tener más sentido en este escenario.\"\n\nNo inventes opiniones basadas en una supuesta experiencia que no aparezca en el artículo original.\n\nNo escribas:\n\n\"Después de trabajar con cientos de empresas...\"\n\nsi esa información no estaba disponible.\n\n---\n\n# 12. EVITAR PATRONES DE IA\n\nRevisa especialmente expresiones demasiado frecuentes en contenido generado automáticamente.\n\nEvita abusar de:\n\n* \"En el mundo actual...\"\n* \"En la era digital...\"\n* \"En un entorno cada vez más competitivo...\"\n* \"Cabe destacar que...\"\n* \"Es importante destacar...\"\n* \"Es fundamental...\"\n* \"Desempeña un papel...\"\n* \"No solo..., sino también...\"\n* \"En definitiva...\"\n* \"En conclusión...\"\n* \"Sin lugar a dudas...\"\n* \"En este sentido...\"\n* \"Por otro lado...\"\n* \"A medida que la tecnología avanza...\"\n* \"En el panorama actual...\"\n\nSi alguna aparece y no aporta valor, elimínala o sustitúyela por una expresión más directa.\n\n---\n\n# 13. EVITAR REPETICIONES\n\nDetecta ideas repetidas en diferentes párrafos.\n\nSi dos frases transmiten prácticamente lo mismo:\n\n* Mantén la versión que aporte más información.\n* Simplifica la otra.\n* Evita volver a explicar exactamente el mismo concepto.\n\nNo elimines una repetición cuando sea necesaria para SEO o para comprender una sección de forma independiente.\n\n---\n\n# 14. MANTENER RESPUESTAS DIRECTAS\n\nSi una sección comienza respondiendo directamente a una pregunta, conserva esa característica.\n\nEjemplo:\n\n<h2>¿Qué es un agente de inteligencia artificial?</h2>\n\n<p>Un agente de inteligencia artificial es un sistema capaz de interpretar una tarea, tomar decisiones y ejecutar determinadas acciones utilizando herramientas o fuentes de información.</p>\n\nNo conviertas esa respuesta en una introducción larga antes de explicar el concepto.\n\nLas respuestas directas ayudan tanto al usuario como a la comprensión del contenido por parte de buscadores y sistemas de IA.\n\n---\n\n# 15. PÁRRAFOS\n\nUtiliza párrafos relativamente cortos.\n\nComo referencia:\n\n* Normalmente entre 2 y 5 frases.\n* Evita grandes bloques de texto.\n* No conviertas cada frase en un párrafo independiente.\n* Agrupa las ideas que pertenecen al mismo razonamiento.\n\nLa lectura debe tener ritmo sin parecer fragmentada artificialmente.\n\n---\n\n# 16. LISTAS\n\nConserva las listas cuando faciliten la comprensión.\n\nNo conviertas automáticamente todos los párrafos en listas.\n\nUtiliza <ul> y <li> únicamente cuando exista una enumeración real.\n\nEjemplo:\n\n<ul>\n<li>Reduce determinadas tareas manuales.</li>\n<li>Permite conectar diferentes herramientas.</li>\n<li>Facilita la ejecución de procesos repetitivos.</li>\n</ul>\n\nNo utilices listas de una sola opción.\n\n---\n\n# 17. NEGRITAS\n\nUtiliza <strong> para destacar:\n\n* Ideas importantes.\n* Conceptos relevantes.\n* Diferencias.\n* Recomendaciones.\n* Palabras o fragmentos que faciliten el escaneo.\n\nNo pongas frases completas constantemente en negrita.\n\nNo utilices negritas únicamente para aumentar la densidad de palabras clave.\n\n---\n\n# 18. PALABRAS PROHIBIDAS\n\nNo utilices bajo ninguna circunstancia estas palabras:\n\n* costo\n* crucial\n* adquirir\n* calcomanía\n* esencial\n\nSi aparecen en el contenido original, sustitúyelas por una alternativa adecuada sin cambiar el significado.\n\n---\n\n# 19. REVISIÓN FINAL\n\nAntes de devolver el artículo, realiza mentalmente una última revisión.\n\nComprueba que:\n\n* El texto mantiene el significado original.\n* No has inventado información.\n* H1 y H2 se conservan.\n* Las palabras clave importantes siguen presentes.\n* No existen repeticiones artificiales.\n* Las frases suenan naturales.\n* Los párrafos tienen diferentes ritmos.\n* No hay mayúsculas innecesarias.\n* No existen expresiones excesivamente robóticas.\n* El contenido continúa respondiendo claramente a la intención de búsqueda.\n* La humanización no ha reducido la profundidad del artículo.\n* El artículo sigue funcionando para SEO y AI Overviews.\n\n---\n\n# FORMATO DE SALIDA\n\nDevuelve **únicamente el artículo final en HTML limpio**.\n\nNo utilices Markdown.\n\nNo incluyas:\n\n* ```html\n  ```\n* explicaciones.\n* comentarios.\n* notas.\n* introducciones fuera del artículo.\n* análisis del contenido.\n* observaciones sobre los cambios realizados.\n\nSolo puedes utilizar estas etiquetas HTML:\n\n<h1>\n<h2>\n<h3>\n<p>\n<ul>\n<li>\n<strong>\n\nNo utilices ningún otro elemento HTML.\n\nNo añadas atributos, clases, estilos inline ni identificadores.\n\nEjemplo de salida válida:\n\n<h1>Título del artículo</h1>\n\n<p>Primer párrafo del artículo.</p>\n\n<h2>Primer apartado</h2>\n\n<p>Contenido de la sección con una <strong>idea importante</strong>.</p>\n\n<ul>\n<li>Primer punto.</li>\n<li>Segundo punto.</li>\n<li>Tercer punto.</li>\n</ul>\n\n<h3>Subapartado</h3>\n\n<p>Contenido del subapartado.</p>\n\nDevuelve únicamente el HTML final.\n"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "45f2bdc1-fa91-4ac2-8c06-675a098c6014",
+      "name": "Humanizer IA2",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -3840,
+        2512
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  // Validar que existe el contenido\n  if (!item.json.message || !item.json.message.content) {\n    return item;\n  }\n  \n  let content = item.json.message.content;\n  \n  // Remover markdown code blocks\n  content = content.replace(/^```html\\n/, '').replace(/```$/, '').trim();\n  \n  // Remover el H1 (con su contenido y etiquetas de apertura/cierre)\n  content = content.replace(/<h1>.*?<\\/h1>\\s*/s, '');\n  \n  return {\n    json: {\n      ...item.json,\n      message: {\n        ...item.json.message,\n        content: content\n      }\n    }\n  };\n});"
+      },
+      "id": "65e6e402-30b3-438f-815a-19a0b94db41e",
+      "name": "Limpia HTML2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3456,
+        2512
+      ]
+    },
+    {
+      "parameters": {
+        "title": "={{ $('Preparar contenido aprobado').first().json.title }}",
+        "additionalFields": {
+          "content": "={{ $('Limpia HTML2').first().json.message.content }}",
+          "status": "draft"
+        }
+      },
+      "id": "ce18dd6b-7729-42d3-bef0-180f5fb0a43d",
+      "name": "WP INF Global",
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [
+        -3264,
+        2512
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "id": "trigger-generate-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const job=input.job??input;if(job.kind!=='generate_content'||!job.id||!job.client_id||!job.target_id||!job.leaseToken)throw new Error('Contrato generate_content v1 invalido');return [{json:{job}}];"
+      },
+      "id": "validate-generate-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:1200}) }}",
+        "options": {}
+      },
+      "id": "hb-generate-ai-v1",
+      "name": "Heartbeat antes de IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-generate-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const supplied=job.payload?.planItem??{};const base=(ctx.planItems??[]).find(x=>x.id===job.target_id)??{};const p={...base,...supplied};const wpAccount=(ctx.accounts??[]).find(x=>x.provider==='wordpress'&&x.active!==false);if(!wpAccount)throw new Error('Cuenta WordPress no autorizada para el cliente');if(!p.title)throw new Error('No existe el plan item objetivo');return [{json:{title:p.title,keywords:Array.isArray(p.keywords)?p.keywords.join(', '):(p.keywords??''),Entidades:Array.isArray(p.entities)?p.entities.join(', '):(p.entities??''),Justificacion:p.rationale??'',Formato:p.format??'blog',siteKey:wpAccount.instance_key,jobId:job.id}}];"
+      },
+      "id": "prepare-generate-v1",
+      "name": "Preparar contenido aprobado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:600}) }}",
+        "options": {}
+      },
+      "id": "hb-generate-wp-v1",
+      "name": "Heartbeat antes de WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-generate-end-v1",
+      "name": "Heartbeat despues de WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const prepared=$('Preparar contenido aprobado').first().json;const cleaned=$('Limpia HTML2').first().json;const wp=$('WP INF Global').first().json;const bodyHtml=cleaned.message?.content;if(!bodyHtml)throw new Error('El humanizador no devolvio HTML');if(!wp.id)throw new Error('WordPress no devolvio post id');const content={contentId:job.id,title:prepared.title,bodyHtml,bodyText:null,excerpt:null,seo:{keywords:prepared.keywords,entities:prepared.Entidades},promptVersion:'inficon-generate-v1',sourceReferences:[]};const event={schemaVersion:1,clientId:job.client_id,entityType:'content',entityId:content.contentId,eventType:'wordpress.draft_created',sourceEventId:`wordpress:${prepared.siteKey}:${wp.id}:draft`,occurredAt:new Date().toISOString(),payload:{siteKey:prepared.siteKey,postId:String(wp.id),editUrl:wp.link??null,status:'draft'}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',content,event,result:{workflowVersion:1,wordpressStatus:'draft',wordpressPostId:String(wp.id)},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "normalize-generate-v1",
+      "name": "Normalizar borrador y contenido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-generate-v1",
+      "name": "Registrar evento WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Normalizar borrador y contenido').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Normalizar borrador y contenido').first().json.clientId,status:'succeeded',content:$('Normalizar borrador y contenido').first().json.content,result:$('Normalizar borrador y contenido').first().json.result,leaseToken:$('Normalizar borrador y contenido').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-generate-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const raw=$json.error??$json;const error=raw?.message??$json.message??'Fallo generando contenido';const code=Number(raw?.httpCode??raw?.statusCode??raw?.status??0);const text=String(error).toLowerCase();const ambiguous=code===0||[408,409,429,500,502,503,504].includes(code)||/(timeout|timed out|network|socket|connection reset|econnreset)/.test(text);return [{json:{schemaVersion:1,clientId:job.client_id,status:ambiguous?'unknown':'failed',error:String(error).slice(0,4000),result:{workflowVersion:1,reconcileRequired:ambiguous,provider:'wordpress',idempotencyKey:`wordpress-draft:${job.id}`},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-generate-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "fail-result-generate-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de IA": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "Preparar contenido aprobado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar contenido aprobado": {
+      "main": [
+        [
+          {
+            "node": "Merge data2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI company researcher2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI company researcher2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI - Search Google2": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI company researcher2",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI company researcher2": {
+      "main": [
+        [
+          {
+            "node": "Merge data2",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge data2": {
+      "main": [
+        [
+          {
+            "node": "SEO Content Writer2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEO Content Writer2": {
+      "main": [
+        [
+          {
+            "node": "Humanizer IA2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Humanizer IA2": {
+      "main": [
+        [
+          {
+            "node": "Limpia HTML2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpia HTML2": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de WordPress": {
+      "main": [
+        [
+          {
+            "node": "WP INF Global",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WP INF Global": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat despues de WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de WordPress": {
+      "main": [
+        [
+          {
+            "node": "Normalizar borrador y contenido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar borrador y contenido": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento WordPress": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "active": false
+}

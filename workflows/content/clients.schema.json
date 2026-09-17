@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infidash.local/schemas/content-workflow-clients.v1.json",
+  "title": "Infidash content workflow client manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "clients"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "clients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "clientIdEnv", "timezone", "language", "workflowBindings"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "clientIdEnv": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+          "timezone": { "type": "string", "minLength": 1 },
+          "language": { "type": "string", "minLength": 2 },
+          "enabled": { "type": "boolean" },
+          "workflowBindings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["generate_plan", "generate_content", "publish", "reconcile"],
+            "properties": {
+              "generate_plan": { "$ref": "#/$defs/workflowBinding" },
+              "generate_content": { "$ref": "#/$defs/workflowBinding" },
+              "publish": { "$ref": "#/$defs/workflowBinding" },
+              "reconcile": { "$ref": "#/$defs/workflowBinding" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "workflowBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflowIdEnv"],
+      "properties": {
+        "workflowIdEnv": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" }
+      }
+    }
+  }
+}

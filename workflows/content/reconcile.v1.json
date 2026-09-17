@@ -1,0 +1,474 @@
+{
+  "name": "Content v1 - Reconcile Postiz",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-reconcile-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const job=input.job??input;if(job.kind!=='reconcile'||!job.id||!job.client_id||!job.target_id||!job.leaseToken)throw new Error('Contrato reconcile v1 invalido');return [{json:{job}}];"
+      },
+      "id": "validate-reconcile-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:600}) }}",
+        "options": {}
+      },
+      "id": "hb-reconcile-start-v1",
+      "name": "Heartbeat antes de consultar Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-reconcile-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const p=job.payload?.publication??{};if(!p.postizPostId)throw new Error('reconcile requiere postizPostId');const account=(ctx.accounts??[]).find(x=>x.id===p.accountId&&x.provider==='postiz');if(!account)throw new Error('Cuenta Postiz no autorizada');const center=p.confirmedScheduledAt??p.desiredScheduledAt??new Date().toISOString();const d=new Date(center);const start=new Date(d.getTime()-7*86400000).toISOString();const end=new Date(d.getTime()+7*86400000).toISOString();return [{json:{postizPostId:String(p.postizPostId),accountId:account.id,instanceKey:account.instance_key,startDate:start,endDate:end}}];"
+      },
+      "id": "prepare-reconcile-v1",
+      "name": "Preparar consulta Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.POSTIZ_INTERNAL_API_URL + '/public/v1/posts' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "startDate",
+              "value": "={{ $json.startDate }}"
+            },
+            {
+              "name": "endDate",
+              "value": "={{ $json.endDate }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.POSTIZ_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "query-postiz-v1",
+      "name": "Consultar publicaciones Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-reconcile-end-v1",
+      "name": "Heartbeat despues de consultar Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar consulta Postiz').first().json;const raw=$('Consultar publicaciones Postiz').first().json;const list=Array.isArray(raw)?raw:(raw.posts??raw.data??raw.items??[]);const item=list.find(x=>String(x.id??x.postId)===req.postizPostId);let state='unknown';if(item){const s=String(item.status??item.state??'').toLowerCase();if(['published','posted','done'].includes(s))state='published';else if(['scheduled','queue','queued','pending'].includes(s))state='scheduled';else if(['failed','error'].includes(s))state='failed';else if(['cancelled','canceled'].includes(s))state='cancelled';}const publishedAt=state==='published'?(item?.publishedAt??item?.published_at??item?.date??null):null;if(state==='published'&&(!publishedAt||Number.isNaN(Date.parse(publishedAt))))state='unknown';const confirmed=state==='scheduled'?(item?.date??item?.scheduledAt??null):null;const publication={status:state,confirmedScheduledAt:confirmed,postizPostId:req.postizPostId,providerPostId:item?.providerPostId?String(item.providerPostId):null,externalUrl:item?.url??null,publishedAt:state==='published'?publishedAt:null,errorCode:state==='failed'?String(item?.errorCode??'POSTIZ_FAILED'):null,errorMessage:state==='failed'?String(item?.error??item?.message??'Postiz marco la publicacion como fallida'):null};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:`postiz.${state}`,sourceEventId:`postiz-reconcile:${req.instanceKey}:${req.postizPostId}:${state}:${item?.updatedAt??'current'}`,occurredAt:new Date().toISOString(),publicationStatus:state,payload:{...publication,accountId:req.accountId}};return [{json:{schemaVersion:1,clientId:job.client_id,status:state==='unknown'?'unknown':'succeeded',publication,event,result:{workflowVersion:1,reconciled:true},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "normalize-reconcile-v1",
+      "name": "Normalizar estado Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-reconcile-v1",
+      "name": "Registrar evento reconciliado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Normalizar estado Postiz').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Normalizar estado Postiz').first().json.clientId,status:$('Normalizar estado Postiz').first().json.status,publication:$('Normalizar estado Postiz').first().json.publication,result:$('Normalizar estado Postiz').first().json.result,leaseToken:$('Normalizar estado Postiz').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-reconcile-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-reconcile-error-v1",
+      "name": "Heartbeat tras error consulta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar consulta Postiz').first().json;const err=$('Consultar publicaciones Postiz').first().json;const message=String(err.error?.message??err.message??'No se pudo confirmar el estado en Postiz').slice(0,4000);const publication={status:'unknown',postizPostId:req.postizPostId,errorCode:'POSTIZ_RECONCILE_UNAVAILABLE',errorMessage:message};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:'postiz.reconcile_unavailable',sourceEventId:`postiz-reconcile-error:${job.id}`,occurredAt:new Date().toISOString(),publicationStatus:'unknown',payload:{accountId:req.accountId,errorMessage:message}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',publication,event,result:{workflowVersion:1,reconciled:false},error:message,leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "unknown-reconcile-v1",
+      "name": "Marcar reconciliacion unknown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-reconcile-error-v1",
+      "name": "Registrar evento unknown",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Marcar reconciliacion unknown').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Marcar reconciliacion unknown').first().json.clientId,status:'unknown',publication:$('Marcar reconciliacion unknown').first().json.publication,result:$('Marcar reconciliacion unknown').first().json.result,error:$('Marcar reconciliacion unknown').first().json.error,leaseToken:$('Marcar reconciliacion unknown').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-reconcile-error-v1",
+      "name": "Guardar unknown Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de consultar Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de consultar Postiz": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "Preparar consulta Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar consulta Postiz": {
+      "main": [
+        [
+          {
+            "node": "Consultar publicaciones Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar publicaciones Postiz": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat despues de consultar Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heartbeat tras error consulta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de consultar Postiz": {
+      "main": [
+        [
+          {
+            "node": "Normalizar estado Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar estado Postiz": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento reconciliado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento reconciliado": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat tras error consulta": {
+      "main": [
+        [
+          {
+            "node": "Marcar reconciliacion unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar reconciliacion unknown": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento unknown": {
+      "main": [
+        [
+          {
+            "node": "Guardar unknown Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "active": false
+}

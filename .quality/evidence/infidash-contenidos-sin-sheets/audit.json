@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-09-17T00:00:00Z",
+  "branch": "feature/contenidos-sin-sheets",
+  "commit": "9862bf0",
+  "verdict": "CONDITIONAL_GO",
+  "scope": "Implementación revisada en local; no se ejecutaron sistemas externos.",
+  "resolved": [
+    "generate_plan crea o conserva un calendario, lo fija como target y lo incluye en el payload.",
+    "Los trabajos de publicación, reintento y reconciliación reconstruyen su snapshot desde PostgreSQL.",
+    "Un resultado ambiguo de WordPress pasa a unknown y requiere reconciliación."
+  ],
+  "validation": {
+    "content_tests": "32 passed",
+    "lint": "passed",
+    "build": "passed",
+    "full_test_suite": "53 passed, 11 environment failures: API server and DATABASE_URL are not configured in this workspace"
+  },
+  "external_preconditions": [
+    "Aplicar migraciones y probar concurrencia contra PostgreSQL de staging.",
+    "Importar y configurar los exports de los otros 14 clientes en n8n.",
+    "Probar flujos reales de WordPress y Postiz, incluida reconciliación de timeouts, en staging."
+  ]
+}

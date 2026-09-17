@@ -1,0 +1,1989 @@
+{
+  "name": "Content v1 - Inficon Global - Generate plan",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista de tendencias de búsqueda para una agencia de marketing digital y automatización con IA.\n\nDatos de Google Trends (queries en alza y queries top):\nRising: {{ JSON.stringify($json.rising_queries, null, 2) }}\nTop: {{ JSON.stringify($json.top_queries, null, 2) }}\nResumen previo: {{ $json.summary }}\n\nTarea: identifica qué tendencias son realmente aprovechables para crear contenido en las próximas semanas, descartando ruido (queries genéricas, de marca ajena o sin relación con el sector).\n\nDevuelve SOLO este JSON (sin markdown, sin explicaciones):\n{\n  \"analysis_type\": \"trends\",\n  \"resumen\": \"2-3 líneas con la lectura general de las tendencias\",\n  \"tendencias_relevantes\": [\n    {\"query\": \"...\", \"motivo\": \"por qué es aprovechable para contenido\", \"urgencia\": \"alta|media|baja\"}\n  ],\n  \"tendencias_descartadas\": [\"query1\", \"query2\"],\n  \"angulos_de_contenido\": [\"idea de ángulo editorial 1\", \"idea de ángulo editorial 2\"]\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "bfba4f8b-8eaf-4924-bf09-b18a9995be99",
+      "name": "🤖 Agente IA: Tendencias",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        336,
+        2032
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'trends', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'trends';\nreturn [{ json: parsed }];"
+      },
+      "id": "d9c0262a-5503-4890-993e-402a8027e184",
+      "name": "📝 Parsear IA Tendencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        2032
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 1800
+        }
+      },
+      "id": "7a217eae-6880-4996-a1c3-88333af2e464",
+      "name": "OpenAI — Histórico",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        2928
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista de rendimiento de contenidos web.\n\nDatos históricos de GA4 (últimos 30 días):\nMeta: {{ JSON.stringify($json.meta, null, 2) }}\nTop performing: {{ JSON.stringify($json.top_performing, null, 2) }}\nPáginas con mayor duración: {{ JSON.stringify($json.high_duration_pages, null, 2) }}\nPáginas con mayor engagement: {{ JSON.stringify($json.high_engagement_pages, null, 2) }}\nInsights: {{ $json.insights }}\n\nTarea: identifica qué patrones de contenido (temas, formatos, tipo de título) están funcionando mejor, y cuáles conviene replicar o actualizar. No repitas los datos en bruto, interprétalos.\n\nDevuelve SOLO este JSON:\n{\n  \"analysis_type\": \"historical\",\n  \"resumen\": \"2-3 líneas sobre qué tipo de contenido funciona mejor y por qué\",\n  \"patrones_ganadores\": [\"patrón 1 (ej: guías comparativas generan más tiempo en página)\", \"patrón 2\"],\n  \"contenido_a_actualizar\": [\"página o tema con buen tráfico que podría refrescarse\"],\n  \"contenido_a_replicar\": [\"tema/formato que deberíamos repetir en el nuevo calendario\"]\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "5ac18214-4d8e-4b80-8b48-9be1b2f668de",
+      "name": "🤖 Agente IA: Histórico",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        320,
+        2832
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'historical', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'historical';\nreturn [{ json: parsed }];"
+      },
+      "id": "9f4d3b5a-f7b0-4330-8e6d-b27fa2f60ff5",
+      "name": "📝 Parsear IA Histórico",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 1800
+        }
+      },
+      "id": "f9ce8fb0-8c75-4b4a-9e69-f670d773dd99",
+      "name": "OpenAI — Search Console Páginas",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        3216
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista SEO especializado en Search Console.\n\nDatos de páginas en Search Console (30 días):\nMeta: {{ JSON.stringify($json.meta, null, 2) }}\nTop por clicks: {{ JSON.stringify($json.top_by_clicks, null, 2) }}\nOportunidades (pos 4-15, CTR bajo): {{ JSON.stringify($json.opportunities, null, 2) }}\nOportunidades página 2 (pos 11-20): {{ JSON.stringify($json.page2_opportunities, null, 2) }}\nPáginas en top 3 (proteger): {{ JSON.stringify($json.top3_positions, null, 2) }}\nInsights: {{ $json.insights }}\n\nTarea: separa qué páginas hay que proteger (no tocar, van bien), cuáles necesitan optimización de título/meta para mejorar CTR, y cuáles necesitan contenido nuevo de refuerzo (clúster) para subir de posición.\n\nDevuelve SOLO este JSON:\n{\n  \"analysis_type\": \"search_console\",\n  \"resumen\": \"2-3 líneas sobre el estado SEO del sitio\",\n  \"paginas_proteger\": [\"url1\", \"url2\"],\n  \"paginas_optimizar_ctr\": [\n    {\"pagina\": \"url\", \"posicion\": \"n\", \"accion_sugerida\": \"reescribir title/meta, añadir FAQ, etc.\"}\n  ],\n  \"paginas_reforzar_con_contenido_nuevo\": [\n    {\"pagina\": \"url\", \"tema_sugerido_para_pillar_o_cluster\": \"...\"}\n  ]\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "888421e5-94e6-4594-a60d-3fd3fce33000",
+      "name": "🤖 Agente IA: SC Páginas",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        384,
+        3072
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'search_console', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'search_console';\nreturn [{ json: parsed }];"
+      },
+      "id": "44fcccb6-9457-40a2-a70c-de79ba76deb8",
+      "name": "📝 Parsear IA SC Páginas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        3072
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 1800
+        }
+      },
+      "id": "b8ca27b3-44d6-4c0d-a839-64601526a86e",
+      "name": "OpenAI — Queries",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        928,
+        3392
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista SEO especializado en intención de búsqueda.\n\nDatos de queries reales en Search Console (30 días):\nMeta: {{ JSON.stringify($json.meta, null, 2) }}\nTop por clicks: {{ JSON.stringify($json.top_by_clicks, null, 2) }}\nOportunidades (pos 4-15, CTR bajo): {{ JSON.stringify($json.opportunities, null, 2) }}\nTop por impresiones: {{ JSON.stringify($json.top_by_impressions, null, 2) }}\nYa en top 3: {{ JSON.stringify($json.top3_positions, null, 2) }}\nInsights: {{ $json.insights }}\n\nTarea: agrupa las queries por intención/tema y detecta qué clústeres de keywords merecen un artículo o pieza de contenido dedicada, priorizando las que tienen impresiones altas pero clicks bajos (oportunidad real).\n\nDevuelve SOLO este JSON:\n{\n  \"analysis_type\": \"queries_analytics\",\n  \"resumen\": \"2-3 líneas sobre qué busca la gente que nos encuentra\",\n  \"clusters_de_intencion\": [\n    {\"tema\": \"...\", \"queries\": [\"q1\",\"q2\"], \"prioridad\": \"alta|media|baja\", \"justificacion\": \"...\"}\n  ],\n  \"keywords_alta_impresion_bajo_click\": [\"kw1\", \"kw2\"]\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "9f2b8e5f-715c-48cb-9b09-fa6fe8eb1e15",
+      "name": "🤖 Agente IA: Queries",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        416,
+        3280
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'queries_analytics', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'queries_analytics';\nreturn [{ json: parsed }];"
+      },
+      "id": "19b1f7fe-f273-40f7-b624-fd9663f17ae2",
+      "name": "📝 Parsear IA Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        3280
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 1000
+        }
+      },
+      "id": "d2444b52-171a-411d-919a-ff5a02f23471",
+      "name": "OpenAI — Rankings SerpLab",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        944,
+        3616
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista SEO de posicionamiento (rank tracking).\n\nDatos de rankings semanales (SerpLab/Serprobot):\nMeta: {{ JSON.stringify($json.meta, null, 2) }}\nTop 3: {{ JSON.stringify($json.top3, null, 2) }}\nPágina 1 (pos 4-10): {{ JSON.stringify($json.page1_pos4_10, null, 2) }}\nPágina 2 (pos 11-20): {{ JSON.stringify($json.page2_pos11_20, null, 2) }}\nOportunidades: {{ JSON.stringify($json.opportunities, null, 2) }}\nAnálisis por página: {{ JSON.stringify($json.pages_analysis, null, 2) }}\nInsights: {{ $json.insights }}\n\nTarea: prioriza acciones de contenido según el ranking: qué keywords hay que \"rescatar\" (perdieron posición), cuáles están a punto de entrar en página 1 y necesitan un empujón de contenido, y cuáles tienen CPC alto pero no están en top 3 (oportunidad de negocio desaprovechada).\n\nDevuelve SOLO este JSON:\n{\n  \"analysis_type\": \"serplab_rankings\",\n  \"resumen\": \"2-3 líneas sobre el estado del posicionamiento\",\n  \"keywords_a_rescatar\": [{\"keyword\": \"...\", \"posicion_actual\": 0, \"mejor_posicion\": 0, \"accion\": \"...\"}],\n  \"keywords_cerca_de_pagina_1\": [{\"keyword\": \"...\", \"posicion_actual\": 0, \"accion\": \"...\"}],\n  \"oportunidades_alto_valor_sin_explotar\": [{\"keyword\": \"...\", \"cpc\": 0, \"accion\": \"...\"}]\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "caf0ba8c-0b15-49aa-9fbd-b1d0be7dabbd",
+      "name": "🤖 Agente IA: Rankings",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        432,
+        3504
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'serplab_rankings', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'serplab_rankings';\nreturn [{ json: parsed }];"
+      },
+      "id": "874ca9e0-a1af-476b-87f3-18cbbe1aec09",
+      "name": "📝 Parsear IA Rankings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        3504
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {
+          "maxTokens": 1000
+        }
+      },
+      "id": "faf45aa3-7283-45e3-9274-135e146b9283",
+      "name": "OpenAI — Estacionalidad",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        3904
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista de estacionalidad de búsquedas.\n\nDatos de interés mensual (últimos 12 meses):\nInterés mensual: {{ JSON.stringify($json.monthly_interest, null, 2) }}\nMes pico: {{ $json.peak_month }}\nTop meses: {{ JSON.stringify($json.top_months, null, 2) }}\n\nFecha de hoy: {{ $now.format('yyyy-MM-dd') }}\n\nTarea: determina si en las próximas semanas nos acercamos a un pico estacional (hay que publicar contenido ANTES del pico, no durante) y qué temas conviene anticipar.\n\nDevuelve SOLO este JSON:\n{\n  \"analysis_type\": \"seasonal\",\n  \"resumen\": \"2-3 líneas sobre si estamos entrando en temporada alta o baja\",\n  \"alerta_estacional\": \"próximo pico detectado y cuántas semanas faltan (o null si no aplica)\",\n  \"temas_a_anticipar\": [\"tema que debería publicarse ya para llegar a tiempo al pico\"],\n  \"recomendacion_timing\": \"cuándo publicar respecto al pico (ej: 2-3 semanas antes)\"\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "78a65cc6-f573-4d41-9e77-bb73d98d2480",
+      "name": "🤖 Agente IA: Estacionalidad",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        400,
+        3744
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'seasonal', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'seasonal';\nreturn [{ json: parsed }];"
+      },
+      "id": "41c8bd4d-ba1a-4525-99a3-f695ce3939d8",
+      "name": "📝 Parsear IA Estacionalidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        3744
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx=$('Cargar contexto Infidash').first().json;const cfg=ctx.settings?.editorial_config??{};return [{json:{topic:cfg.topic??'marketing digital',country:cfg.country??'ES',keywords:Array.isArray(cfg.keywords)?cfg.keywords.join(', '):(cfg.keywords??''),weeks_horizon:Number(cfg.weeksHorizon??4),site_url:cfg.siteUrl??'https://inficonglobal.es/',client_context:ctx}}];"
+      },
+      "id": "93543e5e-47b6-4b87-9d57-8e481ac7e340",
+      "name": "⚙️ Configuración1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        2592
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.topic }}"
+            },
+            {
+              "name": "geo",
+              "value": "={{ $('⚙️ Configuración1').item.json.country }}"
+            },
+            {
+              "name": "engine",
+              "value": "google_trends"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.SERPAPI_API_KEY }}"
+            },
+            {
+              "name": "data_type",
+              "value": "RELATED_QUERIES"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "fb252dd0-62b1-4df7-b38d-0ef63e137ce4",
+      "name": "📈 A: Google Trends1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -96,
+        2032
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.item.json;\nconst rising = (d.related_queries?.rising || []).slice(0, 10);\nconst top    = (d.related_queries?.top    || []).slice(0, 10);\nreturn [{ json: {\n  analysis_type: 'trends',\n  rising_queries: rising.map(r => ({ query: r.query, value: r.value })),\n  top_queries:    top.map(t    => ({ query: t.query, value: t.value })),\n  summary: `${rising.length} tendencias en alza · ${top.length} queries top detectadas`\n}}];"
+      },
+      "id": "3c52fc7a-a491-4ac8-925f-4c85b82f810d",
+      "name": "📈 A: Procesar Tendencias1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        2032
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 1800,
+          "temperature": 0.2
+        }
+      },
+      "id": "37d25c73-bb0d-407b-b750-edcd3a243d7a",
+      "name": "OpenAI — Competidor1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        2704
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "competitors_analysis",
+        "options": {}
+      },
+      "id": "e558aac6-1037-4d92-ae28-d54d7036ca56",
+      "name": "🏢 B: Agregar Competidores1",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1376,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bm1",
+              "name": "analysis_type",
+              "value": "competitors",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {
+          "dotNotation": false
+        }
+      },
+      "id": "2c249c83-b8cf-4984-892a-94dc04a47f27",
+      "name": "🏢 B: Marcar Tipo1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1552,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "propertyId": {
+          "__rl": true,
+          "value": "={{ $env.GA4_PROPERTY_ID_INFICON }}",
+          "mode": "id"
+        },
+        "dateRange": "last30days",
+        "metricsGA4": {
+          "metricValues": [
+            {},
+            {
+              "listName": "other",
+              "name": "averageSessionDuration"
+            },
+            {
+              "listName": "other",
+              "name": "eventsPerSession"
+            }
+          ]
+        },
+        "dimensionsGA4": {
+          "dimensionValues": [
+            {
+              "listName": "other",
+              "name": "landingPage"
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "id": "ac2c0691-44a9-4653-af9a-de3d46655bcc",
+      "name": "📊 C: GA4 — Top Contenidos1",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        2832
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "var allItems = $input.all();\nvar pages = [];\n\nfor (var i = 0; i < allItems.length; i++) {\n  var r = allItems[i].json;\n\n  var path = r.landingPage || r.pagePath || r.pageLocation || '';\n\n  if (path.indexOf('http') === 0) {\n    try { path = new URL(path).pathname; } catch(e) {}\n  }\n\n  if (!path) continue;\n\n  var views    = parseInt(r.totalUsers || r.screenPageViews || 0);\n  var duration = parseFloat(r.averageSessionDuration || r.userEngagementDuration || 0);\n  var events   = parseFloat(r.eventsPerSession || 0);\n  var title    = r.pageTitle || path;\n\n  pages.push({\n    path:         path,\n    title:        title,\n    views:        views,\n    duration:     duration.toFixed(0) + 's',\n    duration_raw: duration,\n    events_per_session: events.toFixed(2)\n  });\n}\n\npages.sort(function(a, b) { return b.views - a.views; });\n\nvar total_views = 0;\nfor (var j = 0; j < pages.length; j++) {\n  total_views += pages[j].views;\n}\n\nvar avg_duration = 0;\nfor (var k = 0; k < pages.length; k++) {\n  avg_duration += pages[k].duration_raw;\n}\navg_duration = pages.length > 0\n  ? (avg_duration / pages.length).toFixed(0) + 's'\n  : 'N/A';\n\nvar top10 = pages.slice(0, 10);\n\nvar high_duration = pages.slice().sort(function(a, b) {\n  return b.duration_raw - a.duration_raw;\n}).slice(0, 5);\n\nvar high_engagement = pages.slice().sort(function(a, b) {\n  return parseFloat(b.events_per_session) - parseFloat(a.events_per_session);\n}).slice(0, 5);\n\nvar parts = [];\nparts.push(pages.length + ' landings analizadas. Total usuarios: ' + total_views + '.');\nif (top10[0]) {\n  parts.push('Top landing: ' + (top10[0].title || top10[0].path) + ' con ' + top10[0].views + ' usuarios.');\n}\nparts.push('Duracion media de sesion: ' + avg_duration + '.');\nif (high_duration.length > 0) {\n  parts.push('Mayor tiempo en pagina: ' + high_duration.slice(0, 3).map(function(p) {\n    return p.path + ' (' + p.duration + ')';\n  }).join(', ') + '.');\n}\n\nreturn [{\n  json: {\n    analysis_type: 'historical',\n    meta: {\n      total_pages_analyzed: pages.length,\n      total_users: total_views,\n      avg_session_duration: avg_duration,\n      period_days: 30\n    },\n    top_performing:       top10,\n    all_pages:            pages,\n    high_duration_pages:  high_duration,\n    high_engagement_pages: high_engagement,\n    best_content: top10[0] ? (top10[0].title || top10[0].path) : 'N/A',\n    insights: parts.join(' ')\n  }\n}];"
+      },
+      "id": "2435f8c3-a3a9-4666-81b8-1179ed2f616a",
+      "name": "📊 C: Procesar Histórico1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_trends"
+            },
+            {
+              "name": "q",
+              "value": "={{ $('⚙️ Configuración1').item.json.keywords }}"
+            },
+            {
+              "name": "geo",
+              "value": "={{ $('⚙️ Configuración1').item.json.country }}"
+            },
+            {
+              "name": "data_type",
+              "value": "TIMESERIES"
+            },
+            {
+              "name": "date",
+              "value": "today 12-m"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.SERPAPI_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b6d6383c-8b92-4186-9b7a-1a78a6c9e529",
+      "name": "🌍 D: Estacionalidad — SerpAPI1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -80,
+        3744
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tl = $input.item.json?.interest_over_time?.timeline_data || [];\nconst monthly = {};\ntl.forEach(p => {\n  const dt = new Date(p.timestamp * 1000);\n  const k  = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;\n  if (!monthly[k]) monthly[k] = [];\n  monthly[k].push(parseInt(p.values?.[0]?.extracted_value || 0));\n});\nconst avgs = Object.entries(monthly)\n  .map(([m, v]) => ({ month: m, avg: Math.round(v.reduce((a,b)=>a+b,0)/v.length) }))\n  .sort((a, b) => b.avg - a.avg);\nreturn [{ json: {\n  analysis_type:    'seasonal',\n  monthly_interest: avgs,\n  peak_month:       avgs[0]?.month || 'N/A',\n  top_months:       avgs.slice(0, 4),\n  seasonal_tip:     `Pico de interés detectado en ${avgs[0]?.month}`\n}}];"
+      },
+      "id": "b4d6542a-380d-4b80-babf-d3e103758ef9",
+      "name": "🌍 D: Procesar Estacionalidad1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        3744
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getPageInsights",
+        "siteUrl": "={{ $('⚙️ Configuración1').first().json.site_url }}",
+        "dateRangeMode": "last12mo",
+        "rowLimit": 20,
+        "dimensions": [
+          "query"
+        ],
+        "filters": {
+          "filter": []
+        }
+      },
+      "type": "n8n-nodes-google-search-console.googleSearchConsole",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        3280
+      ],
+      "id": "3057f23a-d644-498b-9210-08b9d2e999b8",
+      "name": "Query search console1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "getPageInsights",
+        "siteUrl": "={{ $('⚙️ Configuración1').first().json.site_url }}"
+      },
+      "type": "n8n-nodes-google-search-console.googleSearchConsole",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        3072
+      ],
+      "id": "15130ffc-85ea-47af-9693-33bc81dd9807",
+      "name": "Pages search console1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "var allItems = $input.all();\nvar queries = [];\n\nfor (var i = 0; i < allItems.length; i++) {\n  var r = allItems[i].json;\n\n  var query       = r.query || '';\n  var clicks      = parseInt(r.clicks || 0);\n  var impressions = parseInt(r.impressions || 0);\n  var ctr         = parseFloat(r.ctr || 0);\n  var position    = parseFloat(r.position || 0);\n\n  if (!query || query === '(not set)') continue;\n\n  queries.push({\n    query:       query,\n    clicks:      clicks,\n    impressions: impressions,\n    ctr:         (ctr * 100).toFixed(2) + '%',\n    ctr_raw:     ctr,\n    position:    position.toFixed(1)\n  });\n}\n\n// Ordenar por clicks desc\nqueries.sort(function(a, b) { return b.clicks - a.clicks; });\n\n// Totales\nvar total_clicks = 0;\nvar total_impressions = 0;\nfor (var j = 0; j < queries.length; j++) {\n  total_clicks      += queries[j].clicks;\n  total_impressions += queries[j].impressions;\n}\n\nvar avg_ctr = total_impressions > 0\n  ? ((total_clicks / total_impressions) * 100).toFixed(2) + '%'\n  : 'N/A';\n\nvar avg_position = 0;\nfor (var k = 0; k < queries.length; k++) {\n  avg_position += parseFloat(queries[k].position);\n}\navg_position = queries.length > 0\n  ? (avg_position / queries.length).toFixed(1)\n  : 'N/A';\n\n// Top 10 por clicks\nvar top10 = queries.slice(0, 10);\n\n// Oportunidades: posicion 4-15 + impresiones altas + CTR bajo\nvar opportunities = [];\nfor (var l = 0; l < queries.length; l++) {\n  var q = queries[l];\n  if (parseFloat(q.position) >= 4 &&\n      parseFloat(q.position) <= 15 &&\n      q.impressions > 50 &&\n      q.ctr_raw < 0.05) {\n    opportunities.push(q);\n  }\n}\nopportunities.sort(function(a, b) { return b.impressions - a.impressions; });\nopportunities = opportunities.slice(0, 10);\n\n// Top por impresiones (volumen sin clicks)\nvar top_impressions = queries.slice().sort(function(a, b) {\n  return b.impressions - a.impressions;\n}).slice(0, 10);\n\n// Ya en top 3\nvar top3 = queries.filter(function(q) {\n  return parseFloat(q.position) <= 3;\n}).slice(0, 10);\n\nvar parts = [];\nparts.push(queries.length + ' queries analizadas.');\nparts.push('Total clicks: ' + total_clicks + '. Total impresiones: ' + total_impressions + '.');\nparts.push('CTR medio: ' + avg_ctr + '. Posicion media: ' + avg_position + '.');\nif (top10[0]) {\n  parts.push('Top query: \"' + top10[0].query + '\" con ' + top10[0].clicks + ' clicks (pos ' + top10[0].position + ').');\n}\nif (opportunities.length > 0) {\n  parts.push(opportunities.length + ' oportunidades (pos 4-15, CTR bajo): ' +\n    opportunities.slice(0, 3).map(function(q) {\n      return '\"' + q.query + '\" (pos ' + q.position + ', ' + q.impressions + ' imp)';\n    }).join(', ') + '.');\n}\n\nreturn [{\n  json: {\n        analysis_type: 'queries_analytics',\n    meta: {\n      total_queries:     queries.length,\n      total_clicks:      total_clicks,\n      total_impressions: total_impressions,\n      avg_ctr:           avg_ctr,\n      avg_position:      avg_position,\n      period_days:       30\n    },\n    top_by_clicks:      top10,\n    top_by_impressions: top_impressions,\n    top3_positions:     top3,\n    opportunities:      opportunities,\n    all_queries:        queries,\n    insights: parts.join(' ')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        3280
+      ],
+      "id": "ddb475ec-c4b1-4742-bc61-3193f1f7754c",
+      "name": "Code querys1"
+    },
+    {
+      "parameters": {
+        "jsCode": "var allItems = $input.all();\nvar DEBUG_keys = allItems.length > 0 ? Object.keys(allItems[0].json) : [];\nvar pages = [];\n\nfor (var i = 0; i < allItems.length; i++) {\n  var r = allItems[i].json;\n\n  // Search Console pages puede llamar al campo de distintas formas\n  var page = r.page || r.keys || r.url || r.pagePath || '';\n\n  // Si viene como array (a veces GSC devuelve keys:[page])\n  if (Array.isArray(page)) page = page[0] || '';\n\n  // Limpiar dominio si viene URL completa — dejar solo el path\n  if (page.indexOf('http') === 0) {\n    try { page = new URL(page).pathname; } catch(e) {}\n  }\n\n  if (!page || page === '(not set)') continue;\n\n  var clicks      = parseInt(r.clicks || 0);\n  var impressions = parseInt(r.impressions || 0);\n  var ctr         = parseFloat(r.ctr || 0);\n  var position    = parseFloat(r.position || 0);\n\n  pages.push({\n    page:        page,\n    clicks:      clicks,\n    impressions: impressions,\n    ctr:         (ctr * 100).toFixed(2) + '%',\n    ctr_raw:     ctr,\n    position:    position.toFixed(1),\n    position_raw: position\n  });\n}\n\n// Ordenar por clicks desc\npages.sort(function(a, b) { return b.clicks - a.clicks; });\n\n// Totales\nvar total_clicks = 0;\nvar total_impressions = 0;\nfor (var j = 0; j < pages.length; j++) {\n  total_clicks      += pages[j].clicks;\n  total_impressions += pages[j].impressions;\n}\n\nvar avg_ctr = total_impressions > 0\n  ? ((total_clicks / total_impressions) * 100).toFixed(2) + '%'\n  : 'N/A';\n\nvar avg_position = 0;\nfor (var k = 0; k < pages.length; k++) {\n  avg_position += pages[k].position_raw;\n}\navg_position = pages.length > 0\n  ? (avg_position / pages.length).toFixed(1)\n  : 'N/A';\n\n// Top 10 por clicks\nvar top10 = pages.slice(0, 10);\n\n// Oportunidades: posicion 4-15 + impresiones altas + CTR bajo\n// Son las paginas que Google ya muestra pero nadie clickea\nvar opportunities = [];\nfor (var l = 0; l < pages.length; l++) {\n  var p = pages[l];\n  if (p.position_raw >= 4 &&\n      p.position_raw <= 15 &&\n      p.impressions > 30 &&\n      p.ctr_raw < 0.05) {\n    opportunities.push(p);\n  }\n}\nopportunities.sort(function(a, b) { return b.impressions - a.impressions; });\nopportunities = opportunities.slice(0, 10);\n\n// Top por impresiones (se ven mucho pero no se clickean)\nvar top_impressions = pages.slice().sort(function(a, b) {\n  return b.impressions - a.impressions;\n}).slice(0, 10);\n\n// Ya en top 3 (proteger — buen contenido)\nvar top3 = pages.filter(function(p) {\n  return p.position_raw <= 3;\n}).slice(0, 10);\n\n// Paginas en pag 2 (pos 11-20) con potencial\nvar page2 = pages.filter(function(p) {\n  return p.position_raw >= 11 && p.position_raw <= 20;\n}).slice(0, 10);\n\nvar parts = [];\nparts.push(pages.length + ' paginas analizadas en Search Console.');\nparts.push('Total clicks: ' + total_clicks + '. Total impresiones: ' + total_impressions + '.');\nparts.push('CTR medio: ' + avg_ctr + '. Posicion media: ' + avg_position + '.');\nif (top10[0]) {\n  parts.push('Pagina top: \"' + top10[0].page + '\" con ' + top10[0].clicks + ' clicks (pos ' + top10[0].position + ').');\n}\nif (opportunities.length > 0) {\n  parts.push(opportunities.length + ' paginas con oportunidad de mejora (pos 4-15, CTR bajo): ' +\n    opportunities.slice(0, 3).map(function(p) {\n      return '\"' + p.page + '\" (pos ' + p.position + ', ' + p.impressions + ' imp)';\n    }).join(', ') + '.');\n}\nif (top3.length > 0) {\n  parts.push('Paginas en top 3 (proteger): ' +\n    top3.slice(0, 3).map(function(p) { return '\"' + p.page + '\"'; }).join(', ') + '.');\n}\n\nreturn [{\n  json: {\n    analysis_type: 'search_console',\n  \n    meta: {\n      total_pages:       pages.length,\n      total_clicks:      total_clicks,\n      total_impressions: total_impressions,\n      avg_ctr:           avg_ctr,\n      avg_position:      avg_position,\n      period_days:       30\n    },\n    top_by_clicks:      top10,\n    top_by_impressions: top_impressions,\n    top3_positions:     top3,\n    page2_opportunities: page2,\n    opportunities:      opportunities,\n    all_pages:          pages,\n    insights:           parts.join(' ')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        3072
+      ],
+      "id": "0e5690ae-0d6e-4499-a2ec-6b29813cf344",
+      "name": "search console pages1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1216,
+        2400
+      ],
+      "id": "faece732-0df5-4b45-9ccd-f9fd9df3d053",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx=$('Cargar contexto Infidash').first().json;const rows=[...(ctx.recentContents??[]),...(ctx.planItems??[])];return [{json:{analysis_type:'published_articles',total_published:(ctx.recentContents??[]).filter(x=>x.status==='published').length,articles:rows.map(x=>({title:x.title,date:x.planned_at??x.updated_at??null,status:x.status})),used_keywords:[],used_titles:rows.map(x=>x.title).filter(Boolean),insights:rows.length+' contenidos existentes; evitar titulos duplicados.'}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        1808
+      ],
+      "id": "c3313fab-4c5a-466a-acae-02ce2b4407d1",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "resource": "Datasets",
+        "datasetId": "={{ $json.defaultDatasetId }}",
+        "offset": {},
+        "limit": 20,
+        "options": {}
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        64,
+        2272
+      ],
+      "id": "01b9513b-db8b-440c-8c6a-da6047b43065",
+      "name": "Get dataset items2",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Actúa como un experto analista de contenido. Tu tarea es analizar exahustivamente el contenido extraído de la página de un competidor.\n\n\n\nContenido para analizar:\n\n{{ $('Get dataset items2').item.json.text }}, \n\"\"\"\nBasado en el texto anterior, genera un JSON estricto (sin markdown, sin bloques de código) con la siguiente estructura:\n{\n  \"headers\": [\"titulo pricipal del post\"],\n\"resumen\":[\"analisis de los datos obtenidos\"]\n}\n\nIMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. No incluyas introducciones ni explicaciones.",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "7055159e-d6d5-4b87-839d-879fbe469547",
+      "name": "🏢 B: IA Analiza Competidor3",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        480,
+        2272
+      ],
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst articulos = items.map((item, index) => {\n  let header = '';\n  let resumen = '';\n\n  try {\n    const parsed = JSON.parse(item.json.text);\n    \n    header = parsed.headers?.[0] || '';\n    resumen = Array.isArray(parsed.resumen) \n      ? parsed.resumen.join(' ') \n      : parsed.resumen || '';\n      \n  } catch (e) {\n    header = `Error item ${index + 1}: ${e.message}`;\n    resumen = '';\n  }\n\n  return {\n    id: index + 1,\n    header,\n    resumen\n  };\n});\n\nreturn [{\n  json: {\n    articulos,\n    total: articulos.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        2272
+      ],
+      "id": "56cae06d-f3ca-47fe-80d3-546ac4e9e478",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "resource": "Datasets",
+        "datasetId": "={{ $json.defaultDatasetId }}",
+        "offset": {},
+        "limit": 20,
+        "options": {}
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        80,
+        2480
+      ],
+      "id": "7628bc98-d734-4df5-bd3c-fceccfe23ade",
+      "name": "Get dataset items3",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Actúa como un experto analista de contenido. Tu tarea es analizar exahustivamente el contenido extraído de la página de un competidor.\n\n\n\nContenido de Instagram para analizar:\n{{ $json.text }}\n\"\"\"\nBasado en el texto anterior, genera un JSON estricto (sin markdown, sin bloques de código) con la siguiente estructura:\n{\n  \"headers\": [\"titulo pricipal del post\"],\n\"resumen\":[\"analisis de los datos obtenidos\"]\n}\n\nIMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. No incluyas introducciones ni explicaciones.",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "2f220f54-ed8b-4556-a1fa-3f511c04db10",
+      "name": "🏢 B: IA Analiza Competidor1",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        496,
+        2480
+      ],
+      "alwaysOutputData": false,
+      "executeOnce": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst articulos = items.map((item, index) => {\n  let header = '';\n  let resumen = '';\n\n  try {\n    const parsed = JSON.parse(item.json.text);\n    \n    header = parsed.headers?.[0] || '';\n    resumen = Array.isArray(parsed.resumen) \n      ? parsed.resumen.join(' ') \n      : parsed.resumen || '';\n      \n  } catch (e) {\n    header = `Error item ${index + 1}: ${e.message}`;\n    resumen = '';\n  }\n\n  return {\n    id: index + 1,\n    header,\n    resumen\n  };\n});\n\nreturn [{\n  json: {\n    articulos,\n    total: articulos.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        2480
+      ],
+      "id": "4aa5cb28-d260-4305-88f1-8dec498aeffa",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Parsear correctamente: data llega como STRING ────────────────────────\nconst raw = $input.item.json;\nlet parsed;\n\ntry {\n  // El JSON de SerpLab viene como string en raw.data → hay que parsearlo\n  parsed = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;\n} catch(e) {\n  return [{ json: { error: 'JSON inválido en raw.data', detail: e.message, sample: String(raw.data).substring(0, 300) } }];\n}\n\nconst rows      = parsed?.report_data || [];\nconst meta_root = parsed || {};\n\n// ─── Helpers ──────────────────────────────────────────────────────────────\nconst g = (obj, ...keys) => {\n  for (const k of keys) {\n    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];\n  }\n  return null;\n};\n\nconst num = v => {\n  if (v === null || v === undefined || v === '-' || v === '' || v === 'N/A') return null;\n  const n = parseFloat(String(v).replace(',', '.'));\n  return isNaN(n) ? null : n;\n};\n\n// ─── Normalizar keywords ──────────────────────────────────────────────────\nconst keywords = rows.map(r => {\n  const pos_latest = num(g(r, 'latest_position',   'posición_más_última'));\n  const pos_best   = num(g(r, 'best_ever_position', 'mejor_posición_de_todos'));\n  const vol_local  = num(g(r, 'volume_local',       'volumen_local'));\n  const cpc_local  = num(g(r, 'cpc_local')) ?? 0;\n  const url        = g(r, 'found_serp', 'serp_encontrado') || null;\n\n  return {\n    id:          g(r, 'keyword_id', 'id_palabra_clave'),\n    keyword:     g(r, 'keyword', 'palabra_clave') || '',\n    change:      num(g(r, 'change', 'cambio')) ?? 0,\n    pos_latest,\n    pos_best,\n    pos_first:   num(g(r, 'first_ever_position', 'primera_posición_de_todos')),\n    url:         url === 'NOT FOUND' || url === '' ? null : url,\n    not_found:   url === 'NOT FOUND',\n    vol_local,\n    vol_global:  num(g(r, 'volume_global', 'volumen_global')),\n    cpc_local,\n    cpc_global:  num(g(r, 'cpc_global')) ?? 0,\n    cmp_local:   num(g(r, 'cmp_local'))  ?? 0,\n    updated:     g(r, 'updated', 'actualizado'),\n    gap_to_best: (pos_latest !== null && pos_best !== null) ? pos_latest - pos_best : null,\n  };\n}).filter(k => k.keyword.length > 0);\n\n// ─── Clasificar ───────────────────────────────────────────────────────────\nconst ranking    = keywords.filter(k => k.pos_latest !== null && !k.not_found);\nconst no_rank    = keywords.filter(k => k.pos_latest === null || k.not_found);\n\nconst pos1_3     = ranking.filter(k => k.pos_latest <= 3);\nconst pos4_10    = ranking.filter(k => k.pos_latest >= 4  && k.pos_latest <= 10);\nconst pos11_20   = ranking.filter(k => k.pos_latest >= 11 && k.pos_latest <= 20);\n\nconst lost_ground = ranking\n  .filter(k => k.gap_to_best !== null && k.gap_to_best > 3)\n  .sort((a, b) => b.gap_to_best - a.gap_to_best);\n\nconst recoverable = ranking\n  .filter(k => k.pos_latest >= 11 && k.pos_best !== null && k.pos_best <= 10);\n\nconst high_cpc = keywords\n  .filter(k => k.cpc_local > 1 && (k.pos_latest === null || k.pos_latest > 3))\n  .sort((a, b) => b.cpc_local - a.cpc_local);\n\nconst improved = ranking\n  .filter(k => k.change < 0)\n  .sort((a, b) => a.change - b.change);\n\nconst at_best = ranking.filter(k => k.gap_to_best === 0);\n\n// ─── Agrupar por URL ──────────────────────────────────────────────────────\nconst by_url = {};\nkeywords.forEach(k => {\n  const u = k.url || '/';\n  if (!by_url[u]) by_url[u] = [];\n  by_url[u].push({ keyword: k.keyword, pos: k.pos_latest, best: k.pos_best });\n});\nconst pages = Object.entries(by_url)\n  .map(([url, kws]) => ({\n    url,\n    keywords_count: kws.length,\n    keywords: kws.sort((a, b) => (a.pos ?? 999) - (b.pos ?? 999))\n  }))\n  .sort((a, b) => b.keywords_count - a.keywords_count);\n\nconst fmt = k => ({\n  keyword: k.keyword, pos: k.pos_latest, best_ever: k.pos_best,\n  gap: k.gap_to_best, vol_local: k.vol_local, cpc: k.cpc_local,\n  url: k.url, change: k.change\n});\n\n// ─── Output ───────────────────────────────────────────────────────────────\nreturn [{\n  json: {\n    analysis_type: 'serplab_rankings',\n    meta: {\n      period:             `${meta_root.start || ''} → ${meta_root.end || ''}`,\n      report_id:          meta_root.id || null,\n      total_keywords:     keywords.length,\n      ranking:            ranking.length,\n      not_ranking:        no_rank.length,\n      at_best_ever:       at_best.length,\n      improved_this_week: improved.length,\n    },\n    top3:           pos1_3.map(fmt),\n    page1_pos4_10:  pos4_10.map(fmt),\n    page2_pos11_20: pos11_20.map(fmt),\n    not_ranking:    no_rank.map(k => ({ keyword: k.keyword, vol: k.vol_local, not_found: k.not_found })),\n    at_best_ever:   at_best.map(fmt),\n    improved_this_week: improved.map(fmt),\n    opportunities: {\n      lost_ground:      lost_ground.map(fmt),\n      recoverable:      recoverable.map(fmt),\n      high_cpc_not_top3: high_cpc.map(fmt),\n    },\n    pages_analysis: pages,\n    insights: [\n      `${keywords.length} keywords rastreadas. ${ranking.length} rankean, ${no_rank.length} sin posición.`,\n      pos1_3.length     ? `TOP 3: ${pos1_3.map(k => `\"${k.keyword}\" (pos ${k.pos_latest})`).join(', ')}.` : 'Ninguna en top 3.',\n      pos4_10.length    ? `Pág1 pos4-10: ${pos4_10.map(k => `\"${k.keyword}\"`).join(', ')}.` : '',\n      lost_ground.length? `${lost_ground.length} keywords perdieron posición: ${lost_ground.slice(0,3).map(k=>`\"${k.keyword}\" (ahora ${k.pos_latest}, mejor ${k.pos_best})`).join(', ')}.` : '',\n      recoverable.length? `${recoverable.length} recuperables (top10 → pág2): ${recoverable.map(k=>`\"${k.keyword}\"`).join(', ')}.` : '',\n      high_cpc.length   ? `CPC alto sin top3: ${high_cpc.slice(0,3).map(k=>`\"${k.keyword}\" €${k.cpc_local}`).join(', ')}.` : '',\n      pages.length      ? `URL con más keywords: ${pages[0].url} (${pages[0].keywords_count}).` : '',\n    ].filter(Boolean).join(' ')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        3504
+      ],
+      "id": "dcf91dd5-c854-4648-bbc6-aedad6d1a693",
+      "name": "Code in JavaScript7"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SERPROBOT_API_URL + '?api_key=' + $env.SERPROBOT_API_KEY + '&action=project_report&project_id=' + $env.SERPROBOT_PROJECT_ID + '&start=7daysAgo' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -64,
+        3504
+      ],
+      "id": "6e73abcf-4da6-4ba6-9577-11579c44005e",
+      "name": "Datos serprobot 7 dias1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "actorId": {
+          "__rl": true,
+          "value": "shu8hvrXbJbY3Eb9W",
+          "mode": "list",
+          "cachedResultName": "Instagram Scraper (apify/instagram-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/shu8hvrXbJbY3Eb9W/input"
+        },
+        "customBody": "={\n    \"addParentData\": false,\n    \"directUrls\": [\n        \"https://www.instagram.com/marketingcompass\"\n    ],\n    \"onlyPostsNewerThan\": \"5 days\",\n    \"resultsLimit\": 20,\n    \"resultsType\": \"posts\",\n    \"searchLimit\": 10,\n    \"searchType\": \"hashtag\"\n}",
+        "timeout": {}
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        2272
+      ],
+      "id": "98eb9376-a5d4-4536-a93a-7d5226a1c621",
+      "name": "marketingcompass1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "actorId": {
+          "__rl": true,
+          "value": "shu8hvrXbJbY3Eb9W",
+          "mode": "list",
+          "cachedResultName": "Instagram Scraper (apify/instagram-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/shu8hvrXbJbY3Eb9W/input"
+        },
+        "customBody": "={\n    \"addParentData\": false,\n    \"directUrls\": [\n        \"https://www.instagram.com/limmaylimmon\"\n    ],\n    \"onlyPostsNewerThan\": \"5 days\",\n    \"resultsLimit\": 20,\n    \"resultsType\": \"posts\",\n    \"searchLimit\": 10,\n    \"searchType\": \"hashtag\"\n}",
+        "timeout": {}
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        2480
+      ],
+      "id": "07ac81dc-9bd9-4999-ad8e-e86499fe6507",
+      "name": "limmaylimmon1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 8
+      },
+      "id": "c8922a79-7768-44a8-bc31-5122dc4d885a",
+      "name": "🔗 Merge 4 Análisis2",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2048,
+        2352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst find = type => items.find(i => i.json.analysis_type === type)?.json || {};\n\n// ── Helpers de formateo ──────────────────────────────────────────────────\nconst NA = '(sin datos)';\nconst list = (arr, mapper) => {\n  if (!Array.isArray(arr) || arr.length === 0) return '  ' + NA;\n  return arr.map(x => '  - ' + (mapper ? mapper(x) : x)).join('\\n');\n};\n// Si el parser detectó un error de JSON, devolvemos el fallback en vez de romper el prompt\nconst errBlock = b => b && b.error\n  ? `⚠️ No se pudo parsear el análisis de este bloque (${b.error}).\\nResumen crudo: ${b.insights || b.raw || NA}`\n  : null;\n\n// ── TENDENCIAS ────────────────────────────────────────────────────────────\nconst trends = find('trends');\nconst trends_data = errBlock(trends) || [\n  `Resumen: ${trends.resumen || NA}`,\n  `Tendencias relevantes:`,\n  list(trends.tendencias_relevantes, t => `${t.query} (urgencia ${t.urgencia}): ${t.motivo}`),\n  `Ángulos de contenido sugeridos:`,\n  list(trends.angulos_de_contenido)\n].join('\\n');\n\n// ── HISTÓRICO GA4 ─────────────────────────────────────────────────────────\nconst hist = find('historical');\nconst historical_data = errBlock(hist) || [\n  `Resumen: ${hist.resumen || NA}`,\n  `Patrones ganadores:`,\n  list(hist.patrones_ganadores),\n  `Contenido a actualizar:`,\n  list(hist.contenido_a_actualizar),\n  `Contenido a replicar en el nuevo calendario:`,\n  list(hist.contenido_a_replicar)\n].join('\\n');\n\n// ── ESTACIONALIDAD ────────────────────────────────────────────────────────\nconst seasonal = find('seasonal');\nconst seasonal_data = errBlock(seasonal) || [\n  `Resumen: ${seasonal.resumen || NA}`,\n  `Alerta estacional: ${seasonal.alerta_estacional || 'sin alertas próximas'}`,\n  `Temas a anticipar:`,\n  list(seasonal.temas_a_anticipar),\n  `Recomendación de timing: ${seasonal.recomendacion_timing || NA}`\n].join('\\n');\n\n// ── RANKINGS SERPLAB ──────────────────────────────────────────────────────\nconst serplab = find('serplab_rankings');\nconst serplab_data = errBlock(serplab) || [\n  `Resumen: ${serplab.resumen || NA}`,\n  `Keywords a rescatar (perdieron posición):`,\n  list(serplab.keywords_a_rescatar, k => `${k.keyword} (actual ${k.posicion_actual}, mejor ${k.mejor_posicion}): ${k.accion}`),\n  `Keywords cerca de página 1:`,\n  list(serplab.keywords_cerca_de_pagina_1, k => `${k.keyword} (pos ${k.posicion_actual}): ${k.accion}`),\n  `Oportunidades de alto valor sin explotar:`,\n  list(serplab.oportunidades_alto_valor_sin_explotar, k => `${k.keyword} (CPC €${k.cpc}): ${k.accion}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — PÁGINAS ──────────────────────────────────────────────\nconst sc = find('search_console');\nconst search_console_data = errBlock(sc) || [\n  `Resumen: ${sc.resumen || NA}`,\n  `Páginas a proteger (van bien, no tocar):`,\n  list(sc.paginas_proteger),\n  `Páginas a optimizar para mejorar CTR:`,\n  list(sc.paginas_optimizar_ctr, p => `${p.pagina} (pos ${p.posicion}): ${p.accion_sugerida}`),\n  `Páginas a reforzar con contenido nuevo (pillar/cluster):`,\n  list(sc.paginas_reforzar_con_contenido_nuevo, p => `${p.pagina}: ${p.tema_sugerido_para_pillar_o_cluster}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — QUERIES ──────────────────────────────────────────────\nconst queries = find('queries_analytics');\nconst queries_data = errBlock(queries) || [\n  `Resumen: ${queries.resumen || NA}`,\n  `Clusters de intención de búsqueda:`,\n  list(queries.clusters_de_intencion, c => `${c.tema} [prioridad ${c.prioridad}] (${(c.queries || []).join(', ')}): ${c.justificacion}`),\n  `Keywords con impresiones altas y pocos clicks (oportunidad):`,\n  list(queries.keywords_alta_impresion_bajo_click)\n].join('\\n');\n\n// ── COMPETIDORES Y PUBLICADOS (sin agente intermedio, se mantienen igual) ──\nconst comp = items.find(i => i.json.analysis_type === 'competitors')?.json || {};\nconst published = find('published_articles');\n\n// ── Datos DIRECTOS del nodo ⚙️ Configuración (incluye keywords) ────────────\nconst cfg = $('⚙️ Configuración1').item.json;\nconst keywordsRaw  = cfg.keywords || '';\nconst keywordsList = String(keywordsRaw).split(',').map(k => k.trim()).filter(Boolean);\n\n// Datos editoriales canónicos desde Infidash\nconst calendario = $('Cargar contexto Infidash').first().json.planItems || [];\n\nreturn [{ json: {\n  trends_data,\n  historical_data,\n  seasonal_data,\n  serplab_data,\n  search_console_data,\n  queries_data,\n  competitor_data:           JSON.stringify(comp,       null, 2),\n  published_data:            JSON.stringify(published,  null, 2),\n  calendario_editorial_data: JSON.stringify(calendario, null, 2),\n  config: {\n    topic:         cfg.topic,\n    weeks:         cfg.weeks_horizon,\n    country:       cfg.country,\n    keywords:      keywordsRaw,\n    keywords_list: keywordsList\n  }\n}}];\n"
+      },
+      "id": "f012d6fe-1cff-4aaf-a91d-40608e9e79e3",
+      "name": "🧩 Preparar Contexto IA2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        2448
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un experto en estrategia de contenidos. Genera un plan editorial detallado para las próximas {{ $json.config.weeks }} semanas para el mercado {{ $json.config.country }} sobre: {{ $json.config.topic }}.\nExtrae identidades interesantes para el Calendario editorial a partir de los datos extraidos en el calendario editorial ya publicado {{ $json.published_data }}.\nKeywords objetivo prioritarias (definidas por el cliente en ⚙️ Configuración): {{ $('⚙️ Configuración1').item.json.keywords }}\n\n## TENDENCIAS ACTUALES:\n{{ $json.trends_data }}\n\n## RENDIMIENTO HISTÓRICO (GA4):\n{{ $json.historical_data }}\n\n## ESTACIONALIDAD:\n{{ $json.seasonal_data }}\n\n## POSICIONAMIENTO WEB:\n{{ $json.serplab_data }}\n\n## ANÁLISIS DE COMPETIDORES:\n{{ $json.competitor_data }}\n\n## QUERIES DATA (queries reales que te encuentran):\n{{ $json.queries_data }}\n\n## SEARCH CONSOLE (paginas top de nuestro blog):\n{{ $json.search_console_data }}\n\n## ARTÍCULOS YA PUBLICADOS (NO repetir estos títulos ni keywords):\n{{ $json.published_data }}\n\n## CALENDARIO EDITORIAL ACTUAL (contenidos ya planificados/en curso — NO los dupliques, dales continuidad y cubre los huecos):\n{{ $json.calendario_editorial_data }}\n\n---\nDevuelve SOLO este JSON válido (sin markdown, sin explicaciones):\n{\n  \"summary\": \"resumen ejecutivo en 2-3 líneas\",\n  \"key_insights\": [\"insight1\", \"insight2\", \"insight3\"],\n  \"keywords_to_target\": [\"kw1\", \"kw2\", \"kw3\", \"kw4\", \"kw5\"],\n  \"competitor_gaps\": [\"oportunidad1\", \"oportunidad2\", \"oportunidad3\"],\n  \"seasonal_alerts\": [\"alerta1\", \"alerta2\"],\n  \"content_plan\": [\n    {\n      \"week\": 1,\n      \"theme\": \"tema de la semana\",\n      \"rationale\": \"justificación basada en los datos\",\n      \"posts\": [\n        {\n          \"day\": \"Lunes\",\n          \"plannedAt\": \"fecha y hora ISO-8601 con zona\",\n          \"title\": \"título SEO-friendly\",\n          \"format\": \"reel|post|blog\",\n          \"channel\": \"canal recomendado\",\n          \"keywords\": [\"kw1\", \"kw2\"],\n          \"cta\": \"llamada a la acción\",\n          \"priority\": \"alta|media|baja\",\n          \"data_source\": \"tendencia|histórico|estacional|competidor\",\n          \"identities\": \"identidad1,identidad2,identidad3\"\n        }\n      ]\n    }\n  ]\n}\n\n  **hoy** es {{ $now.format('yyyy-MM-dd') }}",
+        "hasOutputParser": false,
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "0b83cf58-9192-4665-982d-0e4a813245aa",
+      "name": "🤖 IA: Plan de Contenidos2",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        2480,
+        2448
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 4000,
+          "temperature": 0.5
+        }
+      },
+      "id": "d6e14bb8-d457-46b3-add9-5b64eacc116c",
+      "name": "OpenAI — Síntesis Final2",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2336,
+        2736
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\ntry {\n  const plan = JSON.parse(text);\n  return [{ json: { success: true, plan, raw: text } }];\n} catch (e) {\n  return [{ json: { success: false, error: e.message, raw: text } }];\n}"
+      },
+      "id": "408dfc5b-ce08-4373-be03-f8fa2905b091",
+      "name": "📝 Parsear Plan JSON2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        2448
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        2832
+      ],
+      "id": "13898cf5-7429-44e3-9974-7914bfee3680",
+      "name": "Wait",
+      "webhookId": "470190f3-c5d0-4369-a776-8dfa08dddcee"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        3072
+      ],
+      "id": "629b1e91-f368-46d7-a8fb-5fe54ba317e6",
+      "name": "Wait1",
+      "webhookId": "3f41332e-c3a0-459c-a395-ea66cd676efd"
+    },
+    {
+      "parameters": {},
+      "id": "trigger-plan-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json; const job=input.job??input;\nconst calendarId=job.target_id??job.payload?.calendarId??job.payload?.calendar_id;\nif(job.kind!=='generate_plan'||!job.id||!job.client_id||!job.leaseToken||!calendarId) throw new Error('Contrato generate_plan v1 invalido: calendarId es obligatorio');\nif(String(calendarId)!==String(job.target_id)) throw new Error('calendarId debe coincidir con target_id');\nreturn [{json:{job:{...job,target_id:calendarId,payload:{...job.payload,calendarId,calendar_id:calendarId}}}];"
+      },
+      "id": "validate-plan-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 1200 }) }}",
+        "options": {}
+      },
+      "id": "heartbeat-plan-start-v1",
+      "name": "Heartbeat inicial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2020,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-plan-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 600 }) }}",
+        "options": {}
+      },
+      "id": "heartbeat-plan-end-v1",
+      "name": "Heartbeat tras IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;\nconst parsed=$('📝 Parsear Plan JSON2').first().json;\nif(!parsed.success||!parsed.plan?.content_plan) throw new Error(parsed.error||'La IA no devolvio content_plan');\nconst dayOffset={lunes:0,martes:1,miercoles:2,miércoles:2,jueves:3,viernes:4,sabado:5,domingo:6};\nconst base=job.payload?.periodStart?new Date(job.payload.periodStart):null; const out=[];\nfor(const week of parsed.plan.content_plan){for(const post of week.posts??[]){if(!post.title)throw new Error('Cada propuesta requiere title');const calendarId=job.target_id;if(!calendarId)throw new Error('calendarId es obligatorio');if(post.calendarId&&String(post.calendarId)!==String(calendarId))throw new Error('La IA devolvió un calendarId distinto al reservado');let plannedAt=post.plannedAt??null;if(!plannedAt&&base&&dayOffset[String(post.day??'').toLowerCase()]!==undefined){const d=new Date(base);d.setUTCDate(d.getUTCDate()+(Number(week.week||1)-1)*7+dayOffset[String(post.day).toLowerCase()]);plannedAt=d.toISOString();}if(plannedAt&&Number.isNaN(Date.parse(plannedAt)))throw new Error('plannedAt debe ser ISO-8601');out.push({calendarId,title:String(post.title).trim(),theme:week.theme??null,rationale:week.rationale??null,format:post.format??null,keywordPrimary:post.keywords?.[0]??null,keywords:Array.isArray(post.keywords)?post.keywords:[],entities:Array.isArray(post.entities)?post.entities:String(post.identities??'').split(',').map(x=>x.trim()).filter(Boolean),cta:post.cta??null,priority:post.priority??null,plannedAt,sourceContext:{workflowVersion:1,dataSource:post.data_source??null},sourceKey:post.sourceKey??`inficon-plan:${job.id}:${out.length}`});}}\nif(!out.length)throw new Error('El plan no contiene propuestas');return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',planItems:out,result:{count:out.length,summary:parsed.plan.summary??null,workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "normalize-plan-v1",
+      "name": "Normalizar resultado del plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion:$json.schemaVersion, clientId:$json.clientId, status:$json.status, planItems:$json.planItems, result:$json.result, leaseToken:$json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-plan-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const error=$json.error?.message??$json.message??'Fallo confirmado en fuente o IA';return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:String(error).slice(0,4000),result:{workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-plan-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "fail-result-plan-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2740,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "🤖 Agente IA: Tendencias": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Tendencias": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "OpenAI — Histórico": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agente IA: Histórico",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Histórico": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Histórico": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "OpenAI — Search Console Páginas": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agente IA: SC Páginas",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: SC Páginas": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA SC Páginas": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "OpenAI — Queries": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agente IA: Queries",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Queries": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Queries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Queries": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "OpenAI — Rankings SerpLab": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agente IA: Rankings",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Rankings": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Rankings": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "OpenAI — Estacionalidad": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agente IA: Estacionalidad",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "⚙️ Configuración1": {
+      "main": [
+        [
+          {
+            "node": "📈 A: Google Trends1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊 C: GA4 — Top Contenidos1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🌍 D: Estacionalidad — SerpAPI1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Pages search console1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query search console1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "marketingcompass1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "limmaylimmon1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Datos serprobot 7 dias1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📈 A: Google Trends1": {
+      "main": [
+        [
+          {
+            "node": "📈 A: Procesar Tendencias1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📈 A: Procesar Tendencias1": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI — Competidor1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🏢 B: IA Analiza Competidor1",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "🏢 B: IA Analiza Competidor3",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "🤖 Agente IA: Tendencias",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏢 B: Agregar Competidores1": {
+      "main": [
+        [
+          {
+            "node": "🏢 B: Marcar Tipo1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏢 B: Marcar Tipo1": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "📊 C: GA4 — Top Contenidos1": {
+      "main": [
+        [
+          {
+            "node": "📊 C: Procesar Histórico1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 C: Procesar Histórico1": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌍 D: Estacionalidad — SerpAPI1": {
+      "main": [
+        [
+          {
+            "node": "🌍 D: Procesar Estacionalidad1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌍 D: Procesar Estacionalidad1": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query search console1": {
+      "main": [
+        [
+          {
+            "node": "Code querys1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pages search console1": {
+      "main": [
+        [
+          {
+            "node": "search console pages1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code querys1": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "search console pages1": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: SC Páginas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "🏢 B: Agregar Competidores1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏢 B: IA Analiza Competidor3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏢 B: IA Analiza Competidor1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript7": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos serprobot 7 dias1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "marketingcompass1": {
+      "main": [
+        [
+          {
+            "node": "Get dataset items2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "limmaylimmon1": {
+      "main": [
+        [
+          {
+            "node": "Get dataset items3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Merge 4 Análisis2": {
+      "main": [
+        [
+          {
+            "node": "🧩 Preparar Contexto IA2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧩 Preparar Contexto IA2": {
+      "main": [
+        [
+          {
+            "node": "🤖 IA: Plan de Contenidos2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 IA: Plan de Contenidos2": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear Plan JSON2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI — Síntesis Final2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 IA: Plan de Contenidos2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA SC Páginas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat inicial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat inicial": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Configuración1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get dataset items2": {
+      "main": [
+        [
+          {
+            "node": "🏢 B: IA Analiza Competidor3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get dataset items3": {
+      "main": [
+        [
+          {
+            "node": "🏢 B: IA Analiza Competidor1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear Plan JSON2": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat tras IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat tras IA": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resultado del plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar resultado del plan": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

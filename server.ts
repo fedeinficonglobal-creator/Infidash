@@ -41,6 +41,8 @@ import {
   type UserRole,
 } from './src/lib/database.js';
 import { fetchClaritySnapshots } from './src/lib/claritySync.js';
+import { contentRoutes } from './src/server/content/routes.js';
+import { closeEditorialPool } from './src/server/content/postgres.js';
 
 const app = fastify({
   logger: false,
@@ -64,6 +66,14 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body,
 const port = Number(process.env.API_PORT ?? process.env.PORT ?? 4000);
 const distPath = path.resolve(process.cwd(), 'dist');
 const indexHtmlPath = path.join(distPath, 'index.html');
+
+app.register(contentRoutes, {
+  resolveHumanSession: (token) => getSessionByToken(token) as any,
+});
+
+app.addHook('onClose', async () => {
+  await closeEditorialPool();
+});
 
 type AnyRouteGeneric = { Body: any; Params: any; Querystring: any; Headers: any };
 type AnyFastifyRequest = FastifyRequest<AnyRouteGeneric>;

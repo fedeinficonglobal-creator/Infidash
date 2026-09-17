@@ -1,0 +1,28 @@
+{
+  "item_id": "content-hub",
+  "timestamp": "2026-09-17T00:00:00Z",
+  "branch": "feature/contenidos-sin-sheets",
+  "commit": "9862bf0",
+  "verdict": "CONDITIONAL",
+  "summary": { "accepted": 10, "conditional": 8, "rejected": 0 },
+  "criteria": [
+    {"ac_id":"AC-01","verdict":"CONDITIONAL","reason":"Aislamiento por FK y API probado; faltan los 15 mapeos reales.","evidence":["db/migrations/0001_editorial_schema.sql","tests/content-persistence.test.ts"]},
+    {"ac_id":"AC-02","verdict":"ACCEPTED","evidence":["src/server/content/importer.ts","tests/content-persistence.test.ts"]},
+    {"ac_id":"AC-03","verdict":"ACCEPTED","evidence":["workflows/content","tests/content-workflows.test.ts"]},
+    {"ac_id":"AC-04","verdict":"CONDITIONAL","reason":"Contrato y estados cubiertos; falta ejecución n8n real.","evidence":["src/server/content/apiRepository.ts","workflows/content/inficon-global/plan.v1.json"]},
+    {"ac_id":"AC-05","verdict":"CONDITIONAL","reason":"Contrato de conflictos cubierto; falta prueba E2E de edición concurrente.","evidence":["src/server/content/routes.ts","tests/content-api.test.ts"]},
+    {"ac_id":"AC-06","verdict":"CONDITIONAL","reason":"Leases y reserva SQL implementados; falta concurrencia sobre PostgreSQL real.","evidence":["src/server/content/apiRepository.ts","db/migrations/0002_editorial_api.sql"]},
+    {"ac_id":"AC-07","verdict":"CONDITIONAL","reason":"Máquina de estados y workflows cubiertos; falta verificación WordPress/Postiz.","evidence":["src/server/content/transitions.ts","workflows/content/inficon-global/publish.v1.json"]},
+    {"ac_id":"AC-08","verdict":"ACCEPTED","evidence":["db/migrations/0001_editorial_schema.sql","src/server/content/apiRepository.ts"]},
+    {"ac_id":"AC-09","verdict":"CONDITIONAL","reason":"unknown y reconciliación implementados; falta timeout real de Postiz.","evidence":["workflows/content/reconcile.v1.json","tests/content-workflows.test.ts"]},
+    {"ac_id":"AC-10","verdict":"CONDITIONAL","reason":"Lease/heartbeat/callback versionado implementados; falta fallo real de worker.","evidence":["src/server/content/apiRepository.ts","tests/content-persistence.test.ts"]},
+    {"ac_id":"AC-11","verdict":"ACCEPTED","evidence":["src/lib/content.ts","tests/content-ui.test.ts"]},
+    {"ac_id":"AC-12","verdict":"ACCEPTED","evidence":["src/server/content/transitions.ts","workflows/content/reconcile.v1.json"]},
+    {"ac_id":"AC-13","verdict":"ACCEPTED","evidence":["workflows/content/reconcile.v1.json","src/components/content/ContentTab.tsx"]},
+    {"ac_id":"AC-14","verdict":"ACCEPTED","evidence":["src/server/content/serviceAuth.ts","tests/content-api.test.ts"]},
+    {"ac_id":"AC-15","verdict":"ACCEPTED","evidence":["src/components/content/ContentTab.tsx","tests/content-ui.test.ts"]},
+    {"ac_id":"AC-16","verdict":"ACCEPTED","evidence":["src/lib/content.ts","src/server/content/contracts.ts","tests/content-ui.test.ts"]},
+    {"ac_id":"AC-17","verdict":"ACCEPTED","evidence":["src/server/content/transitions.ts","src/server/content/apiRepository.ts"]},
+    {"ac_id":"AC-18","verdict":"CONDITIONAL","reason":"Hay procedimiento de corte e importador delta; falta ejecución con datos externos.","evidence":["docs/content-deployment.md","scripts/import-content-hub.ts"]}
+  ]
+}

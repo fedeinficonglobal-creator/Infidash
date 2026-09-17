@@ -1,0 +1,489 @@
+{
+  "name": "Content v1 - Inficon Global - Publish with Postiz",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-publish-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const job=input.job??input;if(job.kind!=='publish'||!job.id||!job.client_id||!job.target_id||!job.leaseToken)throw new Error('Contrato publish v1 invalido');const pub=job.payload?.publication;if(!pub?.desiredScheduledAt||Number.isNaN(Date.parse(pub.desiredScheduledAt)))throw new Error('desiredScheduledAt ISO-8601 es obligatorio');return [{json:{job}}];"
+      },
+      "id": "validate-publish-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:600}) }}",
+        "options": {}
+      },
+      "id": "hb-publish-start-v1",
+      "name": "Heartbeat antes de Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-publish-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');const imageUrl=requested.media?.[0]?.url??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key}}];"
+      },
+      "id": "prepare-publish-v1",
+      "name": "Preparar publicacion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "type": "schedule",
+        "date": "={{ $('Preparar publicacion').first().json.desiredScheduledAt }}",
+        "posts": {
+          "post": [
+            {
+              "integrationId": "={{ $('Preparar publicacion').first().json.integrationId }}",
+              "settings": {
+                "setting": [
+                  {
+                    "key": "topicType",
+                    "stringValue": "STANDARD"
+                  },
+                  {
+                    "key": "callToActionType",
+                    "stringValue": "LEARN_MORE"
+                  },
+                  {
+                    "key": "callToActionUrl",
+                    "stringValue": "={{ $('Preparar publicacion').first().json.externalUrl }}"
+                  }
+                ]
+              },
+              "value": {
+                "contentItem": [
+                  {
+                    "content": "={{ $('Preparar publicacion').first().json.copy }}",
+                    "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
+                    "image": {
+                      "imageItem": [
+                        {
+                          "id": "img1",
+                          "path": "={{ $('Preparar publicacion').first().json.imageUrl }}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "1d8c6ce9-661f-40dc-a7b7-b3a1338dbb29",
+      "name": "Postiz1",
+      "type": "n8n-nodes-postiz.postiz",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-publish-success-v1",
+      "name": "Heartbeat despues de Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar publicacion').first().json;const response=$('Postiz1').first().json;const postId=response.postId??response.id;if(!postId)throw new Error('Postiz no devolvio postId');const publication={status:'scheduled',confirmedScheduledAt:req.desiredScheduledAt,postizPostId:String(postId),providerPostId:null,externalUrl:null,publishedAt:null,errorCode:null,errorMessage:null};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:'postiz.scheduled',sourceEventId:`postiz:${req.postizInstance}:${postId}:scheduled`,occurredAt:new Date().toISOString(),publicationStatus:'scheduled',payload:{accountId:req.accountId,postizPostId:String(postId),confirmedScheduledAt:req.desiredScheduledAt}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',publication,event,result:{workflowVersion:1,state:'scheduled'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "normalize-publish-v1",
+      "name": "Normalizar programacion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-publish-error-v1",
+      "name": "Heartbeat despues de error Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar publicacion').first().json;const err=$('Postiz1').first().json;const raw=err.error??err;const statusCode=Number(raw.httpCode??raw.statusCode??raw.status??0);const confirmed=statusCode>=400&&statusCode<500&&statusCode!==408&&statusCode!==409&&statusCode!==429;const state=confirmed?'failed':'unknown';const message=String(raw.message??raw.description??'Resultado ambiguo de Postiz').slice(0,4000);const publication={status:state,confirmedScheduledAt:null,postizPostId:null,providerPostId:null,externalUrl:null,publishedAt:null,errorCode:statusCode?String(statusCode):(confirmed?'POSTIZ_REJECTED':'POSTIZ_AMBIGUOUS'),errorMessage:message};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:confirmed?'postiz.rejected':'postiz.ambiguous',sourceEventId:`postiz-attempt:${req.postizInstance}:${job.id}`,occurredAt:new Date().toISOString(),publicationStatus:state,payload:{accountId:req.accountId,statusCode:statusCode||null,errorMessage:message,reconcileRequired:!confirmed}};return [{json:{schemaVersion:1,clientId:job.client_id,status:state,publication,event,result:{workflowVersion:1,reconcileRequired:!confirmed},error:message,leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "classify-publish-error-v1",
+      "name": "Clasificar error Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-publish-v1",
+      "name": "Registrar evento Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Normalizar programacion').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Normalizar programacion').first().json.clientId,status:$('Normalizar programacion').first().json.status,publication:$('Normalizar programacion').first().json.publication,result:$('Normalizar programacion').first().json.result,leaseToken:$('Normalizar programacion').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-publish-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-publish-error-v1",
+      "name": "Registrar evento ambiguo o fallo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Clasificar error Postiz').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Clasificar error Postiz').first().json.clientId,status:$('Clasificar error Postiz').first().json.status,publication:$('Clasificar error Postiz').first().json.publication,result:$('Clasificar error Postiz').first().json.result,error:$('Clasificar error Postiz').first().json.error,leaseToken:$('Clasificar error Postiz').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-publish-error-v1",
+      "name": "Guardar fallo o unknown",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de Postiz": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "Preparar publicacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar publicacion": {
+      "main": [
+        [
+          {
+            "node": "Postiz1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postiz1": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat despues de Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heartbeat despues de error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de Postiz": {
+      "main": [
+        [
+          {
+            "node": "Normalizar programacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar programacion": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Clasificar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento ambiguo o fallo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento ambiguo o fallo": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo o unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "active": false
+}
