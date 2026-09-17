@@ -7,4 +7,4 @@
 
 Los criterios condicionados requieren staging, las integraciones reales o los catorce exports de cliente que no se proporcionaron: AC-01, AC-04 a AC-07, AC-09, AC-10 y AC-18.
 
-Los restantes tienen evidencia de implementación y pruebas en `tests/content-*.test.ts`; el conjunto focalizado finaliza con 32 pruebas superadas, además de lint y build.
+Los restantes tienen evidencia de implementación y pruebas en `tests/content-*.test.ts`; el conjunto focalizado finaliza con 32 pruebas superadas, además de lint y build. La suite completa obtiene 53/64: las 11 pruebas restantes necesitan el servidor de API y `DATABASE_URL` del entorno.

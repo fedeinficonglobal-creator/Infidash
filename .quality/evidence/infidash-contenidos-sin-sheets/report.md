@@ -9,6 +9,7 @@
 - `npx tsx --test tests/content-api.test.ts tests/content-persistence.test.ts tests/content-ui.test.ts tests/content-workflows.test.ts`: **32/32** pruebas superadas.
 - `npm run lint`: superado.
 - `npm run build`: superado. Vite informa únicamente del tamaño del bundle principal.
+- `npm test`: **53/64** pruebas superadas. Las 11 restantes requieren el servidor de API y `DATABASE_URL`, que no están configurados en este entorno; fallan antes de ejecutar su aserción.
 
 La revisión confirma aislamiento por cliente, migraciones con FK e índices, importación idempotente, permisos humanos y de servicio, leases de trabajos, estados de publicación, UI paginada y sin vista HTML insegura, y exports n8n sin Sheets ni secretos.
 

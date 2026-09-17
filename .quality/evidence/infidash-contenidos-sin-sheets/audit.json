@@ -12,7 +12,8 @@
   "validation": {
     "content_tests": "32 passed",
     "lint": "passed",
-    "build": "passed"
+    "build": "passed",
+    "full_test_suite": "53 passed, 11 environment failures: API server and DATABASE_URL are not configured in this workspace"
   },
   "external_preconditions": [
     "Aplicar migraciones y probar concurrencia contra PostgreSQL de staging.",
