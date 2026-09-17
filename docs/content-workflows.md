@@ -25,6 +25,12 @@ Conservar una copia inactiva de cada export original durante el montaje. Los nod
 
 Cada operación externa larga renueva el lease antes y después. Las ramas de error confirmado terminan el trabajo como `failed`. En publicación, un 4xx determinista se considera rechazo; timeout, 408, 409, 429, error de red o respuesta sin confirmación terminan como `unknown` y exigen reconciliación antes de reenviar.
 
+## Contrato autosaneable de trabajos
+
+- `generate_plan` siempre recibe un `target_id` que identifica un calendario existente. Si quien llama no aporta uno, la API crea el calendario dentro de la misma transacción y añade `payload.calendarId` y `payload.calendar_id`; el child workflow exige que los tres valores coincidan.
+- `publish`, `reschedule`, `cancel` y `reconcile` no confían en un payload del navegador. Al crear y al reclamar un trabajo, Infidash vuelve a leer `publications` y `publishing_accounts` y escribe `payload.publication` completo. Incluye las variantes camelCase y snake_case de cuenta, fecha deseada, copy, media, IDs de Postiz/proveedor y datos de cuenta. Esto hace que un reintento use los datos persistidos y sanee los trabajos heredados incompletos.
+- Una ambigüedad de WordPress (timeout, red o 5xx) termina como `unknown` con `reconcileRequired`. La propuesta permanece en `generating`, por lo que no se puede abrir otro trabajo de generación y duplicar el borrador hasta revisar/reconciliar el resultado. Los fallos confirmados sí permanecen reintentables.
+
 ## Configuración de staging
 
 1. Importar los cinco JSON y dejarlos inactivos.

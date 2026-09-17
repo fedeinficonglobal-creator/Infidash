@@ -220,7 +220,7 @@ export class EditorialApiRepository {
       const jobResult=await client.query(
         `INSERT INTO editorial.jobs(id,client_id,kind,target_id,idempotency_key,request_hash,payload)
          VALUES($1,$2,'publish',$3,$4,$5,$6::jsonb) RETURNING *`,
-        [jobId,input.clientId,publicationId,input.idempotencyKey,hash,json({schemaVersion:1,publicationId,desiredScheduledAt:input.desiredScheduledAt})],
+        [jobId,input.clientId,publicationId,input.idempotencyKey,hash,json(this.publicationPayload(publicationResult.rows[0],accountResult.rows[0]))],
       );
       await this.auditWith(client,input.clientId,'publication',publicationId,'publication.queued',actorId,{accountId:input.accountId,desiredScheduledAt:input.desiredScheduledAt,jobId});
       const account=accountResult.rows[0] as any;
@@ -238,7 +238,9 @@ export class EditorialApiRepository {
         if ((existing.rows[0] as any).request_hash !== hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otro payload');
         return { job: existing.rows[0], replayed: true };
       }
+      await this.prepareJobTarget(client, input, actorId);
       await this.validateJobTarget(client, input);
+      if (this.isPublicationJob(input.kind)) input.payload = await this.publicationPayloadForJob(client, input.clientId, input.targetId);
       const id=randomUUID();
       const result=await client.query(`INSERT INTO editorial.jobs (id,client_id,kind,target_id,idempotency_key,request_hash,payload) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,[id,input.clientId,input.kind,input.targetId??null,input.idempotencyKey,hash,json(redactSecrets(input.payload))]);
       await this.auditWith(client,input.clientId,'job',id,'job.created',actorId,{kind:input.kind,targetId:input.targetId??null});
@@ -251,6 +253,69 @@ export class EditorialApiRepository {
     if(!result.rows[0] || !(result.rows[0] as any).enabled) throw new ContentApiError(409,'EDITORIAL_DISABLED','La automatización editorial del cliente está desactivada');
   }
 
+  private isPublicationJob(kind: string) { return ['publish', 'reschedule', 'cancel', 'reconcile'].includes(kind); }
+
+  /**
+   * A plan always has a durable calendar before it leaves the API.  This also
+   * keeps older callers (which only sent clientId) compatible with the v1
+   * workflow contract.
+   */
+  private async prepareJobTarget(client: PoolClient, input: any, actorId: string | null) {
+    if (input.kind !== 'generate_plan') return;
+    const supplied = input.payload?.calendar ?? input.payload?.editorialCalendar ?? {};
+    if (input.targetId) {
+      const calendar = await client.query('SELECT id FROM editorial.calendars WHERE client_id=$1 AND id=$2 FOR SHARE', [input.clientId, input.targetId]);
+      if (!calendar.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Calendario editorial no encontrado');
+    } else {
+      input.targetId = randomUUID();
+      await client.query(
+        `INSERT INTO editorial.calendars (id,client_id,title,start_date,end_date,status,summary,insights,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
+        [input.targetId, input.clientId, supplied.title ?? `Calendario editorial ${new Date().toISOString().slice(0, 10)}`,
+          supplied.startDate ?? supplied.start_date ?? null, supplied.endDate ?? supplied.end_date ?? null,
+          supplied.status ?? 'draft', supplied.summary ?? null, json(supplied.insights ?? {}), actorId],
+      );
+      await this.auditWith(client, input.clientId, 'calendar', input.targetId, 'calendar.created_for_generation', actorId, { jobKind: input.kind });
+    }
+    input.payload = {
+      ...(input.payload ?? {}), schemaVersion: 1, calendarId: input.targetId, calendar_id: input.targetId,
+      calendar: { ...supplied, id: input.targetId, calendarId: input.targetId, calendar_id: input.targetId },
+    };
+  }
+
+  /** The workflow receives a snapshot from the database, never untrusted UI input. */
+  private publicationPayload(publication: any, account: any) {
+    const media = Array.isArray(publication.media) ? publication.media : [];
+    return {
+      schemaVersion: 1,
+      publication: {
+        id: publication.id, publicationId: publication.id, publication_id: publication.id,
+        contentId: publication.content_id, content_id: publication.content_id,
+        contentRevisionId: publication.content_revision_id, content_revision_id: publication.content_revision_id,
+        accountId: publication.account_id, account_id: publication.account_id,
+        desiredScheduledAt: publication.desired_scheduled_at, desired_scheduled_at: publication.desired_scheduled_at,
+        confirmedScheduledAt: publication.confirmed_scheduled_at, confirmed_scheduled_at: publication.confirmed_scheduled_at,
+        copy: publication.copy ?? null, media,
+        postizPostId: publication.postiz_post_id ?? null, postiz_post_id: publication.postiz_post_id ?? null,
+        providerPostId: publication.provider_post_id ?? null, provider_post_id: publication.provider_post_id ?? null,
+        externalUrl: publication.external_url ?? null, external_url: publication.external_url ?? null,
+        provider: account.provider, platform: account.platform ?? null, instanceKey: account.instance_key ?? null,
+        instance_key: account.instance_key ?? null, externalAccountId: account.external_account_id ?? null,
+        external_account_id: account.external_account_id ?? null,
+      },
+    };
+  }
+
+  private async publicationPayloadForJob(client: PoolClient, clientId: string, publicationId: string) {
+    const result = await client.query(
+      `SELECT p.*,a.provider,a.platform,a.instance_key,a.external_account_id
+       FROM editorial.publications p JOIN editorial.publishing_accounts a ON a.client_id=p.client_id AND a.id=p.account_id
+       WHERE p.client_id=$1 AND p.id=$2 FOR SHARE`, [clientId, publicationId],
+    );
+    if (!result.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Publicación no encontrada');
+    return this.publicationPayload(result.rows[0], result.rows[0]);
+  }
+
   private async validateJobTarget(client: PoolClient, input: any) {
     if (input.kind === 'generate_content') {
       if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', 'generate_content requiere targetId y expectedVersion');
@@ -258,12 +323,13 @@ export class EditorialApiRepository {
       const item = result.rows[0] as any;
       if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
       if (item.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada antes de solicitar la generación');
+      if (item.status === 'generating') throw new ContentApiError(409, 'RECONCILIATION_REQUIRED', 'La generación anterior sigue sin confirmar; reconcilia WordPress antes de crear otro borrador');
       assertPlanTransition(item.status, 'generating');
       await client.query(`UPDATE editorial.plan_items SET status='generating',version=version+1,updated_at=now() WHERE id=$1`, [input.targetId]);
       return;
     }
-    if (['publish', 'reschedule', 'cancel'].includes(input.kind)) {
-      if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', `${input.kind} requiere targetId y expectedVersion`);
+    if (this.isPublicationJob(input.kind)) {
+      if (!input.targetId || (input.kind !== 'reconcile' && !input.expectedVersion)) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', `${input.kind} requiere targetId${input.kind === 'reconcile' ? '' : ' y expectedVersion'}`);
       const result = await client.query(
         `SELECT p.*,c.status content_status,c.approved_revision_id FROM editorial.publications p
          JOIN editorial.contents c ON c.client_id=p.client_id AND c.id=p.content_id
@@ -271,11 +337,19 @@ export class EditorialApiRepository {
       );
       const publication = result.rows[0] as any;
       if (!publication) throw new ContentApiError(404,'NOT_FOUND','Publicación no encontrada');
-      if (publication.version !== input.expectedVersion) throw new ContentApiError(409,'STALE_VERSION','La publicación fue modificada antes de solicitar la operación');
+      if (input.expectedVersion && publication.version !== input.expectedVersion) throw new ContentApiError(409,'STALE_VERSION','La publicación fue modificada antes de solicitar la operación');
       if (input.kind === 'publish' && (publication.content_status !== 'approved' || !publication.approved_revision_id || publication.content_revision_id !== publication.approved_revision_id)) {
         throw new ContentApiError(409,'REVISION_NOT_APPROVED','La publicación no referencia la revisión aprobada');
       }
       if (input.kind === 'publish' && publication.status === 'unknown') throw new ContentApiError(409,'RECONCILIATION_REQUIRED','La publicación debe reconciliarse antes de reenviarse');
+      if (input.kind === 'reconcile') return;
+      if (input.kind === 'reschedule') {
+        const desired = input.payload?.desiredScheduledAt ?? input.payload?.desired_scheduled_at;
+        if (desired) {
+          if (Number.isNaN(Date.parse(desired))) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'desiredScheduledAt debe ser ISO-8601');
+          await client.query('UPDATE editorial.publications SET desired_scheduled_at=$3,version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2', [input.clientId, input.targetId, desired]);
+        }
+      }
       const reservedStatus = input.kind === 'cancel' ? 'cancel_requested' : 'sending';
       assertPublicationTransition(publication.status, reservedStatus);
       await client.query('UPDATE editorial.publications SET status=$2,version=version+1,updated_at=now() WHERE id=$1',[input.targetId,reservedStatus]);
@@ -308,6 +382,14 @@ export class EditorialApiRepository {
           assertPublicationTransition(currentStatus,reservedStatus);
           await client.query('UPDATE editorial.publications SET status=$2,version=version+1,updated_at=now() WHERE id=$1',[selectedJob.target_id,reservedStatus]);
         }
+      }
+      // Jobs created before the contract was tightened may only contain an id.
+      // Rebuild the payload on every claim so retries and manual reconciliations
+      // use the current persisted publication/account rather than stale UI data.
+      if(this.isPublicationJob(selectedJob.kind) && selectedJob.target_id) {
+        const payload = await this.publicationPayloadForJob(client, selectedJob.client_id, selectedJob.target_id);
+        selectedJob.payload = payload;
+        await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
       }
       const leaseToken=randomUUID();
       const result=await client.query(`UPDATE editorial.jobs SET status='running',attempt_count=attempt_count+1,lease_token=$2,locked_until=now()+make_interval(secs=>$3),execution_id=$4,updated_at=now() WHERE id=$1 RETURNING *`,[selectedJob.id,leaseToken,input.leaseSeconds,input.executionId]);
@@ -368,9 +450,11 @@ export class EditorialApiRepository {
   private async applyPlanResult(client:PoolClient,job:any,items:any[]){
     if(job.kind!=='generate_plan') throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de plan no corresponde al trabajo');
     for(const item of items){
+      if (!job.target_id) throw new ContentApiError(409, 'TARGET_MISSING', 'El trabajo de plan no tiene calendario');
+      if (item.calendarId && item.calendarId !== job.target_id) throw new ContentApiError(409, 'CALENDAR_MISMATCH', 'El resultado no pertenece al calendario reservado');
       await client.query(`INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,entities,cta,priority,planned_at,status,source_context,source_key)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,'proposed',$14::jsonb,$15)
-       ON CONFLICT (client_id,calendar_id,source_key) DO UPDATE SET title=EXCLUDED.title,theme=EXCLUDED.theme,rationale=EXCLUDED.rationale,format=EXCLUDED.format,keyword_primary=EXCLUDED.keyword_primary,keywords=EXCLUDED.keywords,entities=EXCLUDED.entities,cta=EXCLUDED.cta,priority=EXCLUDED.priority,planned_at=EXCLUDED.planned_at,source_context=EXCLUDED.source_context,version=editorial.plan_items.version+1,updated_at=now()`,[item.id??randomUUID(),job.client_id,item.calendarId??job.target_id,item.title,item.theme??null,item.rationale??null,item.format??null,item.keywordPrimary??null,json(item.keywords??[]),json(item.entities??[]),item.cta??null,item.priority??null,item.plannedAt??null,json(item.sourceContext),item.sourceKey]);
+       ON CONFLICT (client_id,calendar_id,source_key) DO UPDATE SET title=EXCLUDED.title,theme=EXCLUDED.theme,rationale=EXCLUDED.rationale,format=EXCLUDED.format,keyword_primary=EXCLUDED.keyword_primary,keywords=EXCLUDED.keywords,entities=EXCLUDED.entities,cta=EXCLUDED.cta,priority=EXCLUDED.priority,planned_at=EXCLUDED.planned_at,source_context=EXCLUDED.source_context,version=editorial.plan_items.version+1,updated_at=now()`,[item.id??randomUUID(),job.client_id,job.target_id,item.title,item.theme??null,item.rationale??null,item.format??null,item.keywordPrimary??null,json(item.keywords??[]),json(item.entities??[]),item.cta??null,item.priority??null,item.plannedAt??null,json(item.sourceContext),item.sourceKey]);
     }
   }
 

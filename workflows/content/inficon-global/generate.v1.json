@@ -369,7 +369,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const error=$json.error?.message??$json.message??'Fallo confirmado generando contenido';return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:String(error).slice(0,4000),result:{workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const raw=$json.error??$json;const error=raw?.message??$json.message??'Fallo generando contenido';const code=Number(raw?.httpCode??raw?.statusCode??raw?.status??0);const text=String(error).toLowerCase();const ambiguous=code===0||[408,409,429,500,502,503,504].includes(code)||/(timeout|timed out|network|socket|connection reset|econnreset)/.test(text);return [{json:{schemaVersion:1,clientId:job.client_id,status:ambiguous?'unknown':'failed',error:String(error).slice(0,4000),result:{workflowVersion:1,reconcileRequired:ambiguous,provider:'wordpress',idempotencyKey:`wordpress-draft:${job.id}`},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "fail-generate-v1",
       "name": "Preparar fallo confirmado",

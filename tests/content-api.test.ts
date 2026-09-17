@@ -163,6 +163,71 @@ test('scheduling pins the approved revision and creates publication and job in o
   assert.ok(statements.includes('COMMIT'));
 });
 
+test('generate_plan creates a durable calendar and passes it as both job target and payload contract', async () => {
+  let insertedJob: any;
+  const pool=poolWithClient(async(sql,values=[])=>{
+    if(sql.includes('SELECT enabled FROM editorial.client_settings')) return {rows:[{enabled:true}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.jobs')) return {rows:[],rowCount:0};
+    if(sql.includes('INSERT INTO editorial.jobs')) { insertedJob={targetId:values[3],payload:JSON.parse(String(values[6]))}; return {rows:[{id:values[0],target_id:values[3],payload:insertedJob.payload}],rowCount:1}; }
+    return {rows:[],rowCount:0};
+  });
+  const repository=new EditorialApiRepository(pool);
+  const created=await repository.createJob({clientId:'client-a',kind:'generate_plan',idempotencyKey:'plan:october',payload:{calendar:{title:'Octubre'}}},'user-1');
+  assert.ok(insertedJob.targetId);
+  assert.equal(insertedJob.payload.calendarId,insertedJob.targetId);
+  assert.equal(insertedJob.payload.calendar_id,insertedJob.targetId);
+  assert.equal(insertedJob.payload.calendar.id,insertedJob.targetId);
+  assert.equal((created.job as any).target_id,insertedJob.targetId);
+});
+
+test('publication jobs persist a database-derived n8n payload in camelCase and snake_case', async () => {
+  let insertedPayload: any;
+  const publication={id:'publication-1',client_id:'client-a',content_id:'content-1',content_revision_id:'revision-1',account_id:'account-1',copy:'Texto final',media:[{url:'https://cdn.example/image.jpg'}],desired_scheduled_at:'2026-10-01T09:00:00.000Z',confirmed_scheduled_at:null,postiz_post_id:'postiz-8',provider_post_id:null,external_url:null,status:'scheduled',version:4,content_status:'approved',approved_revision_id:'revision-1',provider:'postiz',platform:'gmb',instance_key:'postiz-main',external_account_id:'channel-1'};
+  const pool=poolWithClient(async(sql,values=[])=>{
+    if(sql.includes('SELECT enabled FROM editorial.client_settings')) return {rows:[{enabled:true}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.jobs')) return {rows:[],rowCount:0};
+    if(sql.includes('SELECT p.*,c.status')) return {rows:[publication],rowCount:1};
+    if(sql.includes('SELECT p.*,a.provider,a.platform,a.instance_key')) return {rows:[publication],rowCount:1};
+    if(sql.includes('INSERT INTO editorial.jobs')) { insertedPayload=JSON.parse(String(values[6])); return {rows:[{id:values[0],target_id:values[3],payload:insertedPayload}],rowCount:1}; }
+    return {rows:[],rowCount:0};
+  });
+  const repository=new EditorialApiRepository(pool);
+  await repository.createJob({clientId:'client-a',kind:'reconcile',targetId:'publication-1',idempotencyKey:'reconcile:publication-1',payload:{}},'user-1');
+  const p=insertedPayload.publication;
+  assert.deepEqual({accountId:p.accountId,account_id:p.account_id,desiredScheduledAt:p.desiredScheduledAt,desired_scheduled_at:p.desired_scheduled_at,postizPostId:p.postizPostId,postiz_post_id:p.postiz_post_id},{accountId:'account-1',account_id:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',desired_scheduled_at:'2026-10-01T09:00:00.000Z',postizPostId:'postiz-8',postiz_post_id:'postiz-8'});
+  assert.equal(p.copy,'Texto final');
+  assert.deepEqual(p.media,[{url:'https://cdn.example/image.jpg'}]);
+});
+
+test('claim self-heals legacy publication payloads before dispatching a retry', async () => {
+  const writes:any[]=[];
+  const publication={id:'publication-1',client_id:'client-a',content_id:'content-1',content_revision_id:'revision-1',account_id:'account-1',copy:'Texto final',media:[],desired_scheduled_at:'2026-10-01T09:00:00.000Z',postiz_post_id:'postiz-8',status:'sending',provider:'postiz',platform:'gmb',instance_key:'postiz-main',external_account_id:'channel-1'};
+  const pool=poolWithClient(async(sql,values=[])=>{
+    if(sql.includes('SELECT j.* FROM editorial.jobs')) return {rows:[{id:'job-1',client_id:'client-a',kind:'publish',target_id:'publication-1',payload:{publicationId:'publication-1'}}],rowCount:1};
+    if(sql.includes('SELECT status FROM editorial.publications')) return {rows:[{status:'sending'}],rowCount:1};
+    if(sql.includes('SELECT p.*,a.provider,a.platform,a.instance_key')) return {rows:[publication],rowCount:1};
+    if(sql.includes('UPDATE editorial.jobs SET payload')) { writes.push(JSON.parse(String(values[1]))); return {rows:[],rowCount:1}; }
+    if(sql.includes("UPDATE editorial.jobs SET status='running'")) return {rows:[{id:'job-1',payload:writes[0]}],rowCount:1};
+    return {rows:[],rowCount:0};
+  });
+  const repository=new EditorialApiRepository(pool);
+  await repository.claimJob({leaseSeconds:60,executionId:'run-1'},['*']);
+  assert.equal(writes[0].publication.accountId,'account-1');
+  assert.equal(writes[0].publication.postizPostId,'postiz-8');
+});
+
+test('versioned workflow contracts require the generated calendar and consume the persisted publication snapshot', async () => {
+  const root=new URL('..',import.meta.url);
+  const plan=await import('node:fs/promises').then(({readFile})=>readFile(new URL('./workflows/content/inficon-global/plan.v1.json',root),'utf8'));
+  const publish=await import('node:fs/promises').then(({readFile})=>readFile(new URL('./workflows/content/inficon-global/publish.v1.json',root),'utf8'));
+  const generate=await import('node:fs/promises').then(({readFile})=>readFile(new URL('./workflows/content/inficon-global/generate.v1.json',root),'utf8'));
+  assert.match(plan,/calendarId es obligatorio/);
+  assert.match(plan,/calendarId debe coincidir con target_id/);
+  assert.match(plan,/calendarId distinto al reservado/);
+  assert.match(publish,/job\.payload\.publication/);
+  assert.match(generate,/reconcileRequired:ambiguous/);
+});
+
 test('summary and paginated search use editorial dates and SQL filters before LIMIT', async () => {
   const statements:Array<{sql:string;values:unknown[]}>=[];
   const pool={query:async(sql:string,values:unknown[]=[])=>{statements.push({sql,values});return {rows:[],rowCount:0};}} as unknown as Pool;
