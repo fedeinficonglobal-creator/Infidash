@@ -299,7 +299,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const ctx=$('Cargar contexto Infidash').first().json;const cfg=ctx.settings?.editorial_config??{};return [{json:{topic:cfg.topic??'marketing digital',country:cfg.country??'ES',keywords:Array.isArray(cfg.keywords)?cfg.keywords.join(', '):(cfg.keywords??''),weeks_horizon:Number(cfg.weeksHorizon??4),site_url:cfg.siteUrl??'https://inficonglobal.es/',client_context:ctx}}];"
+        "jsCode": "const ctx=$('Cargar contexto Infidash').first().json;const cfg=ctx.settings?.editorial_config??{};const defaultCompetitors=['soyrafaramos.com','moodmarketing.es'];const competitors=Array.isArray(cfg.competitors)&&cfg.competitors.length?cfg.competitors:defaultCompetitors;const topic=cfg.topic??'marketing digital';const rawKeywords=Array.isArray(cfg.keywords)?cfg.keywords.join(', '):(cfg.keywords??'');const keywords=rawKeywords.trim().length?rawKeywords:topic;const serprobotProjectId=cfg.serprobotProjectId??'4958413';const ga4PropertyId=cfg.ga4PropertyId??$env.GA4_PROPERTY_ID_INFICON;return [{json:{topic,country:cfg.country??'ES',keywords,weeks_horizon:Number(cfg.weeksHorizon??4),site_url:cfg.siteUrl??'https://inficonglobal.es/',competitors,serprobotProjectId,ga4PropertyId,client_context:ctx}}];"
       },
       "id": "93543e5e-47b6-4b87-9d57-8e481ac7e340",
       "name": "⚙️ Configuración1",
@@ -433,7 +433,7 @@
       "parameters": {
         "propertyId": {
           "__rl": true,
-          "value": "={{ $env.GA4_PROPERTY_ID_INFICON }}",
+          "value": "={{ $('⚙️ Configuración1').first().json.ga4PropertyId }}",
           "mode": "id"
         },
         "dateRange": "last30days",
@@ -632,26 +632,8 @@
     },
     {
       "parameters": {
-        "resource": "Datasets",
-        "datasetId": "={{ $json.defaultDatasetId }}",
-        "offset": {},
-        "limit": 20,
-        "options": {}
-      },
-      "type": "@apify/n8n-nodes-apify.apify",
-      "typeVersion": 1,
-      "position": [
-        64,
-        2272
-      ],
-      "id": "01b9513b-db8b-440c-8c6a-da6047b43065",
-      "name": "Get dataset items2",
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
         "promptType": "define",
-        "text": "=Actúa como un experto analista de contenido. Tu tarea es analizar exahustivamente el contenido extraído de la página de un competidor.\n\n\n\nContenido para analizar:\n\n{{ $('Get dataset items2').item.json.text }}, \n\"\"\"\nBasado en el texto anterior, genera un JSON estricto (sin markdown, sin bloques de código) con la siguiente estructura:\n{\n  \"headers\": [\"titulo pricipal del post\"],\n\"resumen\":[\"analisis de los datos obtenidos\"]\n}\n\nIMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. No incluyas introducciones ni explicaciones.",
+        "text": "=Actúa como un experto analista de contenido y competencia SEO. Tu tarea es analizar exahustivamente el contenido extraído de la página web de un competidor.\n\n\n\nContenido para analizar:\n\n{{ $json.data }}\n\"\"\"\nBasado en el texto anterior, genera un JSON estricto (sin markdown, sin bloques de código) con la siguiente estructura:\n{\n  \"headers\": [\"titulo pricipal del post\"],\n\"resumen\":[\"analisis de los datos obtenidos\"]\n}\n\nIMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. No incluyas introducciones ni explicaciones.",
         "messages": {
           "messageValues": []
         }
@@ -683,26 +665,8 @@
     },
     {
       "parameters": {
-        "resource": "Datasets",
-        "datasetId": "={{ $json.defaultDatasetId }}",
-        "offset": {},
-        "limit": 20,
-        "options": {}
-      },
-      "type": "@apify/n8n-nodes-apify.apify",
-      "typeVersion": 1,
-      "position": [
-        80,
-        2480
-      ],
-      "id": "7628bc98-d734-4df5-bd3c-fceccfe23ade",
-      "name": "Get dataset items3",
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
         "promptType": "define",
-        "text": "=Actúa como un experto analista de contenido. Tu tarea es analizar exahustivamente el contenido extraído de la página de un competidor.\n\n\n\nContenido de Instagram para analizar:\n{{ $json.text }}\n\"\"\"\nBasado en el texto anterior, genera un JSON estricto (sin markdown, sin bloques de código) con la siguiente estructura:\n{\n  \"headers\": [\"titulo pricipal del post\"],\n\"resumen\":[\"analisis de los datos obtenidos\"]\n}\n\nIMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. No incluyas introducciones ni explicaciones.",
+        "text": "=Actúa como un experto analista de contenido y competencia SEO. Tu tarea es analizar exahustivamente el contenido extraído de la página web de un competidor.\n\n\n\nContenido para analizar:\n{{ $json.data }}\n\"\"\"\nBasado en el texto anterior, genera un JSON estricto (sin markdown, sin bloques de código) con la siguiente estructura:\n{\n  \"headers\": [\"titulo pricipal del post\"],\n\"resumen\":[\"analisis de los datos obtenidos\"]\n}\n\nIMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. No incluyas introducciones ni explicaciones.",
         "messages": {
           "messageValues": []
         }
@@ -747,7 +711,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.SERPROBOT_API_URL + '?api_key=' + $env.SERPROBOT_API_KEY + '&action=project_report&project_id=' + $env.SERPROBOT_PROJECT_ID + '&start=7daysAgo' }}",
+        "url": "={{ $env.SERPROBOT_API_URL + '?api_key=' + $env.SERPROBOT_API_KEY + '&action=project_report&project_id=' + $('⚙️ Configuración1').first().json.serprobotProjectId + '&start=7daysAgo' }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -762,46 +726,62 @@
     },
     {
       "parameters": {
-        "actorId": {
-          "__rl": true,
-          "value": "shu8hvrXbJbY3Eb9W",
-          "mode": "list",
-          "cachedResultName": "Instagram Scraper (apify/instagram-scraper)",
-          "cachedResultUrl": "https://console.apify.com/actors/shu8hvrXbJbY3Eb9W/input"
+        "url": "=https://r.jina.ai/{{ $('⚙️ Configuración1').first().json.competitors[0] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.JINA_API_KEY }}"
+            },
+            {
+              "name": "X-Return-Format",
+              "value": "markdown"
+            }
+          ]
         },
-        "customBody": "={\n    \"addParentData\": false,\n    \"directUrls\": [\n        \"https://www.instagram.com/marketingcompass\"\n    ],\n    \"onlyPostsNewerThan\": \"5 days\",\n    \"resultsLimit\": 20,\n    \"resultsType\": \"posts\",\n    \"searchLimit\": 10,\n    \"searchType\": \"hashtag\"\n}",
-        "timeout": {}
+        "options": {
+          "timeout": 25000
+        }
       },
-      "type": "@apify/n8n-nodes-apify.apify",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         -144,
         2272
       ],
       "id": "98eb9376-a5d4-4536-a93a-7d5226a1c621",
-      "name": "marketingcompass1",
+      "name": "🏢 B: Scrape JINA Reader",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "actorId": {
-          "__rl": true,
-          "value": "shu8hvrXbJbY3Eb9W",
-          "mode": "list",
-          "cachedResultName": "Instagram Scraper (apify/instagram-scraper)",
-          "cachedResultUrl": "https://console.apify.com/actors/shu8hvrXbJbY3Eb9W/input"
+        "url": "=https://r.jina.ai/{{ $('⚙️ Configuración1').first().json.competitors[1] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.JINA_API_KEY }}"
+            },
+            {
+              "name": "X-Return-Format",
+              "value": "markdown"
+            }
+          ]
         },
-        "customBody": "={\n    \"addParentData\": false,\n    \"directUrls\": [\n        \"https://www.instagram.com/limmaylimmon\"\n    ],\n    \"onlyPostsNewerThan\": \"5 days\",\n    \"resultsLimit\": 20,\n    \"resultsType\": \"posts\",\n    \"searchLimit\": 10,\n    \"searchType\": \"hashtag\"\n}",
-        "timeout": {}
+        "options": {
+          "timeout": 25000
+        }
       },
-      "type": "@apify/n8n-nodes-apify.apify",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         -128,
         2480
       ],
       "id": "07ac81dc-9bd9-4999-ad8e-e86499fe6507",
-      "name": "limmaylimmon1",
+      "name": "🏢 B: Scrape JINA Reader2",
       "onError": "continueErrorOutput"
     },
     {
@@ -922,7 +902,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input=$input.first().json; const job=input.job??input;\nconst calendarId=job.target_id??job.payload?.calendarId??job.payload?.calendar_id;\nif(job.kind!=='generate_plan'||!job.id||!job.client_id||!job.leaseToken||!calendarId) throw new Error('Contrato generate_plan v1 invalido: calendarId es obligatorio');\nif(String(calendarId)!==String(job.target_id)) throw new Error('calendarId debe coincidir con target_id');\nreturn [{json:{job:{...job,target_id:calendarId,payload:{...job.payload,calendarId,calendar_id:calendarId}}}];"
+        "jsCode": "const input=$input.first().json; const job=input.job??input;\nconst calendarId=job.target_id??job.payload?.calendarId??job.payload?.calendar_id;\nif(job.kind!=='generate_plan'||!job.id||!job.client_id||!job.leaseToken||!calendarId) throw new Error('Contrato generate_plan v1 invalido: calendarId es obligatorio');\nif(String(calendarId)!==String(job.target_id)) throw new Error('calendarId debe coincidir con target_id');\nreturn [{json:{job:{...job,target_id:calendarId,payload:{...job.payload,calendarId,calendar_id:calendarId}}}}];"
       },
       "id": "validate-plan-v1",
       "name": "Validar trabajo",
@@ -949,7 +929,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 1200 }) }}",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 2700 }) }}",
         "options": {}
       },
       "id": "heartbeat-plan-start-v1",
@@ -959,7 +939,8 @@
       "position": [
         -2020,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -1011,7 +992,8 @@
       "position": [
         2500,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -1405,12 +1387,12 @@
             "index": 0
           },
           {
-            "node": "marketingcompass1",
+            "node": "🏢 B: Scrape JINA Reader",
             "type": "main",
             "index": 0
           },
           {
-            "node": "limmaylimmon1",
+            "node": "🏢 B: Scrape JINA Reader2",
             "type": "main",
             "index": 0
           },
@@ -1723,11 +1705,11 @@
         ]
       ]
     },
-    "marketingcompass1": {
+    "🏢 B: Scrape JINA Reader": {
       "main": [
         [
           {
-            "node": "Get dataset items2",
+            "node": "🏢 B: IA Analiza Competidor3",
             "type": "main",
             "index": 0
           }
@@ -1741,11 +1723,11 @@
         ]
       ]
     },
-    "limmaylimmon1": {
+    "🏢 B: Scrape JINA Reader2": {
       "main": [
         [
           {
-            "node": "Get dataset items3",
+            "node": "🏢 B: IA Analiza Competidor1",
             "type": "main",
             "index": 0
           }
@@ -1872,6 +1854,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1897,42 +1886,6 @@
         ]
       ]
     },
-    "Get dataset items2": {
-      "main": [
-        [
-          {
-            "node": "🏢 B: IA Analiza Competidor3",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Get dataset items3": {
-      "main": [
-        [
-          {
-            "node": "🏢 B: IA Analiza Competidor1",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "📝 Parsear Plan JSON2": {
       "main": [
         [
@@ -1949,6 +1902,13 @@
         [
           {
             "node": "Normalizar resultado del plan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }

@@ -23,7 +23,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { executionId: String($execution.id), leaseSeconds: 600 } }];"
+        "jsCode": "return [{ json: { executionId: String($execution.id), leaseSeconds: 1800 } }];"
       },
       "id": "execution-dispatcher-v1",
       "name": "Preparar reserva",

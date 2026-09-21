@@ -63,7 +63,7 @@ test('Inficon workflows implement the versioned internal API contract', () => {
   assert.match(plan, /planItems/);
   assert.match(plan, /n8n-nodes-base\.googleAnalytics/);
   assert.match(plan, /n8n-nodes-google-search-console\.googleSearchConsole/);
-  assert.match(plan, /@apify\/n8n-nodes-apify\.apify/);
+  assert.match(plan, /r\.jina\.ai/);
   assert.match(plan, /@n8n\/n8n-nodes-langchain/);
   assert.match(generate, /generate_content/);
   assert.match(generate, /wordpress\.draft_created/);
