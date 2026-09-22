@@ -136,14 +136,14 @@ export function Sidebar() {
       </div>
 
       <div className="p-4 border-t border-slate-100">
-        <div className="bg-slate-900 rounded-xl p-4 text-white">
+        <div className="rounded-xl border border-slate-200 p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="size-8 bg-brand-accent rounded-lg flex items-center justify-center">
-              <AlertCircle className="size-5" />
+              <AlertCircle className="size-5 text-white" />
             </div>
-            <span className="text-[10px] font-bold bg-white/10 px-2 py-1 rounded">ALERTA</span>
+            <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded">ALERTA</span>
           </div>
-          <p className="text-xs font-medium text-slate-300 leading-relaxed">
+          <p className="text-xs font-medium text-slate-500 leading-relaxed">
             {activeClient
               ? `El cliente ${activeClient.name} está en ${signals?.healthBand === 'critical' ? 'zona crítica' : signals?.healthBand === 'risk' ? 'zona de riesgo' : 'nivel controlado'}.`
               : 'Selecciona un cliente para ver la alerta prioritaria de la cuenta.'}
