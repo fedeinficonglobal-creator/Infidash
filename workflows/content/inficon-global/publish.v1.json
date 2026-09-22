@@ -79,7 +79,72 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');const imageUrl=requested.media?.[0]?.url??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key}}];"
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'gpt-image-1-mini', prompt: 'Imagen de cabecera fotorrealista y profesional, sin texto superpuesto, para una publicacion de marketing digital sobre: ' + $('Validar trabajo').first().json.job.payload.publication.copy.slice(0, 300), size: '1024x1024', quality: 'medium', output_format: 'jpeg', output_compression: 80 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-image-publish-v1",
+      "name": "Generar imagen IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data[0].b64_json",
+        "options": {
+          "fileName": "publicacion.jpg",
+          "mimeType": "image/jpeg"
+        }
+      },
+      "id": "convert-image-publish-v1",
+      "name": "Convertir imagen a binario",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -520,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "uploadFile",
+        "binaryProperty": "data"
+      },
+      "id": "upload-image-postiz-v1",
+      "name": "Subir imagen a Postiz",
+      "type": "n8n-nodes-postiz.postiz",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=generatedImagePath??requested.media?.[0]?.url??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key}}];"
       },
       "id": "prepare-publish-v1",
       "name": "Preparar publicacion",
@@ -375,6 +440,60 @@
     },
     "Cargar contexto Infidash": {
       "main": [
+        [
+          {
+            "node": "Generar imagen IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar imagen IA": {
+      "main": [
+        [
+          {
+            "node": "Convertir imagen a binario",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar publicacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir imagen a binario": {
+      "main": [
+        [
+          {
+            "node": "Subir imagen a Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar publicacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir imagen a Postiz": {
+      "main": [
+        [
+          {
+            "node": "Preparar publicacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Preparar publicacion",
