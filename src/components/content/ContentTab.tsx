@@ -125,8 +125,11 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
 export function ContentTab({ clientId }: { clientId?: string | null }) {
   const token = useClientStore((state) => state.sessionToken)!;
   const role = useClientStore((state) => state.currentUser?.role);
-  const { month, view, filters, items, isLoading, isRefreshing, error, lastUpdatedAt, setView, reset, setFilters, load, refresh, pollJobs, createJob } = useContentStore();
+  const { month, view, filters, items, isLoading, isRefreshing, error, lastUpdatedAt, jobs, setView, reset, setFilters, load, refresh, pollJobs, createJob } = useContentStore();
   const [creating, setCreating] = useState(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [planCreateError, setPlanCreateError] = useState<string | null>(null);
+  const [dismissedPlanJobId, setDismissedPlanJobId] = useState<string | null>(null);
   useEffect(() => { reset(clientId ?? ''); }, [clientId, reset]);
   useEffect(() => { void load(token); }, [token, month, filters.clientId, filters.status, filters.format, filters.search, load]);
   useEffect(() => {
@@ -141,10 +144,24 @@ export function ContentTab({ clientId }: { clientId?: string | null }) {
   const dated = filtered.filter((item) => item.plannedAt);
   const undated = filtered.filter((item) => !item.plannedAt);
   const admin = role === 'admin';
-  return <div className="space-y-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-brand-primary">Planificación editorial</p><h1 className="mt-1 text-3xl font-bold text-slate-900">Contenidos</h1><p className="mt-2 text-sm text-slate-500">{clientId ? 'Calendario, revisiones y publicaciones del cliente.' : 'Vista global de todos los clientes.'}</p></div>{admin && <div className="flex flex-wrap gap-2"><Button onClick={() => setCreating(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><Plus className="size-4" />Nuevo contenido</Button><Button disabled={!filters.clientId || isRefreshing} onClick={() => filters.clientId && void createJob(token, { clientId: filters.clientId, kind: 'generate_plan' })} className="bg-slate-900 text-white"><Sparkles className="size-4" />Generar plan</Button></div>}</div>
+  const planJob = jobs.find((job) => job.kind === 'generate_plan' && job.clientId === filters.clientId);
+  const showPlanBanner = Boolean(planJob && planJob.id !== dismissedPlanJobId);
+  const generatePlan = async () => {
+    if (!filters.clientId) return;
+    setPlanCreateError(null);
+    setIsGeneratingPlan(true);
+    try { await createJob(token, { clientId: filters.clientId, kind: 'generate_plan' }); }
+    catch (jobError) { setPlanCreateError(jobError instanceof Error ? jobError.message : 'No se pudo iniciar la generación del plan'); }
+    finally { setIsGeneratingPlan(false); }
+  };
+  return <div className="space-y-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-brand-primary">Planificación editorial</p><h1 className="mt-1 text-3xl font-bold text-slate-900">Contenidos</h1><p className="mt-2 text-sm text-slate-500">{clientId ? 'Calendario, revisiones y publicaciones del cliente.' : 'Vista global de todos los clientes.'}</p></div>{admin && <div className="flex flex-wrap gap-2"><Button onClick={() => setCreating(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><Plus className="size-4" />Nuevo contenido</Button><Button disabled={!filters.clientId || isRefreshing || isGeneratingPlan} onClick={() => void generatePlan()} className="bg-slate-900 text-white">{isGeneratingPlan ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Generar plan</Button></div>}</div>
     <Filters /><SummaryCards />
     <div className="flex flex-wrap items-center justify-between gap-3"><div className="inline-flex rounded-xl border border-slate-200 bg-white p-1"><button onClick={() => setView('calendar')} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold', view === 'calendar' ? 'bg-slate-900 text-white' : 'text-slate-500')}><CalendarDays className="size-4" />Calendario</button><button onClick={() => setView('list')} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold', view === 'list' ? 'bg-slate-900 text-white' : 'text-slate-500')}><LayoutList className="size-4" />Lista</button></div><div className="flex items-center gap-2 text-xs text-slate-400"><Clock3 className="size-3.5" />{lastUpdatedAt ? `Actualizado ${format(parseISO(lastUpdatedAt), 'HH:mm:ss', { locale: es })}` : 'Pendiente de actualizar'}<button onClick={() => void refresh(token)} disabled={isRefreshing} aria-label="Actualizar contenidos" className="rounded-lg p-2 hover:bg-white"><RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} /></button></div></div>
     {error && <div role="alert" className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{error}</span><Button onClick={() => void load(token)} className="bg-white px-3 text-rose-700">Reintentar</Button></div>}
+    {planCreateError && <div role="alert" className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{planCreateError}</span><Button onClick={() => setPlanCreateError(null)} className="bg-white px-3 text-rose-700"><X className="size-4" /></Button></div>}
+    {showPlanBanner && planJob && ['pending', 'running', 'unknown'].includes(planJob.status) && <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800"><LoaderCircle className="size-4 shrink-0 animate-spin" />Generando plan editorial… puede tardar varios minutos. Las propuestas nuevas aparecerán aquí automáticamente.</div>}
+    {showPlanBanner && planJob && planJob.status === 'succeeded' && <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><span>Plan generado correctamente.</span><Button onClick={() => setDismissedPlanJobId(planJob.id)} className="bg-white px-3 text-emerald-700"><X className="size-4" /></Button></div>}
+    {showPlanBanner && planJob && planJob.status === 'failed' && <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{planJob.lastError ?? 'La generación del plan falló.'}</span><Button onClick={() => setDismissedPlanJobId(planJob.id)} className="bg-white px-3 text-rose-700"><X className="size-4" /></Button></div>}
     {isLoading ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-28 animate-pulse rounded-2xl bg-slate-200" />)}</div> : filtered.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white"><Empty label={items.length ? 'Ningún contenido coincide con los filtros' : `No hay contenidos en ${monthLabel(month)}`} /></div> : <>{view === 'calendar' ? <EditorialCalendar items={dated} /> : <ContentTable items={filtered} />}<UndatedTray items={undated} /></>}
     <DetailPanel />{creating && <CreatePanel onClose={() => setCreating(false)} />}
   </div>;
