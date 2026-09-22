@@ -238,7 +238,10 @@ function startClaritySyncScheduler() {
     });
   };
 
-  run();
+  // First run is delayed so the psql-backed sync (blocking, via spawnSync)
+  // doesn't compete with the platform's startup health check right after listen().
+  const initialDelayMs = 10_000;
+  setTimeout(run, initialDelayMs);
   globalState.__infidashClaritySyncInterval = setInterval(run, safeInterval);
 }
 
