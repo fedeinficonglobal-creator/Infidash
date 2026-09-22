@@ -19,12 +19,15 @@ import {
   getDailyStatById,
   getDashboardHealthSummary,
   getIntegrationById,
+  getIntegrationByWebhookSecret,
   getIntegrationCredentialsById,
   getLatestUxSnapshot,
   getSessionByToken,
+  insertLead,
   listClients,
   listClientsWithLatestStat,
   listDailyStats,
+  listLeadsByClient,
   listUxSnapshots,
   listIntegrationsByProvider,
   listMonthlyKpis,
@@ -33,6 +36,7 @@ import {
   removeClientIntegration,
   saveMonthlyKpi,
   saveRrssChannel,
+  setClientIntegrationStatus,
   testIntegrationById,
   updateIntegrationSyncState,
   updateUserRole,
@@ -191,6 +195,38 @@ async function syncClarityIntegration(integrationId: string) {
     snapshots: savedSnapshots,
     skipped: false,
   };
+}
+
+async function testWordPressConnection(integration: any, fetchImpl: typeof fetch = globalThis.fetch) {
+  const siteUrl = String(integration.config?.siteUrl ?? '').trim().replace(/\/+$/, '');
+  if (!siteUrl) {
+    return { ok: false, error: 'Falta la URL del sitio' };
+  }
+
+  const restNamespace = String(integration.config?.restNamespace ?? '/wp-json/wp/v2').trim() || '/wp-json/wp/v2';
+  const url = `${siteUrl}${restNamespace.startsWith('/') ? '' : '/'}${restNamespace}`;
+  const credentials = getIntegrationCredentialsById(integration.id) ?? {};
+  const username = typeof credentials.username === 'string' ? credentials.username.trim() : '';
+  const applicationPassword = typeof credentials.applicationPassword === 'string' ? credentials.applicationPassword.trim() : '';
+
+  const headers = new Headers({ accept: 'application/json' });
+  if (username && applicationPassword) {
+    headers.set('authorization', `Basic ${Buffer.from(`${username}:${applicationPassword}`).toString('base64')}`);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(new DOMException('WordPress connection timeout', 'AbortError')), 8000);
+  try {
+    const response = await fetchImpl(url, { method: 'GET', headers, signal: controller.signal });
+    if (!response.ok) {
+      return { ok: false, error: `WordPress respondió ${response.status} ${response.statusText}` };
+    }
+    return { ok: true, error: null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'No se pudo conectar con WordPress' };
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 let claritySyncRunning = false;
@@ -545,15 +581,28 @@ app.patch('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply)
   }
 });
 
-app.post('/api/integrations/:id/test', (req: AnyFastifyRequest, reply: FastifyReply) => {
+app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
 
-  const result = testIntegrationById((req.params as any).id);
+  let result = testIntegrationById((req.params as any).id);
   if (!result) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
+  }
+
+  // The field-completeness check above never actually contacts WordPress.
+  // For wordpress integrations with all required fields, do a real HTTP probe.
+  if (result.ready && result.integration.provider === 'wordpress') {
+    const probe = await testWordPressConnection(result.integration);
+    const updated = setClientIntegrationStatus(result.integration.id, probe.ok ? 'connected' : 'error', probe.ok ? null : probe.error);
+    result = {
+      ...result,
+      integration: updated ?? result.integration,
+      ready: probe.ok,
+      summary: probe.ok ? result.summary : (probe.error ?? 'No se pudo conectar con WordPress'),
+    };
   }
 
   return reply.send(result);
@@ -590,6 +639,69 @@ app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: Fas
     });
     return sendError(reply, 500, message, 'CLARITY_SYNC_FAILED');
   }
+});
+
+function pickLeadField(payload: Record<string, any>, candidates: string[]) {
+  const flatSources = [payload, payload?.data, payload?.fields, payload?.posted_data, payload?.form_data].filter(
+    (value): value is Record<string, any> => Boolean(value) && typeof value === 'object' && !Array.isArray(value),
+  );
+
+  for (const source of flatSources) {
+    const keys = Object.keys(source);
+    for (const candidate of candidates) {
+      const match = keys.find((key) => key.toLowerCase().replace(/[^a-z]/g, '') === candidate);
+      if (match && typeof source[match] === 'string' && source[match].trim()) {
+        return source[match].trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+// Public endpoint: no session. Auth is the unguessable per-integration webhook token itself
+// (WordPress form plugins like Fluent Forms / Contact Form 7 POST here on submit).
+app.post('/api/public/leads/:token', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const token = String((req.params as any).token ?? '').trim();
+  const integration = token ? getIntegrationByWebhookSecret(token) : null;
+  if (!integration || integration.provider !== 'wordpress') {
+    return sendError(reply, 404, 'Webhook no encontrado', 'NOT_FOUND');
+  }
+
+  const body = (req.body ?? {}) as Record<string, any>;
+  const name = pickLeadField(body, ['name', 'fullname', 'yourname', 'nombre', 'nombrecompleto']);
+  const email = pickLeadField(body, ['email', 'youremail', 'correo', 'correoelectronico']);
+  const phone = pickLeadField(body, ['phone', 'phonenumber', 'yourphone', 'telefono', 'tel', 'movil']);
+  const message = pickLeadField(body, ['message', 'yourmessage', 'mensaje', 'comments', 'comentario', 'comentarios']);
+
+  const lead = insertLead({
+    clientId: integration.clientId,
+    integrationId: integration.id,
+    source: integration.config.leadSource?.trim() || 'WordPress',
+    name: name ? name.slice(0, 300) : null,
+    email: email ? email.slice(0, 300) : null,
+    phone: phone ? phone.slice(0, 300) : null,
+    message: message ? message.slice(0, 5000) : null,
+    rawPayload: body,
+  });
+
+  updateIntegrationSyncState(integration.id, { status: 'connected', lastError: null, lastSync: new Date().toISOString() });
+
+  return reply.code(201).send({ ok: true, leadId: lead.id });
+});
+
+app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) {
+    return;
+  }
+
+  const clientId = String((req.query as any)?.clientId ?? '').trim();
+  if (!clientId) {
+    return sendError(reply, 400, 'clientId es obligatorio', 'INVALID_PAYLOAD');
+  }
+
+  return reply.send({ leads: listLeadsByClient(clientId) });
 });
 
 app.delete('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {

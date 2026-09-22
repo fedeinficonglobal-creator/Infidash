@@ -12,7 +12,9 @@ import {
 import {
   AlertCircle,
   BarChart3,
+  Check,
   CheckCircle2,
+  Copy,
   Eye,
   FileText,
   Globe,
@@ -124,6 +126,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -527,6 +530,26 @@ export function IntegrationsTab({ client }: { client: Client }) {
                             <span>Secretos: {integration.secretKeys.length > 0 ? `${integration.secretKeys.length} guardados` : 'No configurados'}</span>
                             {integration.lastError && <span className="text-rose-600">{integration.lastError}</span>}
                           </div>
+                          {integration.capabilities.includes('leads') && integration.webhookSecret && (
+                            <div className="mt-3 flex items-center gap-2">
+                              <code className="max-w-xs truncate rounded-lg bg-slate-50 border border-slate-200 px-2 py-1 text-[10px] text-slate-600">
+                                {`${window.location.origin}/api/public/leads/${integration.webhookSecret}`}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(`${window.location.origin}/api/public/leads/${integration.webhookSecret}`).then(() => {
+                                    setCopiedWebhookId(integration.id);
+                                    setTimeout(() => setCopiedWebhookId((current) => (current === integration.id ? null : current)), 2000);
+                                  });
+                                }}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-white"
+                              >
+                                {copiedWebhookId === integration.id ? <Check className="size-3" /> : <Copy className="size-3" />}
+                                {copiedWebhookId === integration.id ? 'Copiado' : 'Copiar webhook'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 

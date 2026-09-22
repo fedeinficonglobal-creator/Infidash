@@ -82,8 +82,24 @@ export interface ApiIntegration {
   capabilities: Array<'analytics' | 'ads' | 'leads' | 'sales'>;
   config: Record<string, string>;
   secretKeys: string[];
+  webhookSecret: string | null;
   lastSync: string | null;
   lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiLead {
+  id: string;
+  clientId: string;
+  integrationId: string | null;
+  source: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  message: string | null;
+  status: 'new' | 'in_progress' | 'closed' | 'lost';
+  receivedAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -350,6 +366,10 @@ export async function testClientIntegration(token: string, integrationId: string
   }>(`/api/integrations/${encodeURIComponent(integrationId)}/test`, {
     method: 'POST',
   }, token);
+}
+
+export async function getLeads(token: string, clientId: string) {
+  return apiRequest<{ leads: ApiLead[] }>(`/api/leads?clientId=${encodeURIComponent(clientId)}`, {}, token);
 }
 
 export async function syncClientIntegration(token: string, integrationId: string) {

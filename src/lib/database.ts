@@ -53,8 +53,25 @@ export interface IntegrationRecord {
   capabilities: IntegrationCapability[];
   config: Record<string, string>;
   secretKeys: string[];
+  webhookSecret: string | null;
   lastSync: string | null;
   lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeadRecord {
+  id: string;
+  clientId: string;
+  integrationId: string | null;
+  source: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  message: string | null;
+  status: 'new' | 'in_progress' | 'closed' | 'lost';
+  rawPayload: Record<string, unknown>;
+  receivedAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -952,6 +969,22 @@ function initializeSchema(db: AppDatabase) {
       insight_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS leads (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      integration_id TEXT REFERENCES integrations(id) ON DELETE SET NULL,
+      source TEXT NOT NULL DEFAULT 'wordpress',
+      name TEXT,
+      email TEXT,
+      phone TEXT,
+      message TEXT,
+      status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_progress', 'closed', 'lost')),
+      raw_payload_json TEXT NOT NULL DEFAULT '{}',
+      received_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 }
 
@@ -1064,6 +1097,10 @@ function ensureIntegrationSchema(db: AppDatabase) {
 
   if (!existingColumns.has('last_sync')) {
     addColumn(`last_sync TEXT`);
+  }
+
+  if (!existingColumns.has('webhook_secret')) {
+    addColumn(`webhook_secret TEXT`);
   }
 
   const hasTypeColumn = existingColumns.has('type');
@@ -1256,6 +1293,7 @@ function rowToIntegration(row: any): IntegrationRecord {
     capabilities: [...definition.capabilities],
     config,
     secretKeys: definition.credentialFields.map((field) => field.key).filter((key) => Boolean(credentials[key])),
+    webhookSecret: row.webhook_secret ?? null,
     lastSync: row.last_sync ?? null,
     lastError: row.last_error ?? null,
     createdAt: row.created_at,
@@ -1298,6 +1336,24 @@ function rowToUxSnapshot(row: any): ClarityUxSnapshotRecord {
     notes: row.notes ?? null,
     source: row.source,
     payloadJson: row.payload_json ?? '{}',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToLead(row: any): LeadRecord {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    integrationId: row.integration_id ?? null,
+    source: row.source ?? 'wordpress',
+    name: row.name ?? null,
+    email: row.email ?? null,
+    phone: row.phone ?? null,
+    message: row.message ?? null,
+    status: (['new', 'in_progress', 'closed', 'lost'].includes(row.status) ? row.status : 'new') as LeadRecord['status'],
+    rawPayload: parseJsonRecord(row.raw_payload_json ?? '{}'),
+    receivedAt: row.received_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1607,11 +1663,13 @@ export function saveClientIntegration(input: IntegrationInput) {
   const label = buildIntegrationDisplayName(definition, config, input.label ?? existing?.label ?? null);
   const lastSync = missingFields.length === 0 ? (existing?.last_sync ?? timestamp) : existing?.last_sync ?? null;
   const lastError = input.lastError ?? (missingFields.length > 0 ? `Faltan campos obligatorios: ${missingFields.join(', ')}` : null);
+  const needsWebhookSecret = definition.capabilities.includes('leads');
+  const webhookSecret = needsWebhookSecret ? (existing?.webhook_secret ?? crypto.randomBytes(24).toString('hex')) : (existing?.webhook_secret ?? null);
 
   if (existing) {
     db.prepare(
       `UPDATE integrations
-       SET client_id = ?, provider = ?, label = ?, status = ?, config_json = ?, credentials_json = ?, is_active = ?, last_sync = ?, last_error = ?, updated_at = ?
+       SET client_id = ?, provider = ?, label = ?, status = ?, config_json = ?, credentials_json = ?, is_active = ?, last_sync = ?, last_error = ?, webhook_secret = ?, updated_at = ?
        WHERE id = ?`
     ).run(
       clientId,
@@ -1623,6 +1681,7 @@ export function saveClientIntegration(input: IntegrationInput) {
       Number(existing.is_active ?? 1),
       lastSync,
       lastError,
+      webhookSecret,
       timestamp,
       existing.id,
     );
@@ -1642,14 +1701,15 @@ export function saveClientIntegration(input: IntegrationInput) {
     is_active: 1,
     last_sync: lastSync,
     last_error: lastError,
+    webhook_secret: webhookSecret,
     created_at: timestamp,
     updated_at: timestamp,
   };
 
   db.prepare(
     `INSERT INTO integrations (
-      id, client_id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      id, client_id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, webhook_secret, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     record.id,
     record.client_id,
@@ -1661,12 +1721,79 @@ export function saveClientIntegration(input: IntegrationInput) {
     record.is_active,
     record.last_sync,
     record.last_error,
+    record.webhook_secret,
     record.created_at,
     record.updated_at,
   );
 
   const created = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(record.id) as any;
   return rowToIntegration(created);
+}
+
+export function getIntegrationByWebhookSecret(secret: string) {
+  if (!secret) {
+    return null;
+  }
+
+  const row = getDatabase().prepare(`SELECT * FROM integrations WHERE webhook_secret = ? AND is_active = 1`).get(secret) as any;
+  return row ? rowToIntegration(row) : null;
+}
+
+export function insertLead(input: {
+  clientId: string;
+  integrationId: string | null;
+  source: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  message: string | null;
+  rawPayload: Record<string, unknown>;
+}) {
+  const db = getDatabase();
+  const timestamp = nowIso();
+  const record = {
+    id: crypto.randomUUID(),
+    client_id: input.clientId,
+    integration_id: input.integrationId,
+    source: input.source.trim() || 'wordpress',
+    name: input.name?.trim() || null,
+    email: input.email?.trim() || null,
+    phone: input.phone?.trim() || null,
+    message: input.message?.trim() || null,
+    raw_payload_json: JSON.stringify(input.rawPayload ?? {}),
+    received_at: timestamp,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+
+  db.prepare(
+    `INSERT INTO leads (
+      id, client_id, integration_id, source, name, email, phone, message, status, raw_payload_json, received_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?)`
+  ).run(
+    record.id,
+    record.client_id,
+    record.integration_id,
+    record.source,
+    record.name,
+    record.email,
+    record.phone,
+    record.message,
+    record.raw_payload_json,
+    record.received_at,
+    record.created_at,
+    record.updated_at,
+  );
+
+  const created = db.prepare(`SELECT * FROM leads WHERE id = ?`).get(record.id) as any;
+  return rowToLead(created);
+}
+
+export function listLeadsByClient(clientId: string, limit = 200) {
+  const rows = getDatabase()
+    .prepare(`SELECT * FROM leads WHERE client_id = ? ORDER BY received_at DESC LIMIT ?`)
+    .all(clientId, limit) as any[];
+  return rows.map(rowToLead);
 }
 
 export function deleteClientIntegration(id: string) {
