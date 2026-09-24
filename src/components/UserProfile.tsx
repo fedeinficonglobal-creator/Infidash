@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { User, Mail, Shield, Bell, Key, LogOut, Camera, Globe, ChevronRight, BadgeCheck, Clock3 } from 'lucide-react';
+import { User, Mail, Shield, Bell, Key, LogOut, Globe, ChevronRight, BadgeCheck, Clock3 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useClientStore } from '../store/useClientStore';
+import { getAvatarInitials } from '../lib/avatarInitials.js';
 
 export function UserProfile() {
   const [activeSubTab, setActiveSubTab] = useState<'profile' | 'security' | 'notifications'>('profile');
@@ -10,7 +11,7 @@ export function UserProfile() {
   const displayName = currentUser?.name ?? 'Usuario de Infidash';
   const displayEmail = currentUser?.email ?? 'sesion@infidash.local';
   const displayRole = currentUser?.role === 'admin' ? 'Administrador' : currentUser?.role === 'viewer' ? 'Visualizador' : 'Sin rol';
-  const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0F172A&color=FFFFFF&size=256`;
+  const avatarInitials = getAvatarInitials(displayName);
 
   const menu = [
     { id: 'profile', label: 'Mi Perfil', icon: User },
@@ -59,17 +60,10 @@ export function UserProfile() {
             {activeSubTab === 'profile' && (
               <div className="animate-in fade-in duration-300">
                 <div className="flex flex-col md:flex-row items-center gap-8 mb-10 pb-10 border-b border-slate-100">
-                  <div className="relative group">
-                    <div className="size-32 rounded-3xl overflow-hidden border-4 border-slate-50 shadow-inner bg-slate-50">
-                      <img
-                        src={avatarUrl}
-                        alt={`Avatar de ${displayName}`}
-                        className="size-full object-cover group-hover:scale-110 transition-transform duration-500"
-                      />
+                  <div>
+                    <div aria-label={`Iniciales de ${displayName}`} className="flex size-32 items-center justify-center rounded-3xl border-4 border-slate-50 bg-slate-900 text-3xl font-bold tracking-wider text-white shadow-inner">
+                      {avatarInitials}
                     </div>
-                    <button className="absolute -bottom-2 -right-2 p-2 bg-brand-primary text-white rounded-xl shadow-lg hover:scale-110 transition-all" aria-label="Cambiar avatar">
-                      <Camera className="size-4" />
-                    </button>
                   </div>
                   <div className="text-center md:text-left">
                     <h3 className="text-2xl font-bold text-slate-900 mb-1">{displayName}</h3>

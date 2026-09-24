@@ -11,6 +11,7 @@ import {
   type ApiIntegration,
   type WooCommerceSalesPreview,
 } from '../services/infidashApi.js';
+import { hasManualIntegrationSync } from '../lib/integrationState.js';
 import {
   AlertCircle,
   BarChart3,
@@ -619,14 +620,14 @@ export function IntegrationsTab({ client }: { client: Client }) {
                         >
                           {testingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} {integration.provider === 'wordpress' || integration.provider === 'woocommerce' ? 'Probar conexión' : 'Validar campos'}
                         </button>
-                        <button
+                        {hasManualIntegrationSync(integration.provider) && <button
                           type="button"
                           onClick={() => void handleSync(integration.id)}
                           disabled={syncingId === integration.id}
                           className="inline-flex items-center gap-2 rounded-xl border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-50 disabled:cursor-wait"
                         >
                           {syncingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCcw className="size-3.5" />} Sincronizar
-                        </button>
+                        </button>}
                           <button
                             type="button"
                             onClick={() => void handleDelete(integration.id)}
@@ -749,7 +750,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
             )}
 
             <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-xs text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos; la sincronización de ventas sigue pendiente. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
+              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos. La sincronización completa de ventas se ejecuta desde Ventas mediante una acción administrativa. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">

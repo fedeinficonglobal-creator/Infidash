@@ -1,25 +1,23 @@
-﻿# Repository Guidelines
+# Repository Guidelines
 
-## Project Structure & Module Organization
+## Project Structure
 
-`src/` contains the React/Vite frontend and Fastify services: reusable UI lives in `src/components/`, with data access, server code, integrations, and state organized under `src/db/`, `src/server/`, `src/services/`, and `src/store/`. Root `server.ts` starts the API. PostgreSQL migrations are in `db/migrations/`; automated tests are in `tests/`. Static assets belong in `public/`, operational scripts in `scripts/`, and editorial automation definitions in `workflows/content/`. Keep docs and plans in `docs/`.
+`src/components/` contains the React UI; `src/store/` and `src/services/` hold client state and API clients. Shared domain helpers live in `src/lib/`, Fastify modules in `src/server/`, and the API entry point is root `server.ts`. Editorial PostgreSQL migrations are in `db/migrations/`; operational scripts are in `scripts/`; static assets are in `public/` and `assets/`. Tests are `tests/*.test.ts`, with isolated fixtures under `tests/fixtures/`. Product and operations documentation belongs in `docs/`. Versioned n8n exports are under `workflows/content/`; treat them as integration contracts and do not change them without an explicit, scoped request.
 
-## Build, Test, and Development Commands
+## Build, Test, and Development
 
-Run `npm install` to install dependencies. Start the API with `npm run api` and the Vite frontend separately with `npm run dev` (port 3000). Use `npm run build` for a production frontend build, `npm run preview` to inspect it, `npm run lint` for TypeScript checks across frontend and backend configs, and `npm run test` for the Node test-runner suite. For editorial work, `npm run db:migrate:editorial` applies migrations and `npm run content:import` validates imports in dry-run mode; pass `--apply` only when intended to write data.
+- `npm ci` installs the lockfile-defined dependencies.
+- `npm run dev` starts Vite on port 3000; `npm run api` starts Fastify (default port 4000). Run them in separate terminals for local development.
+- `npm run lint` type-checks frontend and backend TypeScript configurations.
+- `npm test` / `npm run test:unit` run the safe unit and contract suites.
+- `npm run build` creates the production frontend in `dist/`; `npm run preview` serves that build.
+- `npm run test:db` and `npm run test:api` require `INFIDASH_TEST_DATABASE_URL` pointing to a disposable loopback PostgreSQL database with a distinct `test` name segment. API tests also use `INFIDASH_TEST_API_BASE_URL` (loopback only). Never target shared, staging, or production data. See `docs/testing.md`.
+- `npm run db:migrate:editorial` applies editorial migrations; `npm run content:import` defaults to a dry run. Use write flags only after reviewing the preview.
 
-## Coding Style & Naming Conventions
+## Style and Testing
 
-Use TypeScript/TSX with two-space indentation, semicolons, and single quotes where consistent with neighboring files. Use PascalCase for React components, camelCase for functions and variables, and descriptive kebab-case for migration filenames. Follow existing module boundaries and prefer small, focused changes. No standalone formatter or linter is configured; `npm run lint` is the required type-check.
+Use TypeScript/TSX, two-space indentation, semicolons, and the surrounding file's quote conventions. React components use PascalCase; functions, variables, and test filenames use camelCase or descriptive kebab-case as appropriate (`tests/lead-query.test.ts`). Add regression coverage beside the affected behavior. Keep provider credentials and real customer data out of tests, logs, fixtures, and commits. Workflow-export tests validate structure/contracts, not execution in a live n8n instance.
 
-## Testing Guidelines
+## Commits and Pull Requests
 
-Tests use Node's built-in test runner through `tsx` and live in `tests/*.test.ts`. Name new files `<feature>.test.ts` and keep coverage near the behavior being changed. Run `npm run test`, plus `npm run lint` and `npm run build` before submitting; tests that depend on PostgreSQL or external services should document their local prerequisites.
-
-## Commit & Pull Request Guidelines
-
-Recent history uses Conventional Commit-style prefixes and optional scopes, e.g. `feat(leads): ...`, `fix(server): ...`, and `style(ui): ...`. Keep commits focused and use imperative summaries. A pull request should explain the user-visible change, note relevant migrations or configuration, link the issue when applicable, and include screenshots for UI changes. Report test, lint, and build results.
-
-## Security & Configuration
-
-Use `.env.example` as the template for local configuration; never commit real credentials, service tokens, or production data. Confirm database and migration prerequisites before enabling related workflows.
+Use the Conventional Commit prefixes present in history, such as `feat(leads): ...`, `fix(server): ...`, and `test(integrations): ...`. Keep changes focused. PRs should summarize behavior, link related issues, call out migrations/configuration, attach UI screenshots when relevant, and report tests, lint, and build results. Never commit secrets; use `.env.example` as the configuration reference.

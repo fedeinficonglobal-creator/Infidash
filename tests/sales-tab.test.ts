@@ -18,6 +18,6 @@ test('Sales does not present manual metrics or fabricated charts as WooCommerce 
     revenue30d: { total: 1000, count: 1, startDate: '2026-09-01', endDate: '2026-09-30' },
   };
   const html = renderToStaticMarkup(createElement(SalesTab, { client }));
-  assert.match(html, /No hay ventas WooCommerce sincronizadas/);
+  assert.match(html, /sincronizacion completa se guarda por tienda y periodo/);
   assert.doesNotMatch(html, /Categorías Top|Potencial recuperable|Ventas por Día|Pedidos.*12|Ingresos Totales/);
 });

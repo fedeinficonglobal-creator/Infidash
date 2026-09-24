@@ -22,7 +22,7 @@ export function Sidebar() {
     { id: 'leads', label: 'Leads', icon: Megaphone },
     { id: 'rrss', label: 'Redes Sociales', icon: Hash },
     { id: 'content', label: 'Contenidos', icon: CalendarDays },
-    { id: 'ai', label: 'Insights IA', icon: Zap },
+    { id: 'ai', label: 'Insights', icon: Zap },
     { id: 'reports', label: 'Reportes', icon: FileText },
     { id: 'integrations', label: 'Integraciones', icon: Users },
   ].filter((item) => !activeClient?.activeTabs || activeClient.activeTabs.includes(item.id));

@@ -20,7 +20,7 @@ export function AiInsightsTab({ client }: { client: Client }) {
       <header className="mb-8 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1 flex items-center gap-3">
-            Insights Inteligentes <Sparkles className="size-6 text-brand-primary fill-brand-primary/20" />
+            Insights operativos <Sparkles className="size-6 text-brand-primary fill-brand-primary/20" />
           </h2>
           <p className="text-slate-500 font-medium uppercase text-xs tracking-widest">
             {client.name} · {signals.healthBand === 'excellent' ? 'Señal positiva' : signals.healthBand === 'stable' ? 'Estabilidad operativa' : signals.healthBand === 'risk' ? 'Atención táctica' : 'Zona crítica'}
@@ -77,8 +77,9 @@ export function AiInsightsTab({ client }: { client: Client }) {
 
         <div className="space-y-6">
           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <Sparkles className="size-4 text-brand-primary" /> Resumen Ejecutivo IA
+            <Sparkles className="size-4 text-brand-primary" /> Resumen basado en reglas
           </h3>
+          <p className="mb-3 text-xs text-slate-500">Recomendaciones deterministas basadas en las métricas disponibles; no se usa un modelo generativo.</p>
           <div className={cn('p-8 rounded-[2rem] shadow-2xl relative overflow-hidden text-white', signals.healthBand === 'critical' ? 'bg-rose-950' : 'bg-slate-900')}>
             <div className="relative z-10 space-y-6 text-slate-300">
               <div className="flex items-center gap-2 text-white">
