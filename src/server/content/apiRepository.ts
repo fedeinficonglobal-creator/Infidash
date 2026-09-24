@@ -356,7 +356,26 @@ export class EditorialApiRepository {
     }
   }
 
-  async getJob(id:string){ const result=await this.pool.query('SELECT * FROM editorial.jobs WHERE id=$1',[id]); return result.rows[0]??null; }
+  async getJob(id:string){ const result=await this.pool.query(`SELECT id,client_id,kind,target_id,status,attempt_count,next_attempt_at,locked_until,execution_id,last_error,created_at,updated_at,completed_at
+    FROM editorial.jobs WHERE id=$1`,[id]); return result.rows[0]??null; }
+
+  async listJobs(filters: { clientId?: string; status?: string; cursor?: { at: string; id: string } | null; limit: number }) {
+    const values: unknown[] = [];
+    const where: string[] = [];
+    if (filters.clientId) { values.push(filters.clientId); where.push(`client_id=$${values.length}`); }
+    if (filters.status) { values.push(filters.status); where.push(`status=$${values.length}`); }
+    if (filters.cursor) {
+      values.push(filters.cursor.at, filters.cursor.id);
+      where.push(`(created_at,id)<($${values.length - 1}::timestamptz,$${values.length}::uuid)`);
+    }
+    values.push(filters.limit + 1);
+    const result = await this.pool.query(`SELECT id,client_id,kind,target_id,status,attempt_count,next_attempt_at,locked_until,execution_id,last_error,created_at,updated_at,completed_at
+      FROM editorial.jobs ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY created_at DESC,id DESC LIMIT $${values.length}`, values);
+    const items = result.rows.slice(0, filters.limit);
+    const last = items.at(-1) as any;
+    return { items, nextCursor: result.rows.length > filters.limit && last ? encodeCursor({ at: new Date(last.created_at).toISOString(), id: last.id }) : null };
+  }
 
   async claimJob(input:{kinds?:string[];clientId?:string;leaseSeconds:number;executionId:string},allowedClientIds:string[]){
     return withEditorialTransaction(async(client)=>{

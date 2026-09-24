@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Calendar, FileText, LoaderCircle, Save, Share2, Download, Mail } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
-import { createDailyStat, getDailyStats, type DailyStat } from '../services/infidashApi';
+import { createDailyStat, fetchDailyReportPdf, getDailyStats, type DailyStat } from '../services/infidashApi';
 
 function todayISODate() {
   return new Date().toISOString().slice(0, 10);
@@ -80,6 +80,11 @@ export function ReportsTab({ client }: { client: Client }) {
   const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [reportFrom, setReportFrom] = useState(`${todayISODate().slice(0, 7)}-01`);
+  const [reportTo, setReportTo] = useState(todayISODate());
   const [dailyStatForm, setDailyStatForm] = useState({
     statDate: todayISODate(),
     revenue: '',
@@ -103,14 +108,16 @@ export function ReportsTab({ client }: { client: Client }) {
       }
 
       setIsLoadingHistory(true);
+      setHistoryError(null);
       try {
         const response = await getDailyStats(sessionToken, client.id);
         if (!cancelled) {
           setDailyStats(response.stats.sort((a, b) => b.statDate.localeCompare(a.statDate)));
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
           setDailyStats([]);
+          setHistoryError(error instanceof Error ? error.message : 'No se pudo cargar el histórico');
         }
       } finally {
         if (!cancelled) {
@@ -182,6 +189,27 @@ export function ReportsTab({ client }: { client: Client }) {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!sessionToken) return;
+    setReportError(null);
+    setIsDownloading(true);
+    try {
+      const blob = await fetchDailyReportPdf(sessionToken, client.id, reportFrom, reportTo);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `infidash-${reportFrom}-${reportTo}.pdf`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (error) {
+      setReportError(error instanceof Error ? error.message : 'No se pudo descargar el PDF');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="mb-8 flex items-center justify-between gap-4">
@@ -189,20 +217,7 @@ export function ReportsTab({ client }: { client: Client }) {
           <h2 className="text-3xl font-bold text-slate-900 mb-1">Generación de Reportes</h2>
           <p className="text-slate-500 font-medium">Exportación de datos, métricas diarias y histórico real para {client.name}.</p>
         </div>
-        <div className="flex gap-3">
-          <button
-            disabled={!canManageReports}
-            className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Calendar className="size-4" /> Programar Envío
-          </button>
-          <button
-            disabled={!canManageReports}
-            className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-brand-primary/90 transition-all shadow-lg shadow-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FileText className="size-4" /> Nuevo Reporte
-          </button>
-        </div>
+
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
@@ -214,14 +229,6 @@ export function ReportsTab({ client }: { client: Client }) {
                 ? `${formatDate(latestStat.statDate)} · Revenue ${formatMoney(latestStat.revenue)} · ROAS ${formatDecimal(latestStat.roas)}x`
                 : 'Todavía no hay métricas guardadas para este cliente.'}
             </p>
-            <div className="flex flex-wrap gap-3">
-              <button className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-colors">
-                <Download className="size-3" /> Descargar PDF
-              </button>
-              <button className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-200 transition-colors">
-                <Share2 className="size-3" /> Compartir resumen
-              </button>
-            </div>
           </div>
           <FileText className="absolute -right-4 -bottom-4 size-32 text-slate-50 group-hover:text-slate-100 transition-colors" />
         </div>
@@ -230,9 +237,7 @@ export function ReportsTab({ client }: { client: Client }) {
           <div className="relative z-10">
             <h3 className="text-lg font-bold text-brand-secondary mb-2">Integración pendiente</h3>
             <p className="text-sm text-slate-500 font-medium mb-6">La sincronización automática con Notion todavía no está conectada. Por ahora, el histórico vive en PostgreSQL.</p>
-            <button className="text-brand-secondary font-bold text-xs flex items-center gap-2 hover:translate-x-1 transition-transform">
-              Revisar roadmap <Share2 className="size-3" />
-            </button>
+
           </div>
           <div className="absolute top-4 right-4 size-10 bg-white rounded-xl shadow-sm flex items-center justify-center opacity-50 group-hover:opacity-100 transition-opacity">
             <Share2 className="size-5 text-brand-secondary" />
@@ -407,6 +412,8 @@ export function ReportsTab({ client }: { client: Client }) {
               <div className="flex items-center gap-3 text-sm text-slate-500">
                 <LoaderCircle className="size-4 animate-spin" /> Cargando histórico...
               </div>
+            ) : historyError ? (
+              <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{historyError}</p>
             ) : latestStat ? (
               <>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -435,8 +442,8 @@ export function ReportsTab({ client }: { client: Client }) {
                   <h4 className="text-sm font-bold text-slate-900">Histórico guardado</h4>
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{dailyStats.length} entradas</span>
                 </div>
-                <div className="rounded-2xl border border-slate-100 overflow-hidden">
-                  {dailyStats.slice(0, 6).map((stat) => (
+                <div className="max-h-96 overflow-y-auto rounded-2xl border border-slate-100">
+                  {dailyStats.map((stat) => (
                     <div key={stat.id}>
                       <DailyStatRow stat={stat} />
                     </div>
@@ -459,10 +466,15 @@ export function ReportsTab({ client }: { client: Client }) {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
           <div className="p-6 border-b lg:border-b-0 lg:border-r border-slate-100">
-            <p className="text-sm font-semibold text-slate-900">Exportar PDF / compartir</p>
-            <p className="text-xs text-slate-500 mt-1">Los botones de exportación siguen como roadmap de producto hasta conectar el motor de documentos.</p>
+            <p className="text-sm font-semibold text-slate-900">Informe PDF</p>
+            <p className="text-xs text-slate-500 mt-1">Descarga las métricas diarias registradas, con periodo, fuente y días sin datos explícitos. No incluye aún ventas WooCommerce conciliadas.</p>
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="text-xs font-semibold text-slate-600">Desde<input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} className="mt-1 block rounded-lg border border-slate-200 px-3 py-2" /></label>
+              <label className="text-xs font-semibold text-slate-600">Hasta<input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} className="mt-1 block rounded-lg border border-slate-200 px-3 py-2" /></label>
+              <button type="button" onClick={() => void handleDownloadPdf()} disabled={!sessionToken || isDownloading || !reportFrom || !reportTo || reportFrom > reportTo} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isDownloading ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}Descargar PDF</button>
+            </div>
+            {reportError && <p role="alert" className="mt-3 text-sm text-rose-700">{reportError}</p>}
             <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold text-slate-500">
-              <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1"><Download className="size-3" /> PDF</span>
               <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1"><Mail className="size-3" /> Email</span>
               <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1"><Share2 className="size-3" /> Cliente</span>
             </div>

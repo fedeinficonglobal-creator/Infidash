@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   getWebMonthLabel,
+  getWebPlanInitialRows,
   getWebPlanStorageKey,
   normalizeWebPlanRow,
   parseWebPlanRows,
@@ -10,6 +11,10 @@ import {
   upsertWebPlanRow,
   type WebPlanRow,
 } from '../src/lib/webPlan.js';
+
+test('a client without a saved web plan starts empty instead of receiving a demo row', () => {
+  assert.deepEqual(getWebPlanInitialRows([]), []);
+});
 
 test('web plan helpers generate stable storage keys and normalize rows', () => {
   assert.equal(getWebPlanStorageKey('client-123'), 'infidash.web-plan:client-123');

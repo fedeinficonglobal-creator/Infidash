@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { type Client } from '../store/useClientStore';
 import { useClientStore } from '../store/useClientStore';
 import {
   deleteClientIntegration,
+  getWooCommerceSalesPreview,
   getClientIntegrations,
   saveClientIntegration,
   syncClientIntegration,
   testClientIntegration,
   type ApiIntegration,
+  type WooCommerceSalesPreview,
 } from '../services/infidashApi.js';
 import {
   AlertCircle,
@@ -81,7 +83,7 @@ function statusMeta(status: ApiIntegration['status']) {
       return {
         badge: 'bg-amber-50 text-amber-700 border-amber-200',
         dot: 'bg-amber-500',
-        label: 'Pendiente',
+        label: 'Sin verificar',
       };
   }
 }
@@ -132,6 +134,19 @@ export function IntegrationsTab({ client }: { client: Client }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<IntegrationProvider>('clarity');
   const [draft, setDraft] = useState<IntegrationDraft>(() => createDraft('clarity'));
+  const [previewFrom, setPreviewFrom] = useState('');
+  const [previewTo, setPreviewTo] = useState('');
+  const [salesPreview, setSalesPreview] = useState<WooCommerceSalesPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewRequestId = useRef(0);
+
+  useEffect(() => {
+    previewRequestId.current += 1;
+    setPreviewLoading(false);
+    setSalesPreview(null);
+    setPreviewError(null);
+  }, [editingId, client.id]);
 
   const selectedDefinition = useMemo(() => getIntegrationProviderDefinition(selectedProvider), [selectedProvider]);
   const currentIntegration = useMemo(
@@ -216,6 +231,11 @@ export function IntegrationsTab({ client }: { client: Client }) {
   const lastSyncLabel = integrations.find((integration) => integration.lastSync)?.lastSync ?? 'Sin sincronizar';
 
   const setField = (section: 'config' | 'credentials', key: string, value: string) => {
+    if (section === 'config') {
+      previewRequestId.current += 1;
+      setPreviewLoading(false);
+      setSalesPreview(null);
+    }
     setDraft((current) => ({
       ...current,
       [section]: {
@@ -282,9 +302,11 @@ export function IntegrationsTab({ client }: { client: Client }) {
     try {
       const result = await testClientIntegration(sessionToken, integrationId);
       setIntegrations((current) => current.map((integration) => integration.id === integrationId ? result.integration : integration));
-      setFormSuccess(result.ready
-        ? `Configuración validada: ${result.summary}`
-        : `Faltan campos: ${result.missingFields.join(', ')}`);
+      setFormSuccess(result.missingFields.length > 0
+        ? `Faltan campos: ${result.missingFields.join(', ')}`
+        : result.integration.status === 'connected'
+          ? `Conexión comprobada: ${result.summary}`
+          : result.integration.lastError ?? 'Configuración revisada; aún no hay conexión real confirmada.');
       if (editingId === integrationId) {
         setDraft((current) => ({
           ...current,
@@ -315,6 +337,22 @@ export function IntegrationsTab({ client }: { client: Client }) {
       setFormError(error instanceof Error ? error.message : 'No se pudo sincronizar Análisis/UX');
     } finally {
       setSyncingId(null);
+    }
+  };
+
+  const handleSalesPreview = async () => {
+    if (!sessionToken || !editingId) return;
+    const requestId = ++previewRequestId.current;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setSalesPreview(null);
+    try {
+      const result = await getWooCommerceSalesPreview(sessionToken, editingId, previewFrom, previewTo);
+      if (previewRequestId.current === requestId) setSalesPreview(result);
+    } catch (error) {
+      if (previewRequestId.current === requestId) setPreviewError(error instanceof Error ? error.message : 'No se pudo consultar WooCommerce');
+    } finally {
+      if (previewRequestId.current === requestId) setPreviewLoading(false);
     }
   };
 
@@ -362,7 +400,15 @@ export function IntegrationsTab({ client }: { client: Client }) {
           {field.label}
           {field.required && <span className="text-rose-500">*</span>}
         </span>
-        {field.type === 'textarea' ? (
+        {field.type === 'select' ? (
+          <select
+            value={draft[section][field.key] ?? field.defaultValue ?? ''}
+            onChange={(event) => setField(section, field.key, event.target.value)}
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/10"
+          >
+            {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        ) : field.type === 'textarea' ? (
           <textarea
             value={draft[section][field.key] ?? ''}
             onChange={(event) => setField(section, field.key, event.target.value)}
@@ -390,7 +436,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1">Integraciones por cliente</h2>
           <p className="text-slate-500 font-medium">
-            Conecta Análisis/UX, WordPress y WooCommerce para ver leads, ventas y analítica real sin exponer secretos en el navegador.
+            Gestiona Análisis/UX y leads de WordPress. WooCommerce permite comprobar el acceso de lectura, pero todavía no aporta cifras de ventas al panel.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -554,6 +600,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
                       </div>
 
                       <div className="flex items-center gap-2 self-start lg:self-auto">
+                        {isAdmin && <>
                         <button
                           type="button"
                           onClick={() => {
@@ -570,7 +617,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
                           disabled={testingId === integration.id}
                           className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-brand-primary transition hover:bg-brand-primary/5 disabled:cursor-wait"
                         >
-                          {testingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} Probar
+                          {testingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} {integration.provider === 'wordpress' || integration.provider === 'woocommerce' ? 'Probar conexión' : 'Validar campos'}
                         </button>
                         <button
                           type="button"
@@ -580,7 +627,6 @@ export function IntegrationsTab({ client }: { client: Client }) {
                         >
                           {syncingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCcw className="size-3.5" />} Sincronizar
                         </button>
-                        {isAdmin && (
                           <button
                             type="button"
                             onClick={() => void handleDelete(integration.id)}
@@ -589,7 +635,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
                           >
                             {deletingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />} Eliminar
                           </button>
-                        )}
+                        </>}
                       </div>
                     </div>
                   );
@@ -669,8 +715,41 @@ export function IntegrationsTab({ client }: { client: Client }) {
               </div>
             </div>
 
+            {isAdmin && selectedProvider === 'woocommerce' && editingId && (
+              <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 space-y-3" aria-label="Vista previa de ventas WooCommerce">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Vista previa de ventas WooCommerce</h4>
+                  <p className="text-xs text-slate-600">Consulta directa de hasta 31 días y 500 pedidos. No se guarda ni sustituye las métricas del panel.</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-semibold text-slate-700">Compra desde
+                    <input type="date" value={previewFrom} onChange={(event) => { previewRequestId.current += 1; setPreviewLoading(false); setPreviewFrom(event.target.value); setSalesPreview(null); }} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">Compra hasta
+                    <input type="date" value={previewTo} onChange={(event) => { previewRequestId.current += 1; setPreviewLoading(false); setPreviewTo(event.target.value); setSalesPreview(null); }} className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2" />
+                  </label>
+                </div>
+                <button type="button" onClick={() => void handleSalesPreview()} disabled={!previewFrom || !previewTo || previewLoading} className="rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
+                  {previewLoading ? 'Consultando…' : 'Consultar ventas'}
+                </button>
+                {previewError && <p role="alert" className="text-xs text-rose-700">{previewError}</p>}
+                {salesPreview && (
+                  <div className="space-y-2 text-xs text-slate-700" aria-live="polite">
+                    <p>Fuente WooCommerce · {salesPreview.refundPolicy === 'subtract' ? 'Reembolsos restados' : 'Reembolsos no restados'} · {salesPreview.orderCount} pedidos leídos.</p>
+                    {salesPreview.sales.length === 0 ? <p>No hay pedidos completados en este periodo.</p> : (
+                      <div className="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white">
+                        <table className="w-full text-left"><thead><tr className="border-b border-slate-100"><th className="p-2">Compra</th><th className="p-2">Moneda</th><th className="p-2">Pedidos</th><th className="p-2">Bruto</th><th className="p-2">Reembolsos</th><th className="p-2">Venta</th></tr></thead>
+                          <tbody>{salesPreview.sales.map((row) => <tr key={`${row.purchaseDate}-${row.currency}`} className="border-b border-slate-100"><td className="p-2">{row.purchaseDate}</td><td className="p-2">{row.currency}</td><td className="p-2">{row.orderCount}</td><td className="p-2">{row.grossTotal}</td><td className="p-2">{row.refundTotal}</td><td className="p-2 font-bold">{row.salesTotal}</td></tr>)}</tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
+
             <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-xs text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> sincroniza ventas.
+              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos; la sincronización de ventas sigue pendiente. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">

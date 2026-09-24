@@ -108,6 +108,58 @@ test('internal routes enforce service scopes, client allowlists and schema versi
   await app.close();
 });
 
+test('authenticated viewers can list durable jobs without worker credentials or payloads', async () => {
+  const app = Fastify({ logger: false });
+  const repository = {
+    ...fakeRepository(),
+    async listJobs(filters: any) {
+      assert.equal(filters.clientId, 'client-a');
+      assert.equal(filters.limit, 25);
+      return { items: [{ id: 'job-1', client_id: 'client-a', kind: 'generate_plan', status: 'running', attempt_count: 2 }], nextCursor: null };
+    },
+  };
+  await app.register(contentRoutes, {
+    repository: repository as any,
+    resolveHumanSession: (token: string) => token === 'viewer' ? { user: { id: 'user-2', role: 'viewer' } } : null,
+  });
+  const unauthorized = await app.inject({ method: 'GET', url: '/api/content/jobs?clientId=client-a&limit=25' });
+  const listed = await app.inject({ method: 'GET', url: '/api/content/jobs?clientId=client-a&limit=25', headers: { authorization: 'Bearer viewer' } });
+  assert.equal(unauthorized.statusCode, 401);
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().items[0].attempt_count, 2);
+  await app.close();
+});
+
+test('job detail query excludes lease tokens and worker payloads', async () => {
+  const statements: string[] = [];
+  const pool = { query: async (sql: string) => { statements.push(sql); return { rows: [{ id: 'job-1', status: 'running' }] }; } } as unknown as Pool;
+  const job = await new EditorialApiRepository(pool).getJob('job-1');
+  assert.equal(job?.status, 'running');
+  assert.doesNotMatch(statements[0], /SELECT\s+\*/i);
+  assert.doesNotMatch(statements[0], /lease_token|payload|result|request_hash/i);
+});
+
+test('editorial lease routes preserve the 2700-second plan workflow heartbeat', async () => {
+  const seen: number[] = [];
+  const repository = {
+    ...fakeRepository(),
+    async claimJob(input: any) { seen.push(input.leaseSeconds); return { id: 'job-1', leaseToken: 'lease-1' }; },
+    async heartbeatJob(_id: string, _clientId: string, _token: string, seconds: number) { seen.push(seconds); return { id: 'job-1' }; },
+  };
+  const app = Fastify({ logger: false });
+  await app.register(contentRoutes, {
+    repository: repository as any,
+    resolveHumanSession: () => null,
+    authenticateService: () => ({ id: 'service-1', name: 'worker', scopes: ['jobs:claim', 'jobs:heartbeat'], allowedClientIds: ['client-a'] }),
+  });
+  const claim = await app.inject({ method: 'POST', url: '/api/internal/content/jobs/claim', headers: { authorization: 'Bearer service' }, payload: { clientId: 'client-a', executionId: 'run-1', leaseSeconds: 2700 } });
+  const heartbeat = await app.inject({ method: 'POST', url: '/api/internal/content/jobs/job-1/heartbeat', headers: { authorization: 'Bearer service' }, payload: { clientId: 'client-a', leaseToken: 'lease-1', leaseSeconds: 2700 } });
+  assert.equal(claim.statusCode, 200);
+  assert.equal(heartbeat.statusCode, 200);
+  assert.deepEqual(seen, [2700, 2700]);
+  await app.close();
+});
+
 test('admin can list accounts and atomically request a publication while viewer cannot', async () => {
   const app=await buildApp();
   const accounts=await app.inject({method:'GET',url:'/api/clients/client-a/publishing-accounts',headers:{authorization:'Bearer viewer'}});

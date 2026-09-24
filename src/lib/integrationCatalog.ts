@@ -1,7 +1,7 @@
 export type IntegrationProvider = 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce';
 export type IntegrationCapability = 'analytics' | 'ads' | 'leads' | 'sales';
 export type IntegrationStatus = 'connected' | 'pending' | 'error' | 'disabled';
-export type IntegrationFieldType = 'text' | 'url' | 'password' | 'textarea';
+export type IntegrationFieldType = 'text' | 'url' | 'password' | 'textarea' | 'select';
 
 export interface IntegrationFieldDefinition {
   key: string;
@@ -11,6 +11,7 @@ export interface IntegrationFieldDefinition {
   placeholder?: string;
   help?: string;
   defaultValue?: string;
+  options?: Array<{ value: string; label: string }>;
 }
 
 export interface IntegrationProviderDefinition {
@@ -250,14 +251,18 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
         label: 'Moneda',
         type: 'text',
         defaultValue: 'EUR',
-        help: 'Moneda con la que se mostrarán ventas y pedidos.',
+        help: 'Moneda esperada de la tienda; no convierte pedidos de otras monedas.',
       },
       {
-        key: 'orderStatus',
-        label: 'Estados de pedido',
-        type: 'text',
-        defaultValue: 'processing,completed',
-        help: 'Estados de pedido que se consideran ventas válidas.',
+        key: 'refundPolicy',
+        label: 'Tratamiento de reembolsos',
+        type: 'select',
+        defaultValue: 'subtract',
+        options: [
+          { value: 'subtract', label: 'Restar reembolsos de las ventas' },
+          { value: 'ignore', label: 'No restar reembolsos' },
+        ],
+        help: 'Editable por cliente. Los importes y fechas proceden de WooCommerce; solo cuentan pedidos completados.',
       },
     ],
     credentialFields: [

@@ -151,6 +151,21 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     return reply.code(created.replayed ? 200 : 202).send({job:created.job,replayed:created.replayed});
   }));
 
+  app.get('/api/content/jobs', route(async (request, reply) => {
+    await requireHuman(request);
+    const query = queryOf(request);
+    const status = optionalString(query.status, 'status', 30);
+    if (status && !['pending', 'running', 'succeeded', 'failed', 'unknown', 'cancelled'].includes(status)) {
+      throw new ContentApiError(400, 'INVALID_PAYLOAD', 'status no es válido');
+    }
+    return reply.send(await repository.listJobs({
+      clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined,
+      status: status ?? undefined,
+      cursor: decodeCursor(query.cursor),
+      limit: parseLimit(query.limit),
+    }));
+  }));
+
   app.get('/api/content/jobs/:id', route(async (request, reply) => {
     await requireHuman(request); const job=await repository.getJob(requireString(paramsOf(request).id,'id',100));
     if(!job) throw new ContentApiError(404,'NOT_FOUND','Trabajo no encontrado'); return reply.send({job});
@@ -188,7 +203,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     const body=requireObject(request.body); const requestedClient=optionalString(body.clientId,'clientId',200)??undefined;
     const principal=await requireService(request,'jobs:claim',requestedClient);
     const kinds=body.kinds===undefined?undefined:stringArray(body.kinds,'kinds')?.map((kind)=>assertEnum(kind,JOB_KINDS,'kinds'));
-    const leaseSeconds=Math.min(Math.max(Number(body.leaseSeconds??300),30),1800);
+    const leaseSeconds=Math.min(Math.max(Number(body.leaseSeconds??300),30),3600);
     if(!Number.isInteger(leaseSeconds)) throw new ContentApiError(400,'INVALID_PAYLOAD','leaseSeconds debe ser entero');
     const job=await repository.claimJob({kinds,clientId:requestedClient,leaseSeconds,executionId:requireString(body.executionId,'executionId',300)},principal.allowedClientIds);
     return job ? reply.send({job}) : reply.code(204).send();
@@ -196,7 +211,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
 
   app.post('/api/internal/content/jobs/:id/heartbeat', route(async (request, reply) => {
     const body=requireObject(request.body); const clientId=requireString(body.clientId,'clientId',200); await requireService(request,'jobs:heartbeat',clientId);
-    const leaseSeconds=Math.min(Math.max(Number(body.leaseSeconds??300),30),1800);
+    const leaseSeconds=Math.min(Math.max(Number(body.leaseSeconds??300),30),3600);
     const job=await repository.heartbeatJob(requireString(paramsOf(request).id,'id',100),clientId,requireString(body.leaseToken,'leaseToken',100),leaseSeconds); return reply.send({job});
   }));
 

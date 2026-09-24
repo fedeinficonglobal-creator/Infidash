@@ -21,6 +21,10 @@ export function getWebPlanStorageKey(clientId: string) {
   return `${STORAGE_PREFIX}:${clientId}`;
 }
 
+export function getWebPlanInitialRows(savedRows: WebPlanRow[]) {
+  return savedRows;
+}
+
 export function getWebMonthLabel(date = new Date()) {
   return new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(date).toUpperCase();
 }

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Megaphone, TrendingUp, Filter, CheckCircle2, Clock, XCircle, Copy, Check, LoaderCircle } from 'lucide-react';
+import { Megaphone, CheckCircle2, Clock, XCircle, Copy, Check, LoaderCircle } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
-import { buildClientSignals, formatMoney } from '../lib/clientSignals.js';
 import { buildLeadsCsv, type LeadExportRow } from '../lib/leadsExport.js';
-import { getClientIntegrations, getLeads, type ApiIntegration, type ApiLead } from '../services/infidashApi.js';
+import { getClientIntegrations, getLeads, rotateIntegrationWebhook, setIntegrationActive, type ApiIntegration, type ApiLead, type LeadsPage } from '../services/infidashApi.js';
+
+const PAGE_SIZE = 50;
 
 const STATUS_LABELS: Record<ApiLead['status'], string> = {
   new: 'Nuevo',
@@ -27,13 +28,17 @@ function leadDateLabel(iso: string) {
 }
 
 export function LeadsTab({ client }: { client: Client }) {
-  const { sessionToken } = useClientStore();
-  const signals = buildClientSignals(client);
-  const leadConversion = signals.healthBand === 'excellent' ? 14.8 : signals.healthBand === 'stable' ? 12.4 : signals.healthBand === 'risk' ? 9.7 : 6.3;
-  const cpl = signals.cpa > 0 ? signals.cpa : (signals.revenue / Math.max(signals.conversions || 1, 1)) * 0.38;
-  const pipelineEstimated = Math.max(signals.revenue * (signals.healthBand === 'excellent' ? 2.2 : signals.healthBand === 'stable' ? 1.8 : 1.4), 18500);
+  const { sessionToken, currentUser } = useClientStore();
+  const isAdmin = currentUser?.role === 'admin';
 
   const [leads, setLeads] = useState<ApiLead[]>([]);
+  const [page, setPage] = useState<LeadsPage | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [sourceInput, setSourceInput] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [updatingWebhook, setUpdatingWebhook] = useState(false);
   const [wordpressIntegration, setWordpressIntegration] = useState<ApiIntegration | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,13 +56,15 @@ export function LeadsTab({ client }: { client: Client }) {
 
       setLoading(true);
       setError(null);
+      setPage(null);
       try {
         const [leadsResponse, integrationsResponse] = await Promise.all([
-          getLeads(sessionToken, client.id),
+          getLeads(sessionToken, client.id, { limit: PAGE_SIZE, offset, status: statusFilter, source: sourceFilter }),
           getClientIntegrations(sessionToken, client.id),
         ]);
         if (!cancelled) {
           setLeads(leadsResponse.leads);
+          setPage(leadsResponse);
           setWordpressIntegration(integrationsResponse.integrations.find((integration) => integration.provider === 'wordpress') ?? null);
         }
       } catch (fetchError) {
@@ -73,9 +80,9 @@ export function LeadsTab({ client }: { client: Client }) {
 
     void load();
     return () => { cancelled = true; };
-  }, [client.id, sessionToken]);
+  }, [client.id, sessionToken, offset, statusFilter, sourceFilter]);
 
-  const webhookUrl = wordpressIntegration?.webhookSecret
+  const webhookUrl = wordpressIntegration?.isActive && wordpressIntegration.webhookSecret
     ? `${window.location.origin}/api/public/leads/${wordpressIntegration.webhookSecret}`
     : null;
 
@@ -90,22 +97,55 @@ export function LeadsTab({ client }: { client: Client }) {
     }
   };
 
-  const handleExportCsv = () => {
-    const rows: LeadExportRow[] = leads.map((lead) => ({
+  const updateWebhook = async (action: 'enable' | 'disable' | 'rotate') => {
+    if (!sessionToken || !wordpressIntegration || updatingWebhook) return;
+    if (action === 'rotate' && !window.confirm('¿Rotar la URL del webhook? La URL anterior dejará de funcionar de inmediato.')) return;
+    if (action === 'disable' && !window.confirm('¿Desactivar la captura de leads de WordPress?')) return;
+    setUpdatingWebhook(true);
+    setError(null);
+    try {
+      const response = action === 'rotate'
+        ? await rotateIntegrationWebhook(sessionToken, wordpressIntegration.id)
+        : await setIntegrationActive(sessionToken, wordpressIntegration.id, action === 'enable');
+      setWordpressIntegration(response.integration);
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'No se pudo actualizar el webhook');
+    } finally {
+      setUpdatingWebhook(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!sessionToken || !page || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const allLeads: ApiLead[] = [];
+      for (let exportOffset = 0; exportOffset < page.total; exportOffset += 100) {
+        const response = await getLeads(sessionToken, client.id, {
+          limit: 100, offset: exportOffset, status: statusFilter, source: sourceFilter,
+        });
+        allLeads.push(...response.leads);
+        if (!response.leads.length) break;
+      }
+      const rows: LeadExportRow[] = allLeads.map((lead) => ({
       name: leadContactLabel(lead),
       source: lead.source,
       status: STATUS_LABELS[lead.status],
-      value: '—',
       date: leadDateLabel(lead.receivedAt),
-    }));
-    const csv = buildLeadsCsv(rows);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `leads-${client.slug || client.id}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+      }));
+      const blob = new Blob([buildLeadsCsv(rows)], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `leads-${client.slug || client.id}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : 'No se pudo exportar el CSV');
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -113,8 +153,9 @@ export function LeadsTab({ client }: { client: Client }) {
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1">Centro de Leads · {client.name}</h2>
-          <p className="text-slate-500 font-medium">{signals.primaryMessage} {signals.actionMessage}</p>
+          <p className="text-slate-500 font-medium">Leads recibidos y almacenados para {client.name}.</p>
         </div>
+        {isAdmin && (
         <button
           type="button"
           onClick={() => setShowWebhookPanel((current) => !current)}
@@ -122,6 +163,7 @@ export function LeadsTab({ client }: { client: Client }) {
         >
           <Megaphone className="size-4" /> Configurar Webhooks
         </button>
+        )}
       </header>
 
       {showWebhookPanel && (
@@ -132,11 +174,11 @@ export function LeadsTab({ client }: { client: Client }) {
               Este cliente todavía no tiene una integración de WordPress configurada. Ve a <strong>Integraciones</strong> y crea una antes de poder recibir leads.
             </p>
           ) : !webhookUrl ? (
-            <p className="text-sm text-slate-500">Guarda la integración de WordPress en Integraciones para generar la URL del webhook.</p>
+            <p className="text-sm text-slate-500">La captura está desactivada o aún no hay URL. Actívala para recibir formularios.</p>
           ) : (
             <>
               <p className="text-sm text-slate-500 mb-3">
-                Pega esta URL como destino del webhook en tu formulario de <strong>Fluent Forms</strong> (Configuraciones → Integraciones → Webhook) o en el plugin que uses para enviar <strong>Contact Form 7</strong> a un webhook. Cada envío del formulario creará un lead aquí automáticamente.
+                En <strong>WP Webhooks</strong>, configura el disparador «Form submitted» de Fluent Forms o Contact Form 7 para enviar un <strong>POST JSON</strong> a esta URL. Para evitar duplicados, incluye <code>infidash_provider</code>, <code>infidash_form_id</code> y un <code>infidash_delivery_id</code> estable; consulta <code>docs/lead-webhooks.md</code>. No uses el email como identificador del envío.
               </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 truncate rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">{webhookUrl}</code>
@@ -151,53 +193,61 @@ export function LeadsTab({ client }: { client: Client }) {
               </div>
             </>
           )}
+          {wordpressIntegration && isAdmin && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" disabled={updatingWebhook} onClick={() => void updateWebhook(wordpressIntegration.isActive ? 'disable' : 'enable')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40">
+                {wordpressIntegration.isActive ? 'Desactivar captura' : 'Activar captura'}
+              </button>
+              <button type="button" disabled={updatingWebhook} onClick={() => void updateWebhook('rotate')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40">Rotar URL</button>
+            </div>
+          )}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-[160px]">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Conversión Lead a Venta</p>
-            <h3 className="text-3xl font-bold">{leadConversion.toFixed(1)}%</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Leads según filtros</p>
+            <h3 className="text-3xl font-bold">{page?.total ?? '—'}</h3>
           </div>
-          <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs bg-emerald-50 w-fit px-2 py-1 rounded-md">
-            <TrendingUp className="size-3" /> {signals.healthBand === 'critical' ? '-1.2' : '+2.1'}% ptos vs mes anterior
-          </div>
+          <div className="text-xs text-slate-500">{loading ? 'Cargando…' : error ? 'No se pudieron cargar' : `${leads.length} en esta página`}</div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-[160px]">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Coste por Lead (CPL)</p>
-            <h3 className="text-3xl font-bold">{formatMoney(cpl)}</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">En curso</p>
+            <h3 className="text-3xl font-bold">{page?.openCount ?? '—'}</h3>
           </div>
-          <div className="flex items-center gap-2 text-rose-600 font-bold text-xs bg-rose-50 w-fit px-2 py-1 rounded-md">
-            <TrendingUp className="size-3" /> {signals.healthBand === 'critical' ? '+15%' : '+4.8%'} vs foco de adquisición
-          </div>
+          <div className="text-xs text-slate-500">Nuevos o en proceso</div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-[160px]">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Pipeline Estimado</p>
-            <h3 className="text-3xl font-bold">{formatMoney(pipelineEstimated)}</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Cerrados / perdidos</p>
+            <h3 className="text-3xl font-bold">{page?.resolvedCount ?? '—'}</h3>
           </div>
-          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-brand-primary rounded-full shadow-[0_0_8px_rgba(14,165,233,0.5)]" style={{ width: `${Math.min(95, Math.round(leadConversion * 5))}%` }} />
-          </div>
+          <div className="text-xs text-slate-500">Según el estado registrado</div>
         </div>
       </div>
-
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-slate-900">Últimos Leads Registrados</h3>
-          <div className="flex gap-2">
-            <button className="p-2 bg-slate-50 text-slate-400 rounded-lg border border-slate-100 hover:text-slate-600">
-              <Filter className="size-4" />
-            </button>
+        <div className="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-bold text-slate-900">Leads registrados</h3>
+          <div className="flex flex-wrap gap-2">
+            <label className="sr-only" htmlFor="lead-status">Filtrar por estado</label>
+            <select id="lead-status" value={statusFilter} onChange={(event) => { setOffset(0); setStatusFilter(event.target.value); }} className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+              <option value="">Todos los estados</option>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <form onSubmit={(event) => { event.preventDefault(); setOffset(0); setSourceFilter(sourceInput.trim()); }} className="flex gap-1">
+              <label className="sr-only" htmlFor="lead-source">Fuente exacta</label>
+              <input id="lead-source" value={sourceInput} onChange={(event) => setSourceInput(event.target.value)} maxLength={100} placeholder="Fuente exacta" className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+              <button type="submit" className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-bold">Filtrar</button>
+            </form>
             <button
               type="button"
-              onClick={handleExportCsv}
-              disabled={!leads.length}
+              onClick={() => void handleExportCsv()}
+              disabled={!page?.total || exporting}
               className="text-xs font-bold text-slate-600 px-3 py-1 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Exportar CSV
+              {exporting ? 'Exportando…' : 'Exportar CSV'}
             </button>
           </div>
         </div>
@@ -208,7 +258,7 @@ export function LeadsTab({ client }: { client: Client }) {
           </div>
         ) : leads.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate-500">
-            Todavía no ha llegado ningún lead. Pulsa "Configurar Webhooks" arriba para conectar tu formulario de WordPress.
+            {page?.total ? 'No hay leads en esta página.' : 'No hay leads para estos filtros.'}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -250,6 +300,15 @@ export function LeadsTab({ client }: { client: Client }) {
               </tbody>
             </table>
           </div>
+        )}
+        {page && page.total > PAGE_SIZE && (
+          <nav aria-label="Paginación de leads" className="flex items-center justify-between border-t border-slate-100 p-4 text-xs text-slate-600">
+            <span>{Math.min(offset + 1, page.total)}–{Math.min(offset + leads.length, page.total)} de {page.total}</span>
+            <div className="flex gap-2">
+              <button type="button" disabled={loading || offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))} className="rounded-lg border px-3 py-1 disabled:opacity-40">Anterior</button>
+              <button type="button" disabled={loading || offset + PAGE_SIZE >= page.total} onClick={() => setOffset(offset + PAGE_SIZE)} className="rounded-lg border px-3 py-1 disabled:opacity-40">Siguiente</button>
+            </div>
+          </nav>
         )}
       </div>
     </div>

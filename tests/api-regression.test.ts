@@ -1,3 +1,4 @@
+import './helpers/isolated-harness-required.js';
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
 import { before, test } from 'node:test';
@@ -7,7 +8,7 @@ const adminEmail = 'admin@infidash.local';
 const adminPassword = 'admin1234';
 const viewerEmail = 'viewer@infidash.local';
 const viewerPassword = 'viewer1234';
-const legacyClientSlug = 'regresion-1779451380395-469e91e8';
+const legacyClientSlug = 'legacy-fixture-client';
 
 let adminToken = '';
 let viewerToken = '';
@@ -126,6 +127,62 @@ test('viewer cannot create daily stats', async () => {
   assert.equal(body.code, 'FORBIDDEN');
 });
 
+test('lead pages and filtered counts exclude raw payload; disabling and rotating webhook credentials reject old URLs', async () => {
+  const auth = { authorization: `Bearer ${adminToken}` };
+  const { response: clientResponse, body: clientBody } = await request('/api/clients', {
+    method: 'POST', headers: auth, body: JSON.stringify({ name: `Lead QA ${Date.now()}` }),
+  });
+  assert.equal(clientResponse.status, 201, JSON.stringify(clientBody));
+  const clientId = clientBody.client.id;
+  const { response: integrationResponse, body: integrationBody } = await request('/api/integrations', {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ clientId, provider: 'wordpress', config: { siteUrl: 'https://example.test', leadSource: 'Form QA' } }),
+  });
+  assert.equal(integrationResponse.status, 201, JSON.stringify(integrationBody));
+  const integrationId = integrationBody.integration.id;
+  const originalToken = integrationBody.integration.webhookSecret;
+  assert.ok(originalToken);
+  const { response: malformedResponse } = await request(`/api/public/leads/${originalToken}`, {
+    method: 'POST', body: JSON.stringify({ irrelevant: true }),
+  });
+  assert.equal(malformedResponse.status, 400);
+  const sendLead = (token: string, name: string, provider?: string) => request(`/api/public/leads/${token}`, {
+    method: 'POST', body: JSON.stringify({ name, secret_extra: 'must-not-be-listed',
+      ...(provider ? { infidash_provider: provider, infidash_form_id: '12', infidash_delivery_id: name } : {}),
+    }),
+  });
+  for (const name of ['A', 'B', 'C']) {
+    const { response } = await sendLead(originalToken, name, 'fluent_forms');
+    assert.equal(response.status, 201);
+  }
+  const { response: replayResponse, body: replayBody } = await sendLead(originalToken, 'A', 'fluent_forms');
+  assert.equal(replayResponse.status, 200);
+  assert.equal(replayBody.duplicate, true);
+  const { response: pageResponse, body: page } = await request(`/api/leads?clientId=${clientId}&limit=2&offset=1&source=Form%20QA`, { headers: auth });
+  assert.equal(pageResponse.status, 200);
+  assert.equal(page.total, 3);
+  assert.equal(page.openCount, 3);
+  assert.equal(page.leads.length, 2);
+  assert.ok(page.leads.every((lead: any) => !('rawPayload' in lead)));
+  assert.equal((await sendLead(originalToken, 'A', 'contact_form_7')).response.status, 201);
+  const { response: invalidResponse } = await request(`/api/leads?clientId=${clientId}&limit=1000`, { headers: auth });
+  assert.equal(invalidResponse.status, 400);
+  const { response: disabledResponse } = await request(`/api/integrations/${integrationId}/disable`, { method: 'POST', headers: auth });
+  assert.equal(disabledResponse.status, 200);
+  const { response: viewerRotateResponse } = await request(`/api/integrations/${integrationId}/rotate-webhook`, {
+    method: 'POST', headers: { authorization: `Bearer ${viewerToken}` },
+  });
+  assert.equal(viewerRotateResponse.status, 403);
+  assert.equal((await sendLead(originalToken, 'D')).response.status, 404);
+  const { response: rotatedResponse, body: rotatedBody } = await request(`/api/integrations/${integrationId}/rotate-webhook`, { method: 'POST', headers: auth });
+  assert.equal(rotatedResponse.status, 200);
+  assert.notEqual(rotatedBody.integration.webhookSecret, originalToken);
+  const { response: enabledResponse } = await request(`/api/integrations/${integrationId}/enable`, { method: 'POST', headers: auth });
+  assert.equal(enabledResponse.status, 200);
+  assert.equal((await sendLead(originalToken, 'E')).response.status, 404);
+  assert.equal((await sendLead(rotatedBody.integration.webhookSecret, 'F')).response.status, 201);
+});
+
 test('admin can create a client, save daily metrics, and see the refresh reflected in the dashboard data', async () => {
   const clientName = `Regresion ${Date.now()}`;
   const { response: createClientResponse, body: createClientBody } = await request('/api/clients', {
@@ -221,6 +278,14 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(statsResponse.status, 200);
   assert.equal(statsBody.stats.length, 1);
   assert.equal(statsBody.stats[0].revenue, 15678);
+
+  const pdfResponse = await fetch(`${baseUrl}/api/clients/${clientId}/reports/daily.pdf?from=${statDate}&to=${statDate}`, {
+    headers: { authorization: `Bearer ${viewerToken}` },
+  });
+  assert.equal(pdfResponse.status, 200);
+  assert.match(pdfResponse.headers.get('content-type') ?? '', /application\/pdf/);
+  assert.equal(Buffer.from(await pdfResponse.arrayBuffer()).subarray(0, 5).toString('ascii'), '%PDF-');
+  assert.equal(pdfResponse.headers.get('cache-control'), 'private, no-store');
 
   const { response: uxCreateResponse, body: uxCreateBody } = await request(`/api/clients/${clientId}/ux-snapshots`, {
     method: 'POST',
@@ -327,6 +392,12 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(kpiListBody.kpis.length, 1);
   assert.equal(kpiListBody.kpis[0].metricKey, 'followers');
 
+  const { response: secondKpiResponse, body: secondKpiBody } = await request(`/api/clients/${clientId}/monthly-kpis`, {
+    method: 'POST', headers: { authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ departmentKey: 'web', metricKey: 'sessions', monthKey: '2026-05', targetValue: 1000, actualValue: 900 }),
+  });
+  assert.equal(secondKpiResponse.status, 201);
+
   const { response: kpiCloseResponse, body: kpiCloseBody } = await request(`/api/monthly-kpis/${kpiCreateBody.kpi.id}/close`, {
     method: 'POST',
     headers: {
@@ -337,6 +408,46 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(kpiCloseResponse.status, 200);
   assert.equal(kpiCloseBody.kpi.id, kpiCreateBody.kpi.id);
   assert.ok(kpiCloseBody.kpi.closedAt);
+  const { response: cycleResponse, body: cycleBody } = await request(`/api/clients/${clientId}/monthly-kpi-cycles`, {
+    headers: { authorization: `Bearer ${viewerToken}` },
+  });
+  assert.equal(cycleResponse.status, 200);
+  assert.ok(cycleBody.cycles.some((cycle: any) => cycle.monthKey === '2026-05' && cycle.closedAt));
+  const { body: closedRowsBody } = await request(`/api/clients/${clientId}/monthly-kpis?monthKey=2026-05`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.ok(closedRowsBody.kpis.every((kpi: any) => kpi.closedAt), 'manual close freezes every row in the cycle');
+  const { body: nextRowsBody } = await request(`/api/clients/${clientId}/monthly-kpis?monthKey=2026-06`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(nextRowsBody.kpis.length, 2);
+  assert.ok(nextRowsBody.kpis.every((kpi: any) => kpi.actualValue === null && kpi.status === 'unknown'));
+  const { response: closedUpdateResponse } = await request(`/api/monthly-kpis/${kpiCreateBody.kpi.id}`, {
+    method: 'PUT', headers: { authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ clientId, monthKey: '2026-05', actualValue: 9999 }),
+  });
+  assert.equal(closedUpdateResponse.status, 409);
+  const { response: viewerReopenResponse } = await request(`/api/monthly-kpis/${kpiCreateBody.kpi.id}/reopen`, {
+    method: 'POST', headers: { authorization: `Bearer ${viewerToken}` },
+    body: JSON.stringify({ reason: 'QA' }),
+  });
+  assert.equal(viewerReopenResponse.status, 403);
+  const { response: reopenResponse, body: reopenBody } = await request(`/api/monthly-kpis/${kpiCreateBody.kpi.id}/reopen`, {
+    method: 'POST', headers: { authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ reason: 'QA: correction required' }),
+  });
+  assert.equal(reopenResponse.status, 200, JSON.stringify(reopenBody));
+  assert.equal(reopenBody.kpi.closedAt, null);
+  const { body: reopenedRowsBody } = await request(`/api/clients/${clientId}/monthly-kpis?monthKey=2026-05`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(reopenedRowsBody.kpis.find((kpi: any) => kpi.id === secondKpiBody.kpi.id)?.closedAt, null);
+  const { response: eventsResponse, body: eventsBody } = await request(`/api/monthly-kpis/${kpiCreateBody.kpi.id}/events`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(eventsResponse.status, 200);
+  assert.equal(eventsBody.events.length, 2);
+  assert.ok(eventsBody.events.some((event: any) => event.action === 'reopened' && event.reason === 'QA: correction required'));
 
   const { response: dashboardResponse, body: dashboardBody } = await request('/api/clients', {
     headers: {

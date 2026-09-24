@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Search, LayoutDashboard, ShoppingBag, BarChart3, SearchCode, Megaphone, Zap, FileText, ChevronRight, AlertCircle, Users, Hash, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, BarChart3, SearchCode, Megaphone, Zap, FileText, ChevronRight, AlertCircle, Users, Hash, CalendarDays } from 'lucide-react';
 import { useClientStore } from '../store/useClientStore';
 import { cn } from '../lib/utils.js';
 import { buildClientSignals } from '../lib/clientSignals.js';
@@ -19,7 +19,6 @@ export function Sidebar() {
     { id: 'sales', label: 'Ventas (Woo)', icon: ShoppingBag },
     { id: 'traffic', label: 'Tráfico & Ads', icon: BarChart3 },
     { id: 'web', label: 'Web', icon: SearchCode },
-    { id: 'seo', label: 'SEO', icon: SearchCode },
     { id: 'leads', label: 'Leads', icon: Megaphone },
     { id: 'rrss', label: 'Redes Sociales', icon: Hash },
     { id: 'content', label: 'Contenidos', icon: CalendarDays },
@@ -41,14 +40,6 @@ export function Sidebar() {
           </div>
         </button>
 
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Buscar..."
-            className="w-full bg-slate-50 border-none rounded-lg py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-brand-primary transition-all"
-          />
-        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
