@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { BadgeCheck, CircleAlert, LoaderCircle, Mail, RefreshCw, Shield, Settings2, Trash2, UserPlus, Users } from 'lucide-react';
+import { BadgeCheck, Building2, CircleAlert, LoaderCircle, Mail, RefreshCw, Shield, Settings2, Trash2, UserPlus, Users } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useClientStore } from '../store/useClientStore';
 import { createUserAccount, deleteUserAccount, getUsers, updateUserAccount, type SessionUser, type UserRole } from '../services/infidashApi.js';
@@ -30,7 +30,7 @@ function formatDate(value: string) {
 }
 
 export function UsersAdminTab() {
-  const { sessionToken, currentUser } = useClientStore();
+  const { sessionToken, currentUser, clients } = useClientStore();
   const [users, setUsers] = useState<SessionUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -42,7 +42,10 @@ export function UsersAdminTab() {
     email: '',
     password: '',
     role: 'viewer' as UserRole,
+    clientIds: [] as string[],
   });
+  const [editingMembershipsId, setEditingMembershipsId] = useState<string | null>(null);
+  const [membershipDraft, setMembershipDraft] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,6 +133,33 @@ export function UsersAdminTab() {
     }
   }
 
+  function startEditingMemberships(user: SessionUser) {
+    setEditingMembershipsId(user.id);
+    setMembershipDraft(user.clientIds ?? []);
+  }
+
+  function toggleMembershipDraft(clientId: string) {
+    setMembershipDraft((current) => (current.includes(clientId) ? current.filter((id) => id !== clientId) : [...current, clientId]));
+  }
+
+  async function handleSaveMemberships(user: SessionUser) {
+    if (!sessionToken) {
+      return;
+    }
+
+    setSavingId(user.id);
+    setError(null);
+    try {
+      await updateUserAccount(sessionToken, user.id, { clientIds: membershipDraft });
+      setEditingMembershipsId(null);
+      setRefreshToken((value) => value + 1);
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'No se pudieron guardar los clientes');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   async function handleDeleteUser(user: SessionUser) {
     if (!sessionToken) {
       return;
@@ -166,8 +196,9 @@ export function UsersAdminTab() {
         email: newUser.email.trim(),
         password: newUser.password,
         role: newUser.role,
+        clientIds: newUser.role === 'viewer' ? newUser.clientIds : undefined,
       });
-      setNewUser({ name: '', email: '', password: '', role: 'viewer' });
+      setNewUser({ name: '', email: '', password: '', role: 'viewer', clientIds: [] });
       setRefreshToken((value) => value + 1);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'No se pudo crear el usuario');
@@ -303,6 +334,12 @@ export function UsersAdminTab() {
                   >
                     {user.active ? 'Activo' : 'Desactivado'}
                   </span>
+                  {user.role === 'viewer' && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                      <Building2 className="size-3" />
+                      {(user.clientIds ?? []).length} cliente{(user.clientIds ?? []).length === 1 ? '' : 's'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
@@ -337,6 +374,18 @@ export function UsersAdminTab() {
                     {user.active ? 'Desactivar' : 'Activar'}
                   </button>
 
+                  {user.role === 'viewer' && (
+                    <button
+                      type="button"
+                      onClick={() => (editingMembershipsId === user.id ? setEditingMembershipsId(null) : startEditingMemberships(user))}
+                      disabled={savingId === user.id}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-brand-primary/30 disabled:cursor-wait disabled:opacity-70"
+                    >
+                      <Building2 className="size-4" />
+                      Editar clientes
+                    </button>
+                  )}
+
                   {!isCurrentUser && (
                     <button
                       type="button"
@@ -349,6 +398,55 @@ export function UsersAdminTab() {
                     </button>
                   )}
                 </div>
+
+                {user.role === 'viewer' && editingMembershipsId === user.id && (
+                  <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Clientes a los que puede acceder</p>
+                    {clients.length === 0 ? (
+                      <p className="mt-2 text-sm text-slate-500">No hay clientes dados de alta todavía.</p>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {clients.map((client) => (
+                          <label
+                            key={client.id}
+                            className={cn(
+                              'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition',
+                              membershipDraft.includes(client.id)
+                                ? 'border-brand-primary/40 bg-brand-primary/5 text-slate-900'
+                                : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={membershipDraft.includes(client.id)}
+                              onChange={() => toggleMembershipDraft(client.id)}
+                              className="size-4"
+                            />
+                            {client.name}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-4 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveMemberships(user)}
+                        disabled={savingId === user.id}
+                        className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        {savingId === user.id ? <LoaderCircle className="size-4 animate-spin" /> : <BadgeCheck className="size-4" />}
+                        Guardar clientes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingMembershipsId(null)}
+                        className="text-sm font-semibold text-slate-500 hover:text-slate-700"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -426,6 +524,44 @@ export function UsersAdminTab() {
               </select>
             </label>
           </div>
+
+          {newUser.role === 'viewer' && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Clientes a los que podrá acceder</span>
+              {clients.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">No hay clientes dados de alta todavía.</p>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {clients.map((client) => (
+                    <label
+                      key={client.id}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium transition',
+                        newUser.clientIds.includes(client.id)
+                          ? 'border-brand-primary/40 bg-brand-primary/5 text-slate-900'
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={newUser.clientIds.includes(client.id)}
+                        onChange={() =>
+                          setNewUser((current) => ({
+                            ...current,
+                            clientIds: current.clientIds.includes(client.id)
+                              ? current.clientIds.filter((id) => id !== client.id)
+                              : [...current.clientIds, client.id],
+                          }))
+                        }
+                        className="size-4"
+                      />
+                      {client.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-5 flex items-center justify-between gap-4">
             <div className="text-xs text-slate-500">

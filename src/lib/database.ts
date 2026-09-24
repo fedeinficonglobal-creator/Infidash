@@ -9,6 +9,7 @@ import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, ve
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
 import { dueMonthlyKpiMonth, nextMonthKey } from './monthlyCloseClock.js';
 import { parseWooRefundPolicy } from './woocommerce.js';
+import type { WooCommerceOrderSummary } from './woocommerce.js';
 import {
   buildIntegrationCapabilitySummary,
   buildIntegrationDisplayName,
@@ -34,6 +35,7 @@ export interface UserRecord {
 
 export interface PublicUser extends Omit<UserRecord, 'active'> {
   active: boolean;
+  clientIds: string[] | null;
 }
 
 export interface ClientRecord {
@@ -887,6 +889,21 @@ function initializeSchema(db: AppDatabase) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS client_memberships (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, client_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_client_memberships_user ON client_memberships (user_id);
+
+    CREATE TABLE IF NOT EXISTS schema_backfills (
+      key TEXT PRIMARY KEY,
+      completed_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS integrations (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -901,6 +918,17 @@ function initializeSchema(db: AppDatabase) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE(client_id, provider)
+    );
+
+    CREATE TABLE IF NOT EXISTS woocommerce_sales_snapshots (
+      integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+      source_key TEXT NOT NULL,
+      purchase_from TEXT NOT NULL,
+      purchase_to TEXT NOT NULL,
+      orders_json JSONB NOT NULL,
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (integration_id, source_key, purchase_from, purchase_to),
+      CHECK (purchase_from <= purchase_to)
     );
 
     CREATE TABLE IF NOT EXISTS daily_stats (
@@ -1035,6 +1063,25 @@ function ensureLeadSchema(db: AppDatabase) {
     db.exec(`ALTER TABLE leads ADD COLUMN dedupe_key TEXT`);
   }
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_integration_delivery ON leads (integration_id, dedupe_key) WHERE dedupe_key IS NOT NULL`);
+}
+
+function ensureClientMembershipsBackfill(db: AppDatabase) {
+  const marker = db.prepare(`SELECT 1 FROM schema_backfills WHERE key = ?`).get('client_memberships_v1');
+  if (marker) return;
+
+  const viewers = db.prepare(`SELECT id FROM users WHERE role = 'viewer'`).all() as { id: string }[];
+  const clients = db.prepare(`SELECT id FROM clients`).all() as { id: string }[];
+  const insert = db.prepare(
+    `INSERT INTO client_memberships (id, user_id, client_id, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (user_id, client_id) DO NOTHING`
+  );
+  for (const viewer of viewers) {
+    for (const client of clients) {
+      insert.run(crypto.randomUUID(), viewer.id, client.id, nowIso());
+    }
+  }
+
+  db.prepare(`INSERT INTO schema_backfills (key, completed_at) VALUES (?, ?)`).run('client_memberships_v1', nowIso());
 }
 
 function ensureUxSnapshotSchema(db: AppDatabase) {
@@ -1253,6 +1300,7 @@ export function getDatabase() {
     ensureIntegrationSchema(database);
     ensureLeadSchema(database);
     ensureUxSnapshotSchema(database);
+    ensureClientMembershipsBackfill(database);
     seedDefaults(database);
     importLegacySqliteData(database);
   }
@@ -1260,7 +1308,13 @@ export function getDatabase() {
   return database;
 }
 
-function rowToUser(row: any): PublicUser {
+function getClientIdsForUser(userId: string, role: UserRole): string[] | null {
+  if (role === 'admin') return null;
+  const rows = getDatabase().prepare(`SELECT client_id FROM client_memberships WHERE user_id = ?`).all(userId) as { client_id: string }[];
+  return rows.map((row) => row.client_id);
+}
+
+function rowToUserBase(row: any): Omit<PublicUser, 'clientIds'> {
   return {
     id: row.id,
     email: row.email,
@@ -1270,6 +1324,25 @@ function rowToUser(row: any): PublicUser {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function rowToUser(row: any): PublicUser {
+  const base = rowToUserBase(row);
+  return { ...base, clientIds: getClientIdsForUser(base.id, base.role) };
+}
+
+function rowsToUsers(rows: any[]): PublicUser[] {
+  const membershipRows = getDatabase().prepare(`SELECT user_id, client_id FROM client_memberships`).all() as { user_id: string; client_id: string }[];
+  const byUser = new Map<string, string[]>();
+  for (const row of membershipRows) {
+    const list = byUser.get(row.user_id) ?? [];
+    list.push(row.client_id);
+    byUser.set(row.user_id, list);
+  }
+  return rows.map((row) => {
+    const base = rowToUserBase(row);
+    return { ...base, clientIds: base.role === 'admin' ? null : (byUser.get(base.id) ?? []) };
+  });
 }
 
 function rowToClient(row: any): ClientRecord {
@@ -1424,11 +1497,20 @@ function rowToMonthlyKpi(row: any): MonthlyKpiRecord {
 }
 
 export function listUsers() {
-  const rows = getDatabase().prepare(`SELECT * FROM users ORDER BY created_at ASC`).all();
-  return rows.map(rowToUser);
+  const rows = getDatabase().prepare(`SELECT * FROM users ORDER BY created_at ASC`).all() as any[];
+  return rowsToUsers(rows);
 }
 
-export function createUser(input: { email: string; name: string; password: string; role: UserRole }) {
+function setClientMemberships(db: AppDatabase, userId: string, clientIds: string[]) {
+  db.prepare(`DELETE FROM client_memberships WHERE user_id = ?`).run(userId);
+  const insert = db.prepare(`INSERT INTO client_memberships (id, user_id, client_id, created_at) VALUES (?, ?, ?, ?)`);
+  const timestamp = nowIso();
+  for (const clientId of clientIds) {
+    insert.run(crypto.randomUUID(), userId, clientId, timestamp);
+  }
+}
+
+export function createUser(input: { email: string; name: string; password: string; role: UserRole; clientIds?: string[] }) {
   const db = getDatabase();
   const timestamp = nowIso();
   const record = {
@@ -1448,10 +1530,13 @@ export function createUser(input: { email: string; name: string; password: strin
   );
 
   stmt.run(record);
+  if (input.role === 'viewer') {
+    setClientMemberships(db, record.id, input.clientIds ?? []);
+  }
   return rowToUser(record);
 }
 
-export function updateUserRole(userId: string, updates: Partial<{ role: UserRole; active: boolean; name: string }>) {
+export function updateUserRole(userId: string, updates: Partial<{ role: UserRole; active: boolean; name: string; clientIds: string[] }>) {
   const db = getDatabase();
   const existing = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId) as any;
   if (!existing) {
@@ -1466,6 +1551,14 @@ export function updateUserRole(userId: string, updates: Partial<{ role: UserRole
   db.prepare(
     `UPDATE users SET name = ?, role = ?, active = ?, updated_at = ? WHERE id = ?`
   ).run(nextName, nextRole, nextActive, timestamp, userId);
+
+  if (nextRole === 'admin') {
+    // Membership rows only ever exist for viewers — clear them so a later
+    // demotion back to viewer never silently resurrects stale access.
+    db.prepare(`DELETE FROM client_memberships WHERE user_id = ?`).run(userId);
+  } else if (updates.clientIds) {
+    setClientMemberships(db, userId, updates.clientIds);
+  }
 
   return rowToUser({
     ...existing,
@@ -1540,8 +1633,14 @@ export function getSessionByToken(token: string) {
   } as AuthenticatedSession;
 }
 
-export function listClients() {
-  const rows = getDatabase().prepare(`SELECT * FROM clients ORDER BY name ASC`).all();
+function clientIdsInClause(clientIds: string[]) {
+  return clientIds.length ? `(${clientIds.map((id) => escapeSqlLiteral(id)).join(',')})` : '(NULL)';
+}
+
+export function listClients(options?: { clientIds?: string[] | null }) {
+  const scope = options?.clientIds;
+  const where = scope ? `WHERE id IN ${clientIdsInClause(scope)}` : '';
+  const rows = getDatabase().prepare(`SELECT * FROM clients ${where} ORDER BY name ASC`).all();
   return rows.map(rowToClient);
 }
 
@@ -1770,6 +1869,38 @@ export function getIntegrationByWebhookSecret(secret: string) {
   return row ? rowToIntegration(row) : null;
 }
 
+export interface WooCommerceSalesSnapshot {
+  integrationId: string;
+  sourceKey: string;
+  from: string;
+  to: string;
+  orders: WooCommerceOrderSummary[];
+  syncedAt: string;
+}
+
+/** Replaces one fully-read purchase window atomically; credentials and customer data are never stored. */
+export function saveWooCommerceSalesSnapshot(input: Omit<WooCommerceSalesSnapshot, 'syncedAt'>) {
+  const syncedAt = nowIso();
+  getDatabase().prepare(`INSERT INTO woocommerce_sales_snapshots
+      (integration_id, source_key, purchase_from, purchase_to, orders_json, synced_at)
+    VALUES (?, ?, ?, ?, ?::jsonb, ?)
+    ON CONFLICT (integration_id, source_key, purchase_from, purchase_to)
+    DO UPDATE SET orders_json = EXCLUDED.orders_json, synced_at = EXCLUDED.synced_at`)
+    .run(input.integrationId, input.sourceKey, input.from, input.to, JSON.stringify(input.orders), syncedAt);
+  return { ...input, syncedAt };
+}
+
+export function getWooCommerceSalesSnapshot(input: Pick<WooCommerceSalesSnapshot, 'integrationId' | 'sourceKey' | 'from' | 'to'>): WooCommerceSalesSnapshot | null {
+  const row = getDatabase().prepare(`SELECT integration_id, source_key, purchase_from, purchase_to, orders_json, synced_at
+    FROM woocommerce_sales_snapshots WHERE integration_id = ? AND source_key = ? AND purchase_from = ? AND purchase_to = ?`)
+    .get(input.integrationId, input.sourceKey, input.from, input.to) as any;
+  if (!row) return null;
+  const orders = typeof row.orders_json === 'string' ? JSON.parse(row.orders_json) : row.orders_json;
+  if (!Array.isArray(orders)) throw new Error('El resumen WooCommerce guardado no es válido');
+  return { integrationId: row.integration_id, sourceKey: row.source_key, from: row.purchase_from,
+    to: row.purchase_to, orders, syncedAt: row.synced_at };
+}
+
 export function setClientIntegrationActive(id: string, active: boolean) {
   const db = getDatabase();
   const existing = getIntegrationRowById(id);
@@ -1995,13 +2126,14 @@ export function testIntegrationById(id: string) {
   return testClientIntegration(id);
 }
 
-export function listDailyStats(clientId?: string) {
-  const query = clientId
-    ? `SELECT * FROM daily_stats WHERE client_id = ? ORDER BY stat_date DESC, created_at DESC`
-    : `SELECT * FROM daily_stats ORDER BY stat_date DESC, created_at DESC`;
-  const rows = clientId
-    ? getDatabase().prepare(query).all(clientId)
-    : getDatabase().prepare(query).all();
+export function listDailyStats(clientId?: string, options?: { clientIds?: string[] | null }) {
+  if (clientId) {
+    const rows = getDatabase().prepare(`SELECT * FROM daily_stats WHERE client_id = ? ORDER BY stat_date DESC, created_at DESC`).all(clientId);
+    return rows.map(rowToDailyStat);
+  }
+  const scope = options?.clientIds;
+  const where = scope ? `WHERE client_id IN ${clientIdsInClause(scope)}` : '';
+  const rows = getDatabase().prepare(`SELECT * FROM daily_stats ${where} ORDER BY stat_date DESC, created_at DESC`).all();
   return rows.map(rowToDailyStat);
 }
 
@@ -2551,11 +2683,14 @@ export function deleteDailyStat(id: string) {
   return result.changes > 0;
 }
 
-export function getDashboardHealthSummary() {
+export function getDashboardHealthSummary(options?: { clientIds?: string[] | null }) {
   const db = getDatabase();
+  const scope = options?.clientIds;
+  const clientsWhere = scope ? `WHERE id IN ${clientIdsInClause(scope)}` : '';
+  const statsWhere = scope ? `WHERE client_id IN ${clientIdsInClause(scope)}` : '';
   const totalUsers = db.prepare(`SELECT COUNT(*) as total FROM users`).get() as { total: number };
-  const totalClients = db.prepare(`SELECT COUNT(*) as total FROM clients`).get() as { total: number };
-  const totalStats = db.prepare(`SELECT COUNT(*) as total FROM daily_stats`).get() as { total: number };
+  const totalClients = db.prepare(`SELECT COUNT(*) as total FROM clients ${clientsWhere}`).get() as { total: number };
+  const totalStats = db.prepare(`SELECT COUNT(*) as total FROM daily_stats ${statsWhere}`).get() as { total: number };
   return {
     users: totalUsers.total,
     clients: totalClients.total,
@@ -2563,8 +2698,8 @@ export function getDashboardHealthSummary() {
   };
 }
 
-export function listClientsWithLatestStat() {
-  const clients = listClients();
+export function listClientsWithLatestStat(options?: { clientIds?: string[] | null }) {
+  const clients = listClients(options);
   const clientsWithStats = clients.map((client) => {
     const latestStat = getDatabase().prepare(
       `SELECT * FROM daily_stats WHERE client_id = ? ORDER BY stat_date DESC, created_at DESC LIMIT 1`

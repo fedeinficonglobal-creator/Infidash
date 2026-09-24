@@ -264,6 +264,18 @@ test('admin can create a client, save daily metrics, and see the refresh reflect
   assert.equal(createClientBody.client.kpiThresholds.revenue, 15000);
   const clientId = createClientBody.client.id as string;
 
+  const { body: usersListBody } = await request('/api/users', {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  const viewerId = usersListBody.users.find((user: any) => user.email === viewerEmail)?.id as string;
+  assert.ok(viewerId, 'the seeded viewer account must exist');
+  const { response: grantResponse } = await request(`/api/users/${viewerId}`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ clientIds: [clientId] }),
+  });
+  assert.equal(grantResponse.status, 200);
+
   const { response: dashboardAfterCreateResponse, body: dashboardAfterCreateBody } = await request('/api/clients', {
     headers: {
       authorization: `Bearer ${adminToken}`,

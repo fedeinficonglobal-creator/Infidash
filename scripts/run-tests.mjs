@@ -12,7 +12,7 @@ const files = readdirSync(testsDirectory)
   .sort()
   .map(file => `tests/${file}`);
 
-const databaseFiles = ['tests/monthly-model.test.ts'];
+const databaseFiles = ['tests/monthly-model.test.ts', 'tests/client-memberships.test.ts'];
 const apiFiles = ['tests/api-regression.test.ts'];
 const unitFiles = files.filter(file => !databaseFiles.includes(file) && !apiFiles.includes(file));
 

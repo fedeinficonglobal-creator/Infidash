@@ -40,3 +40,13 @@ export function hashToken(token: string) {
 export function nowIso() {
   return new Date().toISOString();
 }
+
+export interface ClientScopedUser {
+  role: 'admin' | 'viewer';
+  clientIds: string[] | null;
+}
+
+/** `clientIds === null` means unrestricted (admins). A viewer with an empty array can access nothing. */
+export function canAccessClient(user: ClientScopedUser, clientId: string) {
+  return user.role === 'admin' || (Array.isArray(user.clientIds) && user.clientIds.includes(clientId));
+}

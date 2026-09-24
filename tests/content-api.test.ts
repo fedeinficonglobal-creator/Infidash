@@ -70,7 +70,7 @@ async function buildApp() {
   const app = Fastify({ logger: false });
   await app.register(contentRoutes, {
     repository: fakeRepository() as any,
-    resolveHumanSession: (token: string) => token === 'admin' ? { user: { id: 'user-1', role: 'admin' as const } } : token === 'viewer' ? { user: { id: 'user-2', role: 'viewer' as const } } : null,
+    resolveHumanSession: (token: string) => token === 'admin' ? { user: { id: 'user-1', role: 'admin' as const, clientIds: null } } : token === 'viewer' ? { user: { id: 'user-2', role: 'viewer' as const, clientIds: ['client-a'] } } : null,
     authenticateService: (token: string) => token === 'service' ? { id: 'service-1', name: 'dispatcher', scopes: ['jobs:claim', 'jobs:result'], allowedClientIds: ['client-a'] } : null,
   });
   return app;
@@ -120,7 +120,7 @@ test('authenticated viewers can list durable jobs without worker credentials or 
   };
   await app.register(contentRoutes, {
     repository: repository as any,
-    resolveHumanSession: (token: string) => token === 'viewer' ? { user: { id: 'user-2', role: 'viewer' } } : null,
+    resolveHumanSession: (token: string) => token === 'viewer' ? { user: { id: 'user-2', role: 'viewer', clientIds: ['client-a'] } } : null,
   });
   const unauthorized = await app.inject({ method: 'GET', url: '/api/content/jobs?clientId=client-a&limit=25' });
   const listed = await app.inject({ method: 'GET', url: '/api/content/jobs?clientId=client-a&limit=25', headers: { authorization: 'Bearer viewer' } });
