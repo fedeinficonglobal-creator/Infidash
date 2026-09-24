@@ -189,7 +189,7 @@ export class EditorialApiRepository {
 
   async schedulePublication(input: any, actorId: string) {
     const occurrenceKey=input.occurrenceKey??'primary';
-    const hash=requestHash({kind:'publish',contentId:input.contentId,accountId:input.accountId,desiredScheduledAt:input.desiredScheduledAt,occurrenceKey,copy:input.copy??null,media:input.media??[],expectedVersion:input.expectedVersion});
+    const hash=requestHash({kind:'publish',contentId:input.contentId,accountId:input.accountId,desiredScheduledAt:input.desiredScheduledAt,externalUrl:input.externalUrl??null,occurrenceKey,copy:input.copy??null,media:input.media??[],expectedVersion:input.expectedVersion});
     return withEditorialTransaction(async(client)=>{
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`job:${input.clientId}:${input.idempotencyKey}`]);
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`publication:${input.contentId}:${input.accountId}:${occurrenceKey}`]);
@@ -201,6 +201,8 @@ export class EditorialApiRepository {
       if(content.status!=='approved' || !content.approved_revision_id) throw new ContentApiError(409,'REVISION_NOT_APPROVED','El contenido debe tener una revisión aprobada');
       const accountResult=await client.query("SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE AND provider='postiz' FOR SHARE",[input.clientId,input.accountId]);
       if(!accountResult.rows[0]) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','La cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
+      const instanceKey=String((accountResult.rows[0] as any).instance_key??'').toLowerCase();
+      if((instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google'))&&!input.externalUrl) throw new ContentApiError(400,'CTA_URL_REQUIRED','Google Business Profile requiere una URL de destino para el boton Learn More');
       const existingJob=await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
       if(existingJob.rows[0]){
         const job=existingJob.rows[0] as any;
@@ -214,9 +216,9 @@ export class EditorialApiRepository {
       const media=(Array.isArray(input.media)&&input.media.length)?input.media:(headerImageUrl?[{url:headerImageUrl}]:[]);
       const publicationId=randomUUID();
       const publicationResult=await client.query(
-        `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9) RETURNING *`,
-        [publicationId,input.clientId,input.contentId,input.accountId,occurrenceKey,content.approved_revision_id,input.copy??null,json(media),input.desiredScheduledAt],
+        `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at,external_url)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9,$10) RETURNING *`,
+        [publicationId,input.clientId,input.contentId,input.accountId,occurrenceKey,content.approved_revision_id,input.copy??null,json(media),input.desiredScheduledAt,input.externalUrl??null],
       );
       const jobId=randomUUID();
       const jobResult=await client.query(

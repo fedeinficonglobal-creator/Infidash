@@ -1,6 +1,6 @@
 import { endOfMonth, endOfWeek, format, isSameDay, isSameMonth, parseISO, startOfMonth, startOfWeek, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
-import type { PlanItem } from '../services/contentApi.js';
+import type { ContentJob, PlanItem } from '../services/contentApi.js';
 
 export interface ContentFilters { clientId: string; status: string; format: string; search: string; }
 
@@ -22,6 +22,14 @@ export function filterItems(items: PlanItem[], filters: ContentFilters) {
     return true;
   });
 }
+
+export function jobsForTimeline(jobs: ContentJob[], planItemId: string, contentId: string | null, publicationIds: string[]) {
+  const targets = new Set([planItemId, contentId, ...publicationIds].filter((id): id is string => Boolean(id)));
+  return jobs.filter((job) => job.targetId !== null && targets.has(job.targetId));
+}
+
+export function canCancelPublication(status: string) { return ['pending', 'scheduled', 'failed', 'unknown'].includes(status); }
+export function canReschedulePublication(status: string) { return status === 'scheduled'; }
 
 export function plainTextPreview(html: string | null | undefined, text: string | null | undefined) {
   if (text?.trim()) return text.trim();

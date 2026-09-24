@@ -64,7 +64,7 @@ interface ContentState {
   savePlanItem: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
   saveContent: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
   approveContent: (token: string, id: string, revisionId: string, version: number) => Promise<void>;
-  schedulePublication: (token: string, input: { contentId: string; clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; copy?: string }) => Promise<void>;
+  schedulePublication: (token: string, input: { contentId: string; clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; externalUrl?: string; copy?: string }) => Promise<void>;
   createJob: (token: string, input: { clientId: string; kind: JobKind; targetId?: string; expectedVersion?: number; payload?: Record<string, unknown> }) => Promise<void>;
   pollJobs: (token: string) => Promise<void>;
   clearConflict: () => void;
@@ -116,7 +116,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     listController?.abort();
     listController = new AbortController();
     const serial = ++requestSerial;
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, isLoadingMore: false, error: null });
     const state = get();
     const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
     try {
@@ -135,24 +135,27 @@ export const useContentStore = create<ContentState>((set, get) => ({
   },
   refresh: async (token) => {
     if (get().isRefreshing || get().isLoading) return;
-    set({ isRefreshing: true });
+    const serial = ++requestSerial;
+    listController?.abort();
+    set({ isRefreshing: true, isLoadingMore: false });
     const state = get();
     const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
     try {
       const [page, summary, jobs] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }), getContentSummary(token, filters), getContentJobs(token, { clientId: filters.clientId, limit: 100 })]);
-      set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, jobs: jobs.items, lastUpdatedAt: new Date().toISOString(), error: null });
-    } catch (error) { set({ error: message(error) }); }
-    finally { set({ isRefreshing: false }); }
+      if (serial === requestSerial) set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, jobs: jobs.items, lastUpdatedAt: new Date().toISOString(), error: null });
+    } catch (error) { if (serial === requestSerial) set({ error: message(error) }); }
+    finally { if (serial === requestSerial) set({ isRefreshing: false }); }
   },
   loadMore: async (token) => {
     const state = get();
     if (!state.nextCursor || state.isLoadingMore) return;
+    const serial = requestSerial;
     set({ isLoadingMore: true });
     try {
       const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month), includeUndated: true, cursor: state.nextCursor, limit: 100 });
-      set((current) => ({ items: [...current.items, ...page.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: page.nextCursor }));
-    } catch (error) { set({ error: message(error) }); }
-    finally { set({ isLoadingMore: false }); }
+      if (serial === requestSerial) set((current) => ({ items: [...current.items, ...page.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: page.nextCursor }));
+    } catch (error) { if (serial === requestSerial) set({ error: message(error) }); }
+    finally { if (serial === requestSerial) set({ isLoadingMore: false }); }
   },
   loadCalendars: async (token, clientId) => {
     try { const page = await getEditorialCalendars(token, clientId); set({ calendars: page.items }); }
@@ -216,7 +219,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   schedulePublication: async (token,input) => {
     set({isSaving:true,conflict:null,detailError:null});
     try {
-      const idempotencyKey=`schedule:${input.contentId}:${input.expectedVersion}:${input.accountId}:${input.desiredScheduledAt}`;
+      const idempotencyKey=`schedule:${input.contentId}:${input.expectedVersion}:${input.accountId}:${input.desiredScheduledAt}:${input.externalUrl ?? ''}`;
       const response=await schedulePublicationRequest(token,input.contentId,{...input,idempotencyKey});
       set((state)=>({publications:[response.publication,...state.publications.filter((item)=>item.id!==response.publication.id)],jobs:[response.job,...state.jobs.filter((job)=>job.id!==response.job.id)]}));
     } catch(error) {
