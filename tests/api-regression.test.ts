@@ -763,7 +763,7 @@ test('Análisis/UX integration can be created, tested, and synced against a live
     assert.equal(createIntegrationResponse.status, 201, JSON.stringify(createIntegrationBody));
     assert.equal(createIntegrationBody.integration.clientId, clientId);
     assert.equal(createIntegrationBody.integration.provider, 'clarity');
-    assert.equal(createIntegrationBody.integration.status, 'connected');
+    assert.equal(createIntegrationBody.integration.status, 'pending');
 
     const integrationId = createIntegrationBody.integration.id as string;
 
@@ -787,6 +787,7 @@ test('Análisis/UX integration can be created, tested, and synced against a live
     assert.equal(testResponse.status, 200, JSON.stringify(testBody));
     assert.equal(testBody.ready, true);
     assert.equal(Array.isArray(testBody.missingFields), true);
+    assert.equal(testBody.integration.status, 'pending');
 
     const { response: syncResponse, body: syncBody } = await request(`/api/integrations/${integrationId}/sync`, {
       method: 'POST',

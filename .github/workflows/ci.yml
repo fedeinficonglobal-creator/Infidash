@@ -75,5 +75,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run build
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: npm run test:api
