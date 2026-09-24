@@ -27,6 +27,18 @@ function humanToken(request: Request) {
   return bearer(request);
 }
 
+function optionalHttpUrl(value: unknown) {
+  const raw = optionalString(value, 'externalUrl', 2048);
+  if (!raw?.trim()) return raw;
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('unsupported protocol');
+    return url.toString();
+  } catch {
+    throw new ContentApiError(400, 'INVALID_PAYLOAD', 'externalUrl debe ser una URL HTTP o HTTPS válida');
+  }
+}
+
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof ContentApiError) return reply.code(error.statusCode).send({ error: error.message, code: error.code, details: error.details });
   requestSafeLog('content api failed', error);
@@ -191,6 +203,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
       expectedVersion:requirePositiveVersion(body.expectedVersion),
       accountId:requireString(body.accountId,'accountId',100),
       desiredScheduledAt:asDate(body.desiredScheduledAt,'desiredScheduledAt')??requireString(body.desiredScheduledAt,'desiredScheduledAt',100),
+      externalUrl:optionalHttpUrl(body.externalUrl),
       occurrenceKey:body.occurrenceKey===undefined?undefined:requireString(body.occurrenceKey,'occurrenceKey',100),
       copy:optionalString(body.copy,'copy',20_000),
       media:Array.isArray(body.media)?body.media:[],

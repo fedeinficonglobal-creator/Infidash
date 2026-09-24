@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ContentStatusBadge } from '../src/components/content/ContentStatusBadge.tsx';
-import { filterItems, monthDays, plainTextPreview } from '../src/lib/content.ts';
+import { canCancelPublication, canReschedulePublication, filterItems, jobsForTimeline, monthDays, plainTextPreview } from '../src/lib/content.ts';
 import { camelize } from '../src/services/contentApi.ts';
 import { useContentStore } from '../src/store/useContentStore.ts';
 import type { PlanItem } from '../src/services/contentApi.ts';
@@ -64,6 +64,20 @@ test('content store loads summary and rows and prevents overlapping refreshes', 
   assert.equal(calls, 3);
 });
 
+test('editorial timeline includes jobs targeting publications attached to the plan item', () => {
+  const job = (id: string, targetId: string | null) => ({ id, clientId: 'client-a', kind: 'publish' as const, status: 'succeeded', targetId, lastError: null, createdAt: '2026-09-20T10:00:00Z', updatedAt: '2026-09-20T10:00:00Z' });
+  assert.deepEqual(jobsForTimeline([job('publish-job', 'publication-1'), job('other-job', 'publication-2'), job('content-job', 'content-1'), job('no-target', null)], 'plan-1', 'content-1', ['publication-1']).map(({ id }) => id), ['publish-job', 'content-job']);
+});
+
+test('publication actions only offer cancel or reschedule in supported states', () => {
+  assert.equal(canCancelPublication('scheduled'), true);
+  assert.equal(canCancelPublication('cancel_requested'), false);
+  assert.equal(canCancelPublication('published'), false);
+  assert.equal(canReschedulePublication('scheduled'), true);
+  assert.equal(canReschedulePublication('pending'), false);
+  assert.equal(canReschedulePublication('unknown'), false);
+});
+
 test('content store restores durable job status after a browser reload', async () => {
   const urls: string[] = [];
   globalThis.fetch = async (input) => {
@@ -107,15 +121,35 @@ test('content store sends status, format and search before server pagination', a
   assert.match(listUrl,/limit=100/);
 });
 
+test('late load-more response cannot append rows from a previous client filter', async () => {
+  let releaseOldPage!: (response: Response) => void;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cursor=old-page')) return new Promise<Response>((resolve) => { releaseOldPage = resolve; });
+    if (url.includes('/summary')) return new Response(JSON.stringify({ summary: { plan_items: {}, contents: {}, publications: {}, incidents: 0 } }), { status: 200 });
+    const clientId = new URL(url, 'http://localhost').searchParams.get('clientId');
+    return new Response(JSON.stringify({ items: [{ ...item({ id: `item-${clientId}`, clientId }), client_id: clientId, calendar_id: 'calendar-a', calendar_title: 'Octubre', planned_at: null, created_at: item().createdAt, updated_at: item().updatedAt }], next_cursor: clientId === 'client-a' ? 'old-page' : null }), { status: 200 });
+  };
+  useContentStore.setState({ filters: { clientId: 'client-a', status: '', format: '', search: '' } });
+  await useContentStore.getState().load('token');
+  const oldPage = useContentStore.getState().loadMore('token');
+  useContentStore.getState().setFilters({ clientId: 'client-b' });
+  await useContentStore.getState().load('token');
+  releaseOldPage(new Response(JSON.stringify({ items: [{ ...item({ id: 'stale-a', clientId: 'client-a' }), client_id: 'client-a', calendar_id: 'calendar-a', calendar_title: 'Octubre', planned_at: null, created_at: item().createdAt, updated_at: item().updatedAt }], next_cursor: null }), { status: 200 }));
+  await oldPage;
+  assert.deepEqual(useContentStore.getState().items.map(({ id }) => id), ['item-client-b']);
+});
+
 test('scheduling uses a stable idempotency key and stores publication plus job', async () => {
   let requestBody:any=null;
   globalThis.fetch=async(_input,init)=>{
     requestBody=JSON.parse(String(init?.body));
     return new Response(JSON.stringify({publication:{id:'publication-1',client_id:'client-a',content_id:'content-1',account_id:'account-1',account_label:'Postiz',provider:'postiz',platform:'gmb',copy:null,status:'pending',desired_scheduled_at:'2026-10-01T09:00:00.000Z',confirmed_scheduled_at:null,external_url:null,published_at:null,last_synced_at:null,error_message:null,version:1,created_at:'2026-09-16T10:00:00.000Z',updated_at:'2026-09-16T10:00:00.000Z'},job:{id:'job-1',client_id:'client-a',kind:'publish',status:'pending',target_id:'publication-1',last_error:null,created_at:'2026-09-16T10:00:00.000Z',updated_at:'2026-09-16T10:00:00.000Z'},replayed:false}),{status:202,headers:{'content-type':'application/json'}});
   };
-  const input={contentId:'content-1',clientId:'client-a',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z'};
+  const input={contentId:'content-1',clientId:'client-a',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',externalUrl:'https://example.com/article'};
   await useContentStore.getState().schedulePublication('token',input);
-  assert.equal(requestBody.idempotencyKey,'schedule:content-1:3:account-1:2026-10-01T09:00:00.000Z');
+  assert.equal(requestBody.idempotencyKey,'schedule:content-1:3:account-1:2026-10-01T09:00:00.000Z:https://example.com/article');
+  assert.equal(requestBody.externalUrl,'https://example.com/article');
   assert.equal(useContentStore.getState().publications[0].id,'publication-1');
   assert.equal(useContentStore.getState().jobs[0].id,'job-1');
 });

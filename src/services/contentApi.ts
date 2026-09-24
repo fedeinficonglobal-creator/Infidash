@@ -166,7 +166,7 @@ export function getPublishingAccounts(token: string, clientId: string, signal?: 
   return request<{ accounts: PublishingAccount[] }>(`/api/clients/${encodeURIComponent(clientId)}/publishing-accounts`, token, { signal });
 }
 
-export function schedulePublication(token: string, contentId: string, input: { clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; occurrenceKey?: string; copy?: string; idempotencyKey: string }) {
+export function schedulePublication(token: string, contentId: string, input: { clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; externalUrl?: string; occurrenceKey?: string; copy?: string; idempotencyKey: string }) {
   return request<{ publication: Publication; job: ContentJob; replayed: boolean }>(`/api/content/items/${encodeURIComponent(contentId)}/publications`, token, { method: 'POST', body: JSON.stringify(input) });
 }
 
