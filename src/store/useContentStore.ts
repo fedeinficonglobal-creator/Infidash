@@ -3,9 +3,11 @@ import { endOfMonth, startOfMonth } from 'date-fns';
 import {
   approveContentItem,
   createContentJob,
+  createEditorialCalendar,
   createPlanItem,
   getContentItem,
   getContentJob,
+  getContentJobs,
   getContentSummary,
   getEditorialCalendars,
   getPlanItems,
@@ -56,6 +58,7 @@ interface ContentState {
   refresh: (token: string) => Promise<void>;
   loadMore: (token: string) => Promise<void>;
   loadCalendars: (token: string, clientId: string) => Promise<void>;
+  createCalendar: (token: string, clientId: string, input: { title: string; startDate?: string; endDate?: string }) => Promise<EditorialCalendar>;
   select: (token: string, item: PlanItem | null) => Promise<void>;
   createPlanItem: (token: string, input: Record<string, unknown>) => Promise<PlanItem>;
   savePlanItem: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
@@ -117,12 +120,13 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const state = get();
     const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
     try {
-      const [page, summary] = await Promise.all([
+      const [page, summary, jobs] = await Promise.all([
         getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }, listController.signal),
         getContentSummary(token, filters, listController.signal),
+        getContentJobs(token, { clientId: filters.clientId, limit: 100 }, listController.signal),
       ]);
       if (serial !== requestSerial) return;
-      set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, lastUpdatedAt: new Date().toISOString() });
+      set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, jobs: jobs.items, lastUpdatedAt: new Date().toISOString() });
     } catch (error) {
       if ((error as Error).name !== 'AbortError' && serial === requestSerial) set({ error: message(error) });
     } finally {
@@ -135,8 +139,8 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const state = get();
     const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
     try {
-      const [page, summary] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }), getContentSummary(token, filters)]);
-      set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, lastUpdatedAt: new Date().toISOString(), error: null });
+      const [page, summary, jobs] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }), getContentSummary(token, filters), getContentJobs(token, { clientId: filters.clientId, limit: 100 })]);
+      set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, jobs: jobs.items, lastUpdatedAt: new Date().toISOString(), error: null });
     } catch (error) { set({ error: message(error) }); }
     finally { set({ isRefreshing: false }); }
   },
@@ -153,6 +157,15 @@ export const useContentStore = create<ContentState>((set, get) => ({
   loadCalendars: async (token, clientId) => {
     try { const page = await getEditorialCalendars(token, clientId); set({ calendars: page.items }); }
     catch (error) { set({ error: message(error) }); }
+  },
+  createCalendar: async (token, clientId, input) => {
+    set({ isSaving: true, error: null });
+    try {
+      const { calendar } = await createEditorialCalendar(token, clientId, input);
+      set((state) => ({ calendars: [calendar, ...state.calendars.filter((existing) => existing.id !== calendar.id)] }));
+      return calendar;
+    } catch (error) { set({ error: message(error) }); throw error; }
+    finally { set({ isSaving: false }); }
   },
   select: async (token, item) => {
     detailController?.abort();

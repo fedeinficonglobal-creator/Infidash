@@ -11,7 +11,10 @@
     "start": "tsx server.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
+    "test:unit": "node scripts/run-tests.mjs unit",
+    "test:db": "node scripts/run-tests.mjs db",
+    "test:api": "node scripts/run-tests.mjs api",
     "api": "tsx server.ts",
     "db:migrate:editorial": "tsx scripts/migrate-editorial.ts",
     "content:import": "tsx scripts/import-content-hub.ts"
@@ -28,6 +31,7 @@
     "fastify": "^5.8.5",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "pdfkit": "^0.20.2",
     "pg": "^8.23.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
@@ -38,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.23.1",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",

@@ -1,12 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { DEFAULT_KPI_THRESHOLDS } from '../lib/kpiThresholds.js';
+import { formatDailyStatsSummary, getHealthLabel } from '../lib/dashboardMetrics.js';
 import { useClientStore, type Client } from '../store/useClientStore';
 import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
-import { LayoutGrid, List, Plus, Search, Filter, TrendingUp, TrendingDown, ArrowRight, X, PencilLine, Trash2 } from 'lucide-react';
+import { LayoutGrid, List, Plus, Search, TrendingUp, TrendingDown, ArrowRight, X, PencilLine, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function AgencyDashboard() {
-  const { clients, setActiveClient, addClient, updateClient, deleteClient } = useClientStore();
+  const { clients, sessionToken, currentUser, setActiveClient, addClient, updateClient, deleteClient } = useClientStore();
+  const isAdmin = currentUser?.role === 'admin';
+  const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isNewClientModalOpen, setNewClientModalOpen] = useState(false);
   const [clientModalMode, setClientModalMode] = useState<'create' | 'edit'>('create');
@@ -127,7 +130,8 @@ export function AgencyDashboard() {
 
     const loadHealthSummary = async () => {
       try {
-        const summary = await getHealthSummary();
+        if (!sessionToken) return;
+        const summary = await getHealthSummary(sessionToken);
         if (!cancelled) {
           setHealthSummary(summary);
         }
@@ -147,23 +151,17 @@ export function AgencyDashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sessionToken]);
 
-  const totalRevenue = clients.reduce((acc, client) => {
-    // Basic parse for mock values like "52.430 €" to numbers
-    const num = parseFloat(client.metrics.revenue.value.toString().replace(/[^\\d.,]/g, '').replace(/\\./g, '').replace(',', '.'));
-    return acc + (isNaN(num) ? 0 : num);
-  }, 0);
-
+  const totalRevenue = clients.reduce((acc, client) => acc + (client.revenue30d?.total ?? 0), 0);
+  const revenue30dRows = clients.reduce((count, client) => count + (client.revenue30d?.count ?? 0), 0);
+  const visibleClients = clients.filter((client) => (client.name + ' ' + client.industry).toLocaleLowerCase('es').includes(searchQuery.trim().toLocaleLowerCase('es')));
   const avgHealth = Math.round(clients.reduce((acc, client) => acc + client.health, 0) / (clients.length || 1));
+  const healthLabel = getHealthLabel(clients.length ? avgHealth : null);
   const criticalClients = clients.filter((client) => client.health < 40).length;
   const activeClientsCount = healthSummary?.clients ?? clients.length;
-  const dailyStatsCount = healthSummary?.dailyStats ?? 0;
-  const agencySignal = isLoadingHealthSummary
-    ? 'Sincronizando métricas reales...'
-    : dailyStatsCount > 0
-      ? `Se registraron ${dailyStatsCount} métricas diarias en la base.`
-      : 'Aún no hay métricas diarias registradas.';
+  const dailyStatsCount = healthSummary?.dailyStats ?? null;
+  const agencySignal = formatDailyStatsSummary({ loading: isLoadingHealthSummary, count: dailyStatsCount });
 
   const getHealthStatus = (score: number) => {
     if (score >= 80) return { label: 'Excelente', bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', border: 'border-emerald-200' };
@@ -179,12 +177,12 @@ export function AgencyDashboard() {
            <h2 className="text-3xl font-bold text-slate-900 mb-1">Dashboard General</h2>
            <p className="text-slate-500 font-medium">Gestión integral de cartera y métricas globales de la agencia.</p>
         </div>
-        <button 
+        {isAdmin && <button
            onClick={openCreateClientModal}
            className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-brand-primary/90 transition-all shadow-lg shadow-brand-primary/20"
         >
            <Plus className="size-4" /> Nuevo Cliente
-        </button>
+        </button>}
       </header>
 
       {/* Global Agency Stats */}
@@ -193,14 +191,14 @@ export function AgencyDashboard() {
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Clientes Activos</h3>
             <div className="flex items-end justify-between">
                <span className="text-3xl font-bold text-slate-900">{activeClientsCount}</span>
-               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{isLoadingHealthSummary ? 'Sincronizando...' : `${dailyStatsCount} registros`}</span>
+               <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{isLoadingHealthSummary ? 'Cargando…' : dailyStatsCount === null ? 'No disponible' : `${dailyStatsCount} registros`}</span>
             </div>
          </div>
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Revenue Gestionado (30d)</h3>
             <div className="flex items-end justify-between">
-               <span className="text-3xl font-bold text-slate-900">{new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(totalRevenue)}</span>
-               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{healthSummary ? 'Datos reales' : 'Sincronizando...'}</span>
+               <span className="text-3xl font-bold text-slate-900">{revenue30dRows ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(totalRevenue) : 'Sin datos'}</span>
+               <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{revenue30dRows ? `${revenue30dRows} registros · 30 días` : 'Sin datos · 30 días'}</span>
             </div>
          </div>
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
@@ -215,11 +213,11 @@ export function AgencyDashboard() {
                     />
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-sm font-bold">{avgHealth}</span>
+                    <span className="text-sm font-bold">{clients.length ? avgHealth : '—'}</span>
                   </div>
                </div>
                <div>
-                  <p className="text-sm font-bold text-slate-700">Estado Estable</p>
+                  <p className="text-sm font-bold text-slate-700">{healthLabel}</p>
                   <p className="text-[10px] text-slate-400 font-medium">{criticalClients} cliente{criticalClients === 1 ? '' : 's'} en riesgo crítico</p>
                </div>
             </div>
@@ -231,7 +229,7 @@ export function AgencyDashboard() {
               <p className="mt-3 text-xs text-white/70">
                 {isLoadingHealthSummary
                   ? 'Cargando cartera y métricas reales...'
-                  : `${activeClientsCount} clientes activos · ${dailyStatsCount} métricas guardadas`}
+                  : `${activeClientsCount} clientes · ${dailyStatsCount === null ? 'métricas no disponibles' : `${dailyStatsCount} métricas guardadas`}`}
               </p>
               <div className="mt-4 inline-flex items-center gap-1 text-xs font-bold bg-white/20 px-2 py-1 rounded">
                  Ver cartera real <ArrowRight className="size-3" />
@@ -246,15 +244,14 @@ export function AgencyDashboard() {
          <div className="flex items-center gap-3">
             <div className="relative w-64">
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-               <input 
+               <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
                   type="text" 
                   placeholder="Buscar en la cartera..." 
                   className="w-full bg-white border border-slate-200 rounded-xl py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all shadow-sm"
                />
             </div>
-            <button className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors shadow-sm">
-               <Filter className="size-4" />
-            </button>
          </div>
 
          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
@@ -276,7 +273,7 @@ export function AgencyDashboard() {
       {/* Clients View */}
       {viewMode === 'grid' ? (
          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {clients.map(client => {
+            {visibleClients.map(client => {
                const status = getHealthStatus(client.health);
                return (
                   <div 
@@ -299,7 +296,7 @@ export function AgencyDashboard() {
                                    Score: {client.health}
                                 </span>
                              </div>
-                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                             {isAdmin && <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                <button
                                  type="button"
                                  onClick={(event) => {
@@ -324,7 +321,7 @@ export function AgencyDashboard() {
                                >
                                  <Trash2 className="size-3.5" />
                                </button>
-                             </div>
+                             </div>}
                            </div>
                         </div>
                         <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1">{client.name}</h3>
@@ -374,7 +371,7 @@ export function AgencyDashboard() {
                   </tr>
                </thead>
                <tbody className="divide-y divide-slate-100">
-                  {clients.map(client => {
+                  {visibleClients.map(client => {
                      const status = getHealthStatus(client.health);
                      return (
                         <tr 
@@ -418,7 +415,7 @@ export function AgencyDashboard() {
                               </div>
                            </td>
                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {isAdmin && <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                  <button
                                    type="button"
                                    onClick={(event) => {
@@ -439,7 +436,7 @@ export function AgencyDashboard() {
                                  >
                                    <Trash2 className="size-3" /> Eliminar
                                  </button>
-                              </div>
+                              </div>}
                            </td>
                         </tr>
                      );

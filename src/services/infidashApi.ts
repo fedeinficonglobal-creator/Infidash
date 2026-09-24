@@ -66,10 +66,12 @@ export interface ApiClient {
   slug: string;
   logoUrl: string | null;
   industry: string | null;
+  activeTabs?: string[];
   healthScore: number;
   createdAt: string;
   updatedAt: string;
   latestStat: DailyStat | null;
+  revenue30d?: { total: number; count: number; startDate: string; endDate: string };
   kpiThresholds: KpiThresholds;
 }
 
@@ -79,6 +81,7 @@ export interface ApiIntegration {
   provider: 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce';
   label: string;
   status: 'connected' | 'pending' | 'error' | 'disabled';
+  isActive: boolean;
   capabilities: Array<'analytics' | 'ads' | 'leads' | 'sales'>;
   config: Record<string, string>;
   secretKeys: string[];
@@ -280,14 +283,26 @@ export async function createDailyStat(
 }
 
 export interface HealthSummary {
-  status: string;
   users: number;
   clients: number;
   dailyStats: number;
 }
 
-export async function getHealthSummary() {
-  return apiRequest<HealthSummary>('/api/health');
+export async function getHealthSummary(token: string) {
+  const response = await apiRequest<{ summary: HealthSummary }>('/api/dashboard/summary', {}, token);
+  return response.summary;
+}
+
+export async function fetchDailyReportPdf(token: string, clientId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  const response = await fetch(`/api/clients/${encodeURIComponent(clientId)}/reports/daily.pdf?${query}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `No se pudo generar el PDF (${response.status})`);
+  }
+  return response.blob();
 }
 
 export async function createClient(
@@ -368,8 +383,35 @@ export async function testClientIntegration(token: string, integrationId: string
   }, token);
 }
 
-export async function getLeads(token: string, clientId: string) {
-  return apiRequest<{ leads: ApiLead[] }>(`/api/leads?clientId=${encodeURIComponent(clientId)}`, {}, token);
+export interface LeadsPage {
+  leads: ApiLead[];
+  total: number;
+  openCount: number;
+  resolvedCount: number;
+  limit: number;
+  offset: number;
+}
+
+export async function getLeads(token: string, clientId: string, options: {
+  limit?: number; offset?: number; status?: string; source?: string;
+} = {}) {
+  const params = new URLSearchParams({ clientId });
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return apiRequest<LeadsPage>(`/api/leads?${params.toString()}`, {}, token);
+}
+
+export async function setIntegrationActive(token: string, integrationId: string, active: boolean) {
+  return apiRequest<{ integration: ApiIntegration }>(`/api/integrations/${encodeURIComponent(integrationId)}/${active ? 'enable' : 'disable'}`, {
+    method: 'POST',
+  }, token);
+}
+
+export async function rotateIntegrationWebhook(token: string, integrationId: string) {
+  return apiRequest<{ integration: ApiIntegration }>(`/api/integrations/${encodeURIComponent(integrationId)}/rotate-webhook`, {
+    method: 'POST',
+  }, token);
 }
 
 export async function syncClientIntegration(token: string, integrationId: string) {
@@ -380,6 +422,34 @@ export async function syncClientIntegration(token: string, integrationId: string
   }>(`/api/integrations/${encodeURIComponent(integrationId)}/sync`, {
     method: 'POST',
   }, token);
+}
+
+export interface WooCommerceSalesPreview {
+  source: 'woocommerce';
+  from: string;
+  to: string;
+  refundPolicy: 'subtract' | 'ignore';
+  complete: boolean;
+  persisted: false;
+  orderCount: number;
+  sales: Array<{
+    purchaseDate: string;
+    currency: string;
+    orderCount: number;
+    grossTotal: string;
+    includedTax: string;
+    includedShipping: string;
+    refundTotal: string;
+    salesTotal: string;
+  }>;
+}
+
+export async function getWooCommerceSalesPreview(token: string, integrationId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  return apiRequest<WooCommerceSalesPreview>(
+    `/api/integrations/${encodeURIComponent(integrationId)}/woocommerce/sales-preview?${query}`,
+    {}, token,
+  );
 }
 
 export async function deleteClientIntegration(token: string, integrationId: string) {

@@ -9,14 +9,12 @@ test('buildLeadsCsv exports the visible lead rows with Spanish headers', () => {
       name: 'Laura Pérez',
       source: 'Meta Ads',
       status: 'Nuevo',
-      value: '1.234 €',
       date: 'Hace 2h',
     },
     {
       name: '"Marta", Gómez',
       source: 'Email / Remarketing',
       status: 'En Proceso',
-      value: '987,50 €',
       date: 'Ayer\nTarde',
     },
   ]);
@@ -24,9 +22,9 @@ test('buildLeadsCsv exports the visible lead rows with Spanish headers', () => {
   assert.equal(
     csv,
     [
-      'Contacto,Fuente,Estado,Valor Est.,Fecha',
-      'Laura Pérez,Meta Ads,Nuevo,1.234 €,Hace 2h',
-      '"""Marta"", Gómez",Email / Remarketing,En Proceso,"987,50 €","Ayer\nTarde"',
+      'Contacto,Fuente,Estado,Fecha',
+      'Laura Pérez,Meta Ads,Nuevo,Hace 2h',
+      '"""Marta"", Gómez",Email / Remarketing,En Proceso,"Ayer\nTarde"',
       '',
     ].join('\n'),
   );

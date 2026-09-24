@@ -2,11 +2,10 @@ export type LeadExportRow = {
   name: string;
   source: string;
   status: string;
-  value: string;
   date: string;
 };
 
-const CSV_HEADERS = ['Contacto', 'Fuente', 'Estado', 'Valor Est.', 'Fecha'];
+const CSV_HEADERS = ['Contacto', 'Fuente', 'Estado', 'Fecha'];
 
 function escapeCsvValue(value: string) {
   const normalized = value.replace(/"/g, '""');
@@ -18,7 +17,7 @@ export function buildLeadsCsv(rows: LeadExportRow[]) {
 
   for (const row of rows) {
     lines.push(
-      [row.name, row.source, row.status, row.value, row.date]
+      [row.name, row.source, row.status, row.date]
         .map((value) => escapeCsvValue(value))
         .join(','),
     );

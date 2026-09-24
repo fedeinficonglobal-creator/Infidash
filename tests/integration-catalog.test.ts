@@ -33,6 +33,8 @@ test('integration catalog builds readable display names', () => {
   const woocommerce = getIntegrationProviderDefinition('woocommerce');
   assert.ok(clarity);
   assert.ok(woocommerce);
+  assert.equal(woocommerce!.configFields.some((field) => field.key === 'orderStatus'), false);
+  assert.equal(woocommerce!.configFields.find((field) => field.key === 'refundPolicy')?.defaultValue, 'subtract');
   assert.equal(
     buildIntegrationDisplayName(clarity!, { projectId: 'abc-123', siteUrl: 'https://example.com', segmentName: 'Principal' }),
     'Análisis/UX · Principal',

@@ -1,0 +1,94 @@
+{
+  "organizations": [
+    {
+      "id": "fixture-org-1",
+      "name": "Anonymized Test Organization",
+      "slug": "fixture-test-organization",
+      "created_at": "2026-05-01T00:00:00.000Z"
+    }
+  ],
+  "clients": [
+    {
+      "id": "fixture-client-1",
+      "org_id": "fixture-org-1",
+      "name": "Anonymized Legacy Client",
+      "slug": "legacy-fixture-client",
+      "logo_url": null,
+      "industry": "services",
+      "health_score": 75,
+      "kpi_thresholds_json": "{}",
+      "created_at": "2026-05-01T00:00:00.000Z",
+      "updated_at": "2026-05-01T00:00:00.000Z"
+    }
+  ],
+  "daily_stats": [
+    {
+      "id": "fixture-stat-1",
+      "client_id": "fixture-client-1",
+      "stat_date": "2026-05-19",
+      "revenue": 15678,
+      "roas": 2.5,
+      "clicks": 100,
+      "conversions": 8,
+      "cpa": 12,
+      "leads": 8,
+      "traffic": 640,
+      "notes": "Anonymized integration fixture",
+      "source": "manual",
+      "created_at": "2026-05-19T00:00:00.000Z",
+      "updated_at": "2026-05-19T00:00:00.000Z"
+    }
+  ],
+  "ux_snapshots": [
+    {
+      "id": "fixture-ux-1",
+      "client_id": "fixture-client-1",
+      "snapshot_date": "2026-05-19",
+      "sessions": 640,
+      "page_views": 654,
+      "rage_clicks": 7,
+      "dead_clicks": 2,
+      "scroll_depth_avg": 71.2,
+      "engaged_sessions": 210,
+      "conversions": 18,
+      "conversion_rate": 5.6,
+      "notes": "Anonymized integration fixture",
+      "source": "clarity",
+      "payload_json": "{}",
+      "created_at": "2026-05-19T00:00:00.000Z",
+      "updated_at": "2026-05-19T00:00:00.000Z"
+    }
+  ],
+  "rrss_channels": [
+    {
+      "id": "fixture-channel-1",
+      "client_id": "fixture-client-1",
+      "platform_key": "instagram",
+      "label": "Instagram principal",
+      "is_active": 1,
+      "sort_order": 1,
+      "created_at": "2026-05-01T00:00:00.000Z",
+      "updated_at": "2026-05-01T00:00:00.000Z"
+    }
+  ],
+  "monthly_kpis": [
+    {
+      "id": "fixture-kpi-1",
+      "client_id": "fixture-client-1",
+      "department_key": "rrss",
+      "metric_key": "followers",
+      "month_key": "2026-05",
+      "target_value": 500,
+      "target_text": "500 followers",
+      "actual_value": 480,
+      "actual_text": "480 followers",
+      "status": "warning",
+      "difference_value": -20,
+      "difference_pct": -4,
+      "notes": "Anonymized integration fixture",
+      "closed_at": "2026-05-25T00:00:00.000Z",
+      "created_at": "2026-05-01T00:00:00.000Z",
+      "updated_at": "2026-05-25T00:00:00.000Z"
+    }
+  ]
+}

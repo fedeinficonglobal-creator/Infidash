@@ -28,6 +28,7 @@ export interface Client {
   name: string;
   logo: string;
   health: number;
+  revenue30d?: { total: number; count: number; startDate: string; endDate: string };
   industry: string;
   activeTabs?: string[];
   metrics: {
@@ -61,7 +62,7 @@ interface ClientState {
   deleteClient: (clientId: string) => Promise<void>;
 }
 
-export const DEFAULT_TABS = ['overview', 'sales', 'traffic', 'web', 'rrss', 'content', 'ai', 'reports', 'integrations'];
+export const DEFAULT_TABS = ['overview', 'sales', 'traffic', 'web', 'leads', 'rrss', 'content', 'ai', 'reports', 'integrations'];
 
 const FALLBACK_CLIENTS: Client[] = [];
 
@@ -94,16 +95,20 @@ function mapApiClientToUiClient(client: ApiClient): Client {
 
   const metrics = fallback?.metrics ?? {
     revenue: { label: 'Ventas (30d)', value: '0 €', change: 0, trend: 'neutral' },
-    roas: { label: 'ROAS Global', value: '0.0x', change: 0, trend: 'neutral' },
-    conversions: { label: 'Conversiones', value: '0', change: 0, trend: 'neutral' },
+    roas: { label: 'ROAS (último dato)', value: 'Sin datos', change: 0, trend: 'neutral' },
+    conversions: { label: 'Conversiones (último dato)', value: 'Sin datos', change: 0, trend: 'neutral' },
     cpa: { label: 'CPA Medio', value: '0,00 €', change: 0, trend: 'neutral' },
   };
 
+  metrics.revenue = {
+    ...metrics.revenue,
+    label: 'Ventas (30d)',
+    value: client.revenue30d?.count ? formatMoney(client.revenue30d.total) : 'Sin datos',
+    change: 0,
+    trend: 'neutral',
+  };
+
   if (latestStat) {
-    metrics.revenue = {
-      ...metrics.revenue,
-      value: formatMoney(latestStat.revenue),
-    };
     metrics.roas = {
       ...metrics.roas,
       value: `${formatDecimal(latestStat.roas)}x`,
@@ -124,8 +129,9 @@ function mapApiClientToUiClient(client: ApiClient): Client {
     name: client.name,
     logo: client.logoUrl ?? fallback?.logo ?? 'https://ui-avatars.com/api/?name=Infidash&background=random',
     health: client.healthScore,
+    revenue30d: client.revenue30d,
     industry: client.industry ?? fallback?.industry ?? 'General',
-    activeTabs: fallback?.activeTabs ?? DEFAULT_TABS,
+    activeTabs: client.activeTabs ?? fallback?.activeTabs ?? DEFAULT_TABS,
     kpiThresholds: client.kpiThresholds ?? fallback?.kpiThresholds ?? DEFAULT_KPI_THRESHOLDS,
     metrics,
   };

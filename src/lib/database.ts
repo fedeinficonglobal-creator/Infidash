@@ -3,8 +3,12 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
+import { getBootstrapUsers } from './bootstrapUsers.js';
+import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
+import { dueMonthlyKpiMonth, nextMonthKey } from './monthlyCloseClock.js';
+import { parseWooRefundPolicy } from './woocommerce.js';
 import {
   buildIntegrationCapabilitySummary,
   buildIntegrationDisplayName,
@@ -50,6 +54,7 @@ export interface IntegrationRecord {
   provider: IntegrationProvider;
   label: string;
   status: IntegrationStatus;
+  isActive: boolean;
   capabilities: IntegrationCapability[];
   config: Record<string, string>;
   secretKeys: string[];
@@ -375,7 +380,7 @@ function createPostgresDatabase(connectionString: string): AppDatabase {
         run: (...params: unknown[]) => {
           const finalSql = inlineSqlParams(sql, params).trim().replace(/;\s*$/, '');
           const normalized = finalSql.replace(/\s+$/, '');
-          const dmlMatch = /^(insert|update|delete)/i.test(normalized);
+          const dmlMatch = /^(insert|update|delete)\b/i.test(normalized);
           if (!dmlMatch) {
             runPostgresCommand(connectionString, normalized);
             return { changes: 0 };
@@ -441,7 +446,14 @@ function createDatabase() {
   return createPostgresDatabase(connectionString);
 }
 
-const legacySqlitePath = path.join(process.cwd(), 'data', 'infidash.sqlite');
+const defaultLegacySqlitePath = path.join(process.cwd(), 'data', 'infidash.sqlite');
+const testLegacySqlitePath = process.env.INFIDASH_TEST_SUITE === 'api'
+  ? process.env.INFIDASH_TEST_LEGACY_SQLITE_PATH
+  : undefined;
+if (process.env.INFIDASH_TEST_SUITE === 'api' && !testLegacySqlitePath) {
+  throw new Error('API tests require an isolated legacy SQLite fixture path.');
+}
+const legacySqlitePath = testLegacySqlitePath ?? defaultLegacySqlitePath;
 const legacySqliteTables = [
   'organizations',
   'users',
@@ -498,7 +510,7 @@ print(json.dumps(out))
 }
 
 function importLegacySqliteData(db: AppDatabase) {
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' || process.env.INFIDASH_SKIP_LEGACY_SQLITE_IMPORT === '1') {
     return;
   }
 
@@ -963,6 +975,33 @@ function initializeSchema(db: AppDatabase) {
       UNIQUE(client_id, department_key, metric_key, month_key)
     );
 
+    CREATE TABLE IF NOT EXISTS monthly_kpi_cycles (
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      month_key TEXT NOT NULL,
+      closed_at TEXT,
+      closed_by_user_id TEXT,
+      close_token TEXT,
+      reopened_at TEXT,
+      reopened_by_user_id TEXT,
+      reopen_reason TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (client_id, month_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_kpi_events (
+      id TEXT PRIMARY KEY,
+      kpi_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      month_key TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('closed', 'reopened')),
+      actor_user_id TEXT,
+      reason TEXT,
+      occurred_at TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_monthly_kpi_events_kpi_time ON monthly_kpi_events (kpi_id, occurred_at DESC, id DESC);
+
     CREATE TABLE IF NOT EXISTS ai_insights (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -980,12 +1019,22 @@ function initializeSchema(db: AppDatabase) {
       phone TEXT,
       message TEXT,
       status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_progress', 'closed', 'lost')),
+      dedupe_key TEXT,
       raw_payload_json TEXT NOT NULL DEFAULT '{}',
       received_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_leads_client_received_id ON leads (client_id, received_at DESC, id DESC);
   `);
+}
+
+function ensureLeadSchema(db: AppDatabase) {
+  if (!db.tableColumns('leads').includes('dedupe_key')) {
+    db.exec(`ALTER TABLE leads ADD COLUMN dedupe_key TEXT`);
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_integration_delivery ON leads (integration_id, dedupe_key) WHERE dedupe_key IS NOT NULL`);
 }
 
 function ensureUxSnapshotSchema(db: AppDatabase) {
@@ -1168,41 +1217,8 @@ function seedDefaults(db: AppDatabase) {
   // No se seedan clientes de demostración: el panel debe arrancar vacío y
   // poblarse solo con datos reales creados por usuarios o sincronizados desde backend.
 
-  const adminEmail = normalizeEmail(process.env.INFIDASH_ADMIN_EMAIL ?? 'admin@infidash.local');
-  const viewerEmail = normalizeEmail(process.env.INFIDASH_VIEWER_EMAIL ?? 'viewer@infidash.local');
-  const adminPassword = process.env.INFIDASH_ADMIN_PASSWORD ?? 'admin1234';
-  const viewerPassword = process.env.INFIDASH_VIEWER_PASSWORD ?? 'viewer1234';
-
-  if (process.env.NODE_ENV === 'production') {
-    const warnings: string[] = [];
-    if (adminPassword === 'admin1234') {
-      warnings.push('INFIDASH_ADMIN_PASSWORD');
-    }
-    if (viewerPassword === 'viewer1234') {
-      warnings.push('INFIDASH_VIEWER_PASSWORD');
-    }
-    if (warnings.length > 0) {
-      console.warn(
-        `[infidash] Configuración insegura detectada en producción: ${warnings.join(', ')}. ` +
-          'Define credenciales personalizadas antes de desplegar.'
-      );
-    }
-  }
-
-  const users = [
-    {
-      email: adminEmail,
-      name: process.env.INFIDASH_ADMIN_NAME ?? 'Administrador',
-      role: 'admin' as const,
-      password: adminPassword,
-    },
-    {
-      email: viewerEmail,
-      name: process.env.INFIDASH_VIEWER_NAME ?? 'Visualizador',
-      role: 'viewer' as const,
-      password: viewerPassword,
-    },
-  ];
+  const existingAdmin = db.prepare(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`).get();
+  const users = getBootstrapUsers(process.env, Boolean(existingAdmin));
 
   const userExists = db.prepare(`SELECT id FROM users WHERE email = ?`);
   const insertUser = db.prepare(
@@ -1235,6 +1251,7 @@ export function getDatabase() {
     initializeSchema(database);
     ensureClientThresholdSchema(database);
     ensureIntegrationSchema(database);
+    ensureLeadSchema(database);
     ensureUxSnapshotSchema(database);
     seedDefaults(database);
     importLegacySqliteData(database);
@@ -1289,13 +1306,16 @@ function rowToIntegration(row: any): IntegrationRecord {
     clientId: row.client_id,
     provider,
     label: row.label ?? buildIntegrationDisplayName(definition, config),
-    status: (row.status ?? 'pending') as IntegrationStatus,
+    status: statusForIntegrationView(provider, (row.status ?? 'pending') as IntegrationStatus),
+    isActive: Number(row.is_active ?? 1) === 1,
     capabilities: [...definition.capabilities],
     config,
     secretKeys: definition.credentialFields.map((field) => field.key).filter((key) => Boolean(credentials[key])),
     webhookSecret: row.webhook_secret ?? null,
-    lastSync: row.last_sync ?? null,
-    lastError: row.last_error ?? null,
+    lastSync: hasLiveIntegrationAdapter(provider) ? (row.last_sync ?? null) : null,
+    lastError: row.last_error ?? (row.status === 'connected' && !hasLiveIntegrationAdapter(provider)
+      ? 'Este proveedor todavía no tiene un adaptador real de conexión/sincronización.'
+      : null),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1657,12 +1677,23 @@ export function saveClientIntegration(input: IntegrationInput) {
   const previousConfig = existing ? normalizeIntegrationSection(definition.configFields, parseJsonRecord(existing.config_json ?? '{}')) : {};
   const previousCredentials = existing ? normalizeIntegrationSection(definition.credentialFields, parseJsonRecord(existing.credentials_json ?? '{}')) : {};
   const config = normalizeIntegrationSection(definition.configFields, { ...previousConfig, ...(input.config ?? {}) });
+  if (provider === 'woocommerce') parseWooRefundPolicy(config.refundPolicy);
   const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...(input.credentials ?? {}) });
   const missingFields = listMissingIntegrationFields(definition, config, credentials);
-  const status = input.status ?? (missingFields.length === 0 ? 'connected' : 'pending');
+  const configurationUnchanged = Boolean(existing)
+    && JSON.stringify(previousConfig) === JSON.stringify(config)
+    && JSON.stringify(previousCredentials) === JSON.stringify(credentials);
+  const state = resolveIntegrationSaveState({
+    provider,
+    existingStatus: (existing?.status ?? null) as IntegrationStatus | null,
+    existingLastError: existing?.last_error ?? null,
+    configurationUnchanged,
+    missingFields,
+  });
+  const status = existing && Number(existing.is_active ?? 1) === 0 ? 'disabled' : state.status;
   const label = buildIntegrationDisplayName(definition, config, input.label ?? existing?.label ?? null);
-  const lastSync = missingFields.length === 0 ? (existing?.last_sync ?? timestamp) : existing?.last_sync ?? null;
-  const lastError = input.lastError ?? (missingFields.length > 0 ? `Faltan campos obligatorios: ${missingFields.join(', ')}` : null);
+  const lastSync = existing?.last_sync ?? null;
+  const lastError = state.lastError;
   const needsWebhookSecret = definition.capabilities.includes('leads');
   const webhookSecret = needsWebhookSecret ? (existing?.webhook_secret ?? crypto.randomBytes(24).toString('hex')) : (existing?.webhook_secret ?? null);
 
@@ -1735,8 +1766,26 @@ export function getIntegrationByWebhookSecret(secret: string) {
     return null;
   }
 
-  const row = getDatabase().prepare(`SELECT * FROM integrations WHERE webhook_secret = ? AND is_active = 1`).get(secret) as any;
+  const row = getDatabase().prepare(`SELECT * FROM integrations WHERE webhook_secret = ? AND is_active = 1 AND status <> 'disabled'`).get(secret) as any;
   return row ? rowToIntegration(row) : null;
+}
+
+export function setClientIntegrationActive(id: string, active: boolean) {
+  const db = getDatabase();
+  const existing = getIntegrationRowById(id);
+  if (!existing) return null;
+  db.prepare(`UPDATE integrations SET is_active = ?, status = ?, last_error = NULL, updated_at = ? WHERE id = ?`)
+    .run(active ? 1 : 0, active ? 'pending' : 'disabled', nowIso(), id);
+  return rowToIntegration(getIntegrationRowById(id));
+}
+
+export function rotateClientIntegrationWebhook(id: string) {
+  const db = getDatabase();
+  const existing = getIntegrationRowById(id);
+  if (!existing || existing.provider !== 'wordpress') return null;
+  db.prepare(`UPDATE integrations SET webhook_secret = ?, updated_at = ? WHERE id = ?`)
+    .run(crypto.randomBytes(24).toString('hex'), nowIso(), id);
+  return rowToIntegration(getIntegrationRowById(id));
 }
 
 export function insertLead(input: {
@@ -1748,6 +1797,7 @@ export function insertLead(input: {
   phone: string | null;
   message: string | null;
   rawPayload: Record<string, unknown>;
+  dedupeKey?: string | null;
 }) {
   const db = getDatabase();
   const timestamp = nowIso();
@@ -1760,6 +1810,7 @@ export function insertLead(input: {
     email: input.email?.trim() || null,
     phone: input.phone?.trim() || null,
     message: input.message?.trim() || null,
+    dedupe_key: input.dedupeKey ?? null,
     raw_payload_json: JSON.stringify(input.rawPayload ?? {}),
     received_at: timestamp,
     created_at: timestamp,
@@ -1768,8 +1819,8 @@ export function insertLead(input: {
 
   db.prepare(
     `INSERT INTO leads (
-      id, client_id, integration_id, source, name, email, phone, message, status, raw_payload_json, received_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?)`
+      id, client_id, integration_id, source, name, email, phone, message, status, dedupe_key, raw_payload_json, received_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`
   ).run(
     record.id,
     record.client_id,
@@ -1779,21 +1830,52 @@ export function insertLead(input: {
     record.email,
     record.phone,
     record.message,
+    record.dedupe_key,
     record.raw_payload_json,
     record.received_at,
     record.created_at,
     record.updated_at,
   );
-
   const created = db.prepare(`SELECT * FROM leads WHERE id = ?`).get(record.id) as any;
-  return rowToLead(created);
+  if (created) return { lead: rowToLead(created), duplicate: false };
+  if (!record.dedupe_key || !record.integration_id) throw new Error('No se pudo guardar el lead');
+  const existing = db.prepare(`SELECT * FROM leads WHERE integration_id = ? AND dedupe_key = ?`)
+    .get(record.integration_id, record.dedupe_key) as any;
+  if (!existing) throw new Error('No se pudo recuperar el lead duplicado');
+  return { lead: rowToLead(existing), duplicate: true };
 }
 
-export function listLeadsByClient(clientId: string, limit = 200) {
-  const rows = getDatabase()
-    .prepare(`SELECT * FROM leads WHERE client_id = ? ORDER BY received_at DESC LIMIT ?`)
-    .all(clientId, limit) as any[];
-  return rows.map(rowToLead);
+export function listLeadsByClient(clientId: string, query: { limit: number; offset: number; status: string | null; source: string | null }) {
+  const db = getDatabase();
+  const conditions = ['client_id = ?'];
+  const parameters: Array<string | number> = [clientId];
+  if (query.status) {
+    conditions.push('status = ?');
+    parameters.push(query.status);
+  }
+  if (query.source) {
+    conditions.push('source = ?');
+    parameters.push(query.source);
+  }
+  const where = conditions.join(' AND ');
+  const count = db.prepare(`SELECT COUNT(*) AS total,
+    SUM(CASE WHEN status IN ('new', 'in_progress') THEN 1 ELSE 0 END) AS open_count,
+    SUM(CASE WHEN status IN ('closed', 'lost') THEN 1 ELSE 0 END) AS resolved_count
+    FROM leads WHERE ${where}`).get(...parameters) as any;
+  const rows = db.prepare(`SELECT * FROM leads WHERE ${where} ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(...parameters, query.limit, query.offset) as any[];
+  const leads = rows.map((row) => {
+    const { rawPayload: _rawPayload, ...safeLead } = rowToLead(row);
+    return safeLead;
+  });
+  return {
+    leads,
+    total: Number(count?.total ?? 0),
+    openCount: Number(count?.open_count ?? 0),
+    resolvedCount: Number(count?.resolved_count ?? 0),
+    limit: query.limit,
+    offset: query.offset,
+  };
 }
 
 export function deleteClientIntegration(id: string) {
@@ -1813,12 +1895,15 @@ export function testClientIntegration(id: string) {
   const definition = getIntegrationProviderDefinition(integration.provider)!;
   const missingFields = listMissingIntegrationFields(definition, integration.config, Object.fromEntries(integration.secretKeys.map((key) => [key, 'present'])));
   const timestamp = nowIso();
-  const status: IntegrationStatus = missingFields.length === 0 ? 'connected' : 'pending';
-  const lastError = missingFields.length > 0 ? `Faltan campos obligatorios: ${missingFields.join(', ')}` : null;
+  const status: IntegrationStatus = 'pending';
+  const lastError = missingFields.length > 0
+    ? `Faltan campos obligatorios: ${missingFields.join(', ')}`
+    : hasLiveIntegrationAdapter(integration.provider)
+      ? 'Configuración completa; falta una prueba o sincronización real.'
+      : 'La configuración está completa, pero este proveedor todavía no dispone de una prueba/sincronización real.';
 
-  db.prepare(`UPDATE integrations SET status = ?, last_sync = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
+  db.prepare(`UPDATE integrations SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
     status,
-    timestamp,
     lastError,
     timestamp,
     id,
@@ -1849,10 +1934,14 @@ export function getClientIntegrationsSummary(clientId: string) {
   }));
 }
 
-export function setClientIntegrationStatus(id: string, status: IntegrationStatus, lastError: string | null = null) {
+export function setClientIntegrationStatus(id: string, status: IntegrationStatus, lastError: string | null = null, lastSync?: string) {
   const db = getDatabase();
   const timestamp = nowIso();
-  db.prepare(`UPDATE integrations SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(status, lastError, timestamp, id);
+  if (lastSync) {
+    db.prepare(`UPDATE integrations SET status = ?, last_error = ?, last_sync = ?, updated_at = ? WHERE id = ? AND is_active = 1`).run(status, lastError, lastSync, timestamp, id);
+  } else {
+    db.prepare(`UPDATE integrations SET status = ?, last_error = ?, updated_at = ? WHERE id = ? AND is_active = 1`).run(status, lastError, timestamp, id);
+  }
   const row = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
   return row ? rowToIntegration(row) : null;
 }
@@ -1955,7 +2044,7 @@ export function updateIntegrationSyncState(
   const lastSync = updates.lastSync ?? current.last_sync ?? null;
   const lastError = updates.lastError ?? current.last_error ?? null;
 
-  db.prepare(`UPDATE integrations SET status = ?, last_sync = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
+  db.prepare(`UPDATE integrations SET status = ?, last_sync = ?, last_error = ?, updated_at = ? WHERE id = ? AND is_active = 1`).run(
     status,
     lastSync,
     lastError,
@@ -2123,6 +2212,10 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
   if (!client) {
     return null;
   }
+  nextMonthKey(input.monthKey);
+  if (getMonthlyKpiCycleRow(input.clientId, input.monthKey)?.closed_at) {
+    throw new Error('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
+  }
 
   const timestamp = nowIso();
   const existing = input.id
@@ -2133,6 +2226,13 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
         input.metricKey,
         input.monthKey,
       ) as any);
+
+  if (existing?.client_id !== undefined && existing.client_id !== input.clientId) {
+    throw new Error('El KPI no pertenece a este cliente');
+  }
+  if (existing?.closed_at) {
+    throw new Error('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
+  }
 
   const record = {
     id: existing?.id ?? input.id ?? crypto.randomUUID(),
@@ -2156,10 +2256,12 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
   };
 
   if (existing) {
-    db.prepare(
+    const update = db.prepare(
       `UPDATE monthly_kpis
        SET department_key = ?, metric_key = ?, month_key = ?, target_value = ?, target_text = ?, actual_value = ?, actual_text = ?, status = ?, difference_value = ?, difference_pct = ?, notes = ?, closed_at = ?, created_by_user_id = ?, updated_by_user_id = ?, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND closed_at IS NULL AND NOT EXISTS (
+         SELECT 1 FROM monthly_kpi_cycles WHERE client_id = ? AND month_key = ? AND closed_at IS NOT NULL
+       )`
     ).run(
       record.department_key,
       record.metric_key,
@@ -2177,13 +2279,17 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
       record.updated_by_user_id,
       record.updated_at,
       record.id,
+      record.client_id,
+      record.month_key,
     );
+    if (update.changes === 0) throw new Error('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
   } else {
-    db.prepare(
+    const insert = db.prepare(
       `INSERT INTO monthly_kpis (
         id, client_id, department_key, metric_key, month_key, target_value, target_text, actual_value, actual_text, status,
         difference_value, difference_pct, notes, closed_at, created_by_user_id, updated_by_user_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (SELECT 1 FROM monthly_kpi_cycles WHERE client_id = ? AND month_key = ? AND closed_at IS NOT NULL)`
     ).run(
       record.id,
       record.client_id,
@@ -2203,23 +2309,171 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
       record.updated_by_user_id,
       record.created_at,
       record.updated_at,
+      record.client_id,
+      record.month_key,
     );
+    if (insert.changes === 0) throw new Error('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
   }
 
   const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(record.id) as any;
   return rowToMonthlyKpi(saved);
 }
 
-export function closeMonthlyKpi(id: string, closedAt = nowIso()) {
+export function closeMonthlyKpi(id: string, closedAt = nowIso(), actorUserId: string | null = null) {
   const db = getDatabase();
   const existing = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
   if (!existing) {
     return null;
   }
-
-  db.prepare(`UPDATE monthly_kpis SET closed_at = ?, updated_at = ? WHERE id = ?`).run(closedAt, nowIso(), id);
+  if (existing.closed_at) return rowToMonthlyKpi(existing);
+  const timestamp = nowIso();
+  db.prepare(`WITH changed AS (
+    UPDATE monthly_kpis SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL RETURNING *
+  ) INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+    SELECT ?, id, client_id, month_key, 'closed', ?, NULL, ?, row_to_json(changed)::text FROM changed`)
+    .run(closedAt, timestamp, id, crypto.randomUUID(), actorUserId, timestamp);
   const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
   return rowToMonthlyKpi(saved);
+}
+
+export function getMonthlyKpiById(id: string) {
+  const row = getDatabase().prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  return row ? rowToMonthlyKpi(row) : null;
+}
+
+function getMonthlyKpiCycleRow(clientId: string, monthKey: string) {
+  return getDatabase().prepare(`SELECT * FROM monthly_kpi_cycles WHERE client_id = ? AND month_key = ?`)
+    .get(clientId, monthKey) as any;
+}
+
+export function listMonthlyKpiCycles(clientId: string) {
+  const rows = getDatabase().prepare(`SELECT * FROM monthly_kpi_cycles WHERE client_id = ? ORDER BY month_key DESC`)
+    .all(clientId) as any[];
+  return rows.map((row) => ({
+    clientId: row.client_id as string,
+    monthKey: row.month_key as string,
+    closedAt: row.closed_at as string | null,
+    closedByUserId: row.closed_by_user_id as string | null,
+    reopenedAt: row.reopened_at as string | null,
+    reopenedByUserId: row.reopened_by_user_id as string | null,
+    reopenReason: row.reopen_reason as string | null,
+  }));
+}
+
+function transitionMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string | null, at: Date, allowReclose: boolean) {
+  const nextMonth = nextMonthKey(monthKey);
+  const timestamp = at.toISOString();
+  const closeToken = crypto.randomUUID();
+  const db = getDatabase();
+  db.prepare(`WITH cycle AS (
+    INSERT INTO monthly_kpi_cycles (client_id, month_key, closed_at, closed_by_user_id, close_token, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (client_id, month_key) DO UPDATE SET
+      closed_at = EXCLUDED.closed_at, closed_by_user_id = EXCLUDED.closed_by_user_id,
+      close_token = EXCLUDED.close_token, reopened_at = NULL, reopened_by_user_id = NULL,
+      reopen_reason = NULL, updated_at = EXCLUDED.updated_at
+    WHERE monthly_kpi_cycles.closed_at IS NULL AND ? = 1
+    RETURNING client_id, month_key, closed_at
+  ), closed_rows AS (
+    UPDATE monthly_kpis m SET closed_at = cycle.closed_at, updated_at = cycle.closed_at
+    FROM cycle WHERE m.client_id = cycle.client_id AND m.month_key = cycle.month_key AND m.closed_at IS NULL
+    RETURNING m.*
+  ), audit_rows AS (
+    INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+    SELECT gen_random_uuid()::text, id, client_id, month_key, 'closed', ?, NULL, ?, row_to_json(closed_rows)::text
+    FROM closed_rows
+  ), next_rows AS (
+    INSERT INTO monthly_kpis (id, client_id, department_key, metric_key, month_key, target_value, target_text,
+      actual_value, actual_text, status, difference_value, difference_pct, notes, closed_at,
+      created_by_user_id, updated_by_user_id, created_at, updated_at)
+    SELECT gen_random_uuid()::text, m.client_id, m.department_key, m.metric_key, ?, m.target_value, m.target_text,
+      NULL, NULL, 'unknown', NULL, NULL, NULL, NULL, NULL, NULL, ?, ?
+    FROM monthly_kpis m JOIN cycle ON m.client_id = cycle.client_id AND m.month_key = cycle.month_key
+    ON CONFLICT (client_id, department_key, metric_key, month_key) DO NOTHING
+  ) SELECT COUNT(*) FROM cycle`)
+    .run(clientId, monthKey, timestamp, actorUserId, closeToken, timestamp, timestamp,
+      allowReclose ? 1 : 0, actorUserId, timestamp, nextMonth, timestamp, timestamp);
+  return getMonthlyKpiCycleRow(clientId, monthKey)?.close_token === closeToken;
+}
+
+export function closeMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, at = new Date()) {
+  if (!getClientById(clientId)) return null;
+  if (listMonthlyKpis(clientId, monthKey).length === 0) return null;
+  transitionMonthlyKpiCycle(clientId, monthKey, actorUserId, at, true);
+  return listMonthlyKpiCycles(clientId).find((cycle) => cycle.monthKey === monthKey) ?? null;
+}
+
+export function reopenMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, reason: string) {
+  const normalizedReason = reason.trim();
+  if (!normalizedReason || normalizedReason.length > 500) throw new Error('La reapertura requiere un motivo de hasta 500 caracteres');
+  const current = getMonthlyKpiCycleRow(clientId, monthKey);
+  if (current && !current.closed_at) throw new Error('El ciclo ya está abierto');
+  if (!current && !listMonthlyKpis(clientId, monthKey).some((kpi) => kpi.closedAt)) return null;
+  const timestamp = nowIso();
+  getDatabase().prepare(`WITH cycle AS (
+    INSERT INTO monthly_kpi_cycles (client_id, month_key, closed_at, closed_by_user_id, close_token,
+      reopened_at, reopened_by_user_id, reopen_reason, created_at, updated_at)
+    VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)
+    ON CONFLICT (client_id, month_key) DO UPDATE SET closed_at = NULL,
+      reopened_at = EXCLUDED.reopened_at, reopened_by_user_id = EXCLUDED.reopened_by_user_id,
+      reopen_reason = EXCLUDED.reopen_reason, updated_at = EXCLUDED.updated_at
+    WHERE monthly_kpi_cycles.closed_at IS NOT NULL
+    RETURNING client_id, month_key
+  ), opened_rows AS (
+    UPDATE monthly_kpis m SET closed_at = NULL, updated_at = ? FROM cycle
+    WHERE m.client_id = cycle.client_id AND m.month_key = cycle.month_key AND m.closed_at IS NOT NULL
+    RETURNING m.*
+  ), audit_rows AS (
+    INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+    SELECT gen_random_uuid()::text, id, client_id, month_key, 'reopened', ?, ?, ?, row_to_json(opened_rows)::text
+    FROM opened_rows
+  ) SELECT COUNT(*) FROM cycle`)
+    .run(clientId, monthKey, timestamp, actorUserId, normalizedReason, timestamp, timestamp, timestamp,
+      actorUserId, normalizedReason, timestamp);
+  return listMonthlyKpiCycles(clientId).find((cycle) => cycle.monthKey === monthKey) ?? null;
+}
+
+export function closeDueMonthlyKpiCycles(now = new Date(), onlyClientId?: string) {
+  const dueMonth = dueMonthlyKpiMonth(now);
+  const db = getDatabase();
+  let closed = 0;
+  let candidate: { client_id: string; month_key: string } | undefined;
+  const findCandidate = () => db.prepare(`SELECT m.client_id, m.month_key FROM monthly_kpis m
+    WHERE m.month_key <= ? AND m.month_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
+      AND (? IS NULL OR m.client_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM monthly_kpi_cycles c WHERE c.client_id = m.client_id AND c.month_key = m.month_key)
+    GROUP BY m.client_id, m.month_key ORDER BY m.month_key ASC, m.client_id ASC LIMIT 1`)
+    .get(dueMonth, onlyClientId ?? null, onlyClientId ?? null) as { client_id: string; month_key: string } | undefined;
+  // The adapter starts a psql process for each candidate. Bound each scheduler
+  // tick so a long historical catch-up does not monopolize the API process.
+  for (let processed = 0; processed < 10; processed += 1) {
+    candidate = findCandidate();
+    if (!candidate) break;
+    if (transitionMonthlyKpiCycle(candidate.client_id, candidate.month_key, null, now, false)) closed += 1;
+  }
+  return { dueMonth, closed, pending: Boolean(findCandidate()) };
+}
+
+export function reopenMonthlyKpi(id: string, actorUserId: string, reason: string) {
+  const normalizedReason = reason.trim();
+  if (!normalizedReason || normalizedReason.length > 500) throw new Error('La reapertura requiere un motivo de hasta 500 caracteres');
+  const db = getDatabase();
+  const existing = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  if (!existing) return null;
+  if (!existing.closed_at) throw new Error('El KPI ya está abierto');
+  const timestamp = nowIso();
+  db.prepare(`WITH changed AS (
+    UPDATE monthly_kpis SET closed_at = NULL, updated_at = ? WHERE id = ? AND closed_at IS NOT NULL RETURNING *
+  ) INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+    SELECT ?, id, client_id, month_key, 'reopened', ?, ?, ?, row_to_json(changed)::text FROM changed`)
+    .run(timestamp, id, crypto.randomUUID(), actorUserId, normalizedReason, timestamp);
+  const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  return rowToMonthlyKpi(saved);
+}
+
+export function listMonthlyKpiEvents(id: string) {
+  return getDatabase().prepare(`SELECT id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json
+    FROM monthly_kpi_events WHERE kpi_id = ? ORDER BY occurred_at DESC, id DESC`).all(id) as Array<Record<string, unknown>>;
 }
 
 export function getDailyStatById(id: string) {

@@ -58,10 +58,38 @@ test('content store loads summary and rows and prevents overlapping refreshes', 
   await useContentStore.getState().load('token');
   assert.equal(useContentStore.getState().items[0].clientId, 'client-a');
   assert.equal(useContentStore.getState().summary?.planItems.proposed, 1);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   useContentStore.setState({ isRefreshing: true });
   await useContentStore.getState().refresh('token');
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
+});
+
+test('content store restores durable job status after a browser reload', async () => {
+  const urls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input); urls.push(url);
+    const payload = url.includes('/summary') ? { summary: { plan_items: {}, contents: {}, publications: {}, incidents: 0 } }
+      : url.includes('/jobs') ? { items: [{ id: 'job-7', client_id: 'client-a', kind: 'generate_plan', status: 'running', target_id: null, last_error: null, created_at: '2026-09-23T10:00:00Z', updated_at: '2026-09-23T10:00:00Z' }], next_cursor: null }
+      : { items: [], next_cursor: null };
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  useContentStore.getState().reset('client-a');
+  await useContentStore.getState().load('token');
+  assert.ok(urls.some((url) => url.includes('/content/jobs') && url.includes('clientId=client-a')));
+  assert.equal(useContentStore.getState().jobs[0]?.id, 'job-7');
+});
+
+test('content store creates a calendar for the selected client and makes it selectable', async () => {
+  let posted: any = null;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), '/api/clients/client-a/editorial-calendars');
+    posted = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ calendar: { id: 'calendar-new', client_id: 'client-a', title: posted.title, status: 'draft', start_date: null, end_date: null } }), { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+  const created = await useContentStore.getState().createCalendar('token', 'client-a', { title: 'Octubre' });
+  assert.equal(posted.title, 'Octubre');
+  assert.equal(created.id, 'calendar-new');
+  assert.equal(useContentStore.getState().calendars[0]?.id, 'calendar-new');
 });
 
 test('content store sends status, format and search before server pagination', async () => {

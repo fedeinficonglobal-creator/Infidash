@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link2, PencilLine, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import { type Client } from '../store/useClientStore';
+import { type Client, useClientStore } from '../store/useClientStore';
 import { buildClientSignals } from '../lib/clientSignals.js';
+import { canPersistPlanRows } from '../lib/planStorage.js';
 import {
+  getWebPlanInitialRows,
   getWebMonthLabel,
   loadWebPlanRows,
   removeWebPlanRow,
@@ -23,9 +25,11 @@ const EMPTY_FORM = {
 };
 
 export function WebTab({ client }: { client: Client }) {
+  const { currentUser } = useClientStore();
+  const isAdmin = currentUser?.role === 'admin';
   const signals = buildClientSignals(client);
   const [rows, setRows] = useState<WebPlanRow[]>([]);
-  const [isReady, setIsReady] = useState(false);
+  const [loadedClientId, setLoadedClientId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<WebPlanRow | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -35,26 +39,8 @@ export function WebTab({ client }: { client: Client }) {
 
   useEffect(() => {
     const loaded = loadWebPlanRows(client.id);
-    if (loaded.length > 0) {
-      setRows(loaded);
-    } else {
-      setRows([
-        {
-          id: crypto.randomUUID(),
-          cliente: client.name,
-          web: client.slug ? `https://${client.slug}.com/` : 'https://example.com/',
-          kpi: 'Formularios web - Citas',
-          umbralLeads: '5 FORMS',
-          leadsAbril: '2 FORMS',
-          accionMayo: 'Markdown Elementor para IA',
-          leadsMayo: '3 FORMS',
-          wpoMayo: '87',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ]);
-    }
-    setIsReady(true);
+    setRows(getWebPlanInitialRows(loaded));
+    setLoadedClientId(client.id);
     setIsModalOpen(false);
     setEditingRow(null);
     setForm(EMPTY_FORM);
@@ -62,9 +48,9 @@ export function WebTab({ client }: { client: Client }) {
   }, [client.id, client.name, client.slug]);
 
   useEffect(() => {
-    if (!isReady) return;
+    if (!canPersistPlanRows(client.id, loadedClientId)) return;
     saveWebPlanRows(client.id, rows);
-  }, [client.id, isReady, rows]);
+  }, [client.id, loadedClientId, rows]);
 
   const openCreateModal = () => {
     setEditingRow(null);
@@ -144,6 +130,10 @@ export function WebTab({ client }: { client: Client }) {
         </div>
       </header>
 
+      <div role="note" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Borrador local de abril/mayo; no es seguimiento actual ni se comparte entre navegadores. La persistencia y migración se completarán en la fase 4B.
+      </div>
+
       <section className="mb-8 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-100 bg-gradient-to-r from-blue-50 to-amber-50 p-6 md:flex-row md:items-center md:justify-between">
           <div>
@@ -151,13 +141,13 @@ export function WebTab({ client }: { client: Client }) {
             <h3 className="text-xl font-bold text-slate-900">Seguimiento Web editable</h3>
             <p className="text-sm text-slate-500 mt-1">Campos como en la hoja: cliente, web, KPI, umbral, abril, acción mayo, mayo y WPO.</p>
           </div>
-          <button
+          {isAdmin && <button
             type="button"
             onClick={openCreateModal}
             className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 transition-colors hover:bg-brand-primary/90"
           >
             <Plus className="size-4" /> Añadir fila
-          </button>
+          </button>}
         </div>
 
         <div className="overflow-x-auto">
@@ -181,6 +171,13 @@ export function WebTab({ client }: { client: Client }) {
               </tr>
             </thead>
             <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-500">
+                    No hay filas guardadas para este cliente. Usa <strong>Añadir fila</strong> para crear un borrador.
+                  </td>
+                </tr>
+              )}
               {rows.map((row) => (
                 <tr key={row.id} className="group align-top even:bg-slate-50/40 hover:bg-slate-50 transition-colors">
                   <td className="px-5 py-4 border-b border-slate-100 text-sm font-bold text-slate-900">{row.cliente}</td>
@@ -200,7 +197,7 @@ export function WebTab({ client }: { client: Client }) {
                   <td className="px-5 py-4 border-b border-slate-100 text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[180px]">{row.leadsMayo || '—'}</td>
                   <td className="px-5 py-4 border-b border-slate-100 text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[120px]">{row.wpoMayo || '—'}</td>
                   <td className="px-5 py-4 border-b border-slate-100 text-right">
-                    <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    {isAdmin && <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
                         onClick={() => openEditModal(row)}
@@ -215,7 +212,7 @@ export function WebTab({ client }: { client: Client }) {
                       >
                         <Trash2 className="size-3.5" /> Eliminar
                       </button>
-                    </div>
+                    </div>}
                   </td>
                 </tr>
               ))}
@@ -224,7 +221,7 @@ export function WebTab({ client }: { client: Client }) {
         </div>
       </section>
 
-      {isModalOpen && (
+      {isAdmin && isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-100 p-6">

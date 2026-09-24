@@ -29,7 +29,7 @@ test('migration discovery is deterministic and checksums detect edits', async ()
 });
 
 test('the supplied Content Hub JSON is accepted as a schema-only dry-run source', async () => {
-  const raw = JSON.parse(await readFile(path.resolve(repositoryRoot, '..', 'estructura-db-content-hub.json'), 'utf8'));
+  const raw = JSON.parse(await readFile(path.join(repositoryRoot, 'tests', 'fixtures', 'content-hub-schema.json'), 'utf8'));
   const parsed = parseContentHubExport(raw);
   assert.equal(parsed.schemaOnly, true);
   assert.equal(parsed.tables.articles.length, 0);

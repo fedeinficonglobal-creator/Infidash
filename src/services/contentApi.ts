@@ -104,7 +104,7 @@ export interface PublishingAccount {
 }
 
 export interface EditorialCalendar { id: string; clientId: string; title: string; status: string; startDate: string | null; endDate: string | null; }
-export interface ContentJob { id: string; clientId: string; kind: JobKind; status: string; targetId: string | null; lastError: string | null; createdAt: string; updatedAt: string; }
+export interface ContentJob { id: string; clientId: string; kind: JobKind; status: string; targetId: string | null; attemptCount?: number; nextAttemptAt?: string | null; lockedUntil?: string | null; lastError: string | null; createdAt: string; updatedAt: string; }
 export interface Page<T> { items: T[]; nextCursor: string | null; }
 
 export class ContentApiRequestError extends Error {
@@ -150,6 +150,10 @@ export function getEditorialCalendars(token: string, clientId: string, signal?: 
   return request<Page<EditorialCalendar>>(`/api/clients/${encodeURIComponent(clientId)}/editorial-calendars?limit=100`, token, { signal });
 }
 
+export function createEditorialCalendar(token: string, clientId: string, input: { title: string; startDate?: string; endDate?: string }) {
+  return request<{ calendar: EditorialCalendar }>(`/api/clients/${encodeURIComponent(clientId)}/editorial-calendars`, token, { method: 'POST', body: JSON.stringify(input) });
+}
+
 export function getContentItem(token: string, id: string, signal?: AbortSignal) {
   return request<{ content: ContentItem }>(`/api/content/items/${encodeURIComponent(id)}`, token, { signal });
 }
@@ -188,4 +192,8 @@ export function createContentJob(token: string, input: { clientId: string; kind:
 
 export function getContentJob(token: string, id: string, signal?: AbortSignal) {
   return request<{ job: ContentJob }>(`/api/content/jobs/${encodeURIComponent(id)}`, token, { signal });
+}
+
+export function getContentJobs(token: string, filters: { clientId?: string; status?: string; cursor?: string; limit?: number }, signal?: AbortSignal) {
+  return request<Page<ContentJob>>(`/api/content/jobs${queryString(filters)}`, token, { signal });
 }

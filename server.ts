@@ -5,7 +5,9 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   authenticateUser,
-  closeMonthlyKpi,
+  closeMonthlyKpiCycle,
+  closeDueMonthlyKpiCycles,
+  reopenMonthlyKpiCycle,
   createClient,
   createDatabaseBackup,
   deleteClient,
@@ -15,6 +17,7 @@ import {
   deleteDailyStat,
   deleteUser,
   getClientBySlug,
+  getClientByIdRecord,
   getClientIntegrations,
   getDailyStatById,
   getDashboardHealthSummary,
@@ -22,6 +25,7 @@ import {
   getIntegrationByWebhookSecret,
   getIntegrationCredentialsById,
   getLatestUxSnapshot,
+  getMonthlyKpiById,
   getSessionByToken,
   insertLead,
   listClients,
@@ -31,12 +35,16 @@ import {
   listUxSnapshots,
   listIntegrationsByProvider,
   listMonthlyKpis,
+  listMonthlyKpiEvents,
+  listMonthlyKpiCycles,
   listRrssChannels,
   listUsers,
   removeClientIntegration,
+  rotateClientIntegrationWebhook,
   saveMonthlyKpi,
   saveRrssChannel,
   setClientIntegrationStatus,
+  setClientIntegrationActive,
   testIntegrationById,
   updateIntegrationSyncState,
   updateUserRole,
@@ -47,11 +55,20 @@ import {
 import { fetchClaritySnapshots } from './src/lib/claritySync.js';
 import { contentRoutes } from './src/server/content/routes.js';
 import { closeEditorialPool } from './src/server/content/postgres.js';
+import { LoginThrottle } from './src/lib/loginThrottle.js';
+import { redactIntegrationSecrets } from './src/lib/integrationPresentation.js';
+import { fetchWooCommercePurchaseWindow, parseWooRefundPolicy, probeWooCommerceOrders, summarizeCompletedOrderSales } from './src/lib/woocommerce.js';
+import { sumRevenueWindow } from './src/lib/dashboardMetrics.js';
+import { parseLeadQuery } from './src/lib/leadQuery.js';
+import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
+import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
+import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPdf.js';
 
 const app = fastify({
   logger: false,
   bodyLimit: 1_000_000,
 });
+const loginThrottle = new LoginThrottle();
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
   const rawBody = typeof body === 'string' ? body.trim() : '';
@@ -282,10 +299,7 @@ function startClaritySyncScheduler() {
 }
 
 app.get('/api/health', (_req: AnyFastifyRequest, reply: FastifyReply) => {
-  return reply.send({
-    status: 'ok',
-    ...getDashboardHealthSummary(),
-  });
+  return reply.send({ status: 'ok' });
 });
 
 app.post('/api/auth/login', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -295,11 +309,19 @@ app.post('/api/auth/login', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return sendError(reply, 400, 'email y password son obligatorios', 'INVALID_PAYLOAD');
   }
 
+  const loginCheck = loginThrottle.check(req.ip);
+  if (loginCheck.blocked) {
+    reply.header('Retry-After', String(loginCheck.retryAfterSeconds));
+    return sendError(reply, 429, 'Demasiados intentos. Espera antes de volver a intentarlo.', 'LOGIN_RATE_LIMITED');
+  }
+
   const result = authenticateUser(email, password);
   if (!result) {
+    loginThrottle.recordFailure(req.ip);
     return sendError(reply, 401, 'Credenciales inválidas', 'INVALID_CREDENTIALS');
   }
 
+  loginThrottle.recordSuccess(req.ip);
   return reply.send(result);
 });
 
@@ -399,7 +421,12 @@ app.get('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return;
   }
 
-  return reply.send({ clients: listClientsWithLatestStat() });
+  const endDate = new Date().toISOString().slice(0, 10);
+  const clients = listClientsWithLatestStat().map((client) => ({
+    ...client,
+    revenue30d: sumRevenueWindow(listDailyStats(client.id), endDate, 30),
+  }));
+  return reply.send({ clients });
 });
 
 app.get('/api/clients/:slug', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -515,7 +542,7 @@ app.get('/api/clients/:clientId/integrations', (req: AnyFastifyRequest, reply: F
     return;
   }
 
-  const clientIntegrations = getClientIntegrations((req.params as any).clientId);
+  const clientIntegrations = redactIntegrationSecrets(getClientIntegrations((req.params as any).clientId), session.user.role);
   return reply.send({ integrations: clientIntegrations });
 });
 
@@ -587,6 +614,10 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     return;
   }
 
+  if (getIntegrationById((req.params as any).id)?.isActive === false) {
+    return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  }
+
   let result = testIntegrationById((req.params as any).id);
   if (!result) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
@@ -596,7 +627,12 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
   // For wordpress integrations with all required fields, do a real HTTP probe.
   if (result.ready && result.integration.provider === 'wordpress') {
     const probe = await testWordPressConnection(result.integration);
-    const updated = setClientIntegrationStatus(result.integration.id, probe.ok ? 'connected' : 'error', probe.ok ? null : probe.error);
+    const updated = setClientIntegrationStatus(
+      result.integration.id,
+      probe.ok ? 'connected' : 'error',
+      probe.ok ? null : probe.error,
+      probe.ok ? new Date().toISOString() : undefined,
+    );
     result = {
       ...result,
       integration: updated ?? result.integration,
@@ -605,7 +641,58 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     };
   }
 
+  if (result.ready && result.integration.provider === 'woocommerce') {
+    const credentials = getIntegrationCredentialsById(result.integration.id) ?? {};
+    const probe = await probeWooCommerceOrders({
+      storeUrl: String(result.integration.config?.storeUrl ?? ''),
+      consumerKey: String(credentials.consumerKey ?? ''),
+      consumerSecret: String(credentials.consumerSecret ?? ''),
+    });
+    const updated = setClientIntegrationStatus(result.integration.id, probe.ok ? 'pending' : 'error', probe.error);
+    result = {
+      ...result,
+      integration: updated ?? result.integration,
+      ready: probe.ok,
+      summary: probe.ok ? 'Acceso a pedidos verificado; la sincronización de ventas aún no está activada' : (probe.error ?? 'No se pudo conectar con WooCommerce'),
+    };
+  }
+
   return reply.send(result);
+});
+
+app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) return;
+  reply.header('Cache-Control', 'no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'woocommerce') {
+    return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
+  }
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  const query = req.query as Record<string, unknown>;
+  if (typeof query.from !== 'string' || typeof query.to !== 'string') {
+    return sendError(reply, 400, 'Indica las fechas de compra desde y hasta', 'INVALID_RANGE');
+  }
+  let refundPolicy;
+  try { refundPolicy = parseWooRefundPolicy(integration.config.refundPolicy); }
+  catch { return sendError(reply, 400, 'Política de reembolsos inválida', 'INVALID_REFUND_POLICY'); }
+  const credentials = getIntegrationCredentialsById(integration.id) ?? {};
+  try {
+    const orders = await fetchWooCommercePurchaseWindow({
+      storeUrl: String(integration.config.storeUrl ?? ''),
+      consumerKey: String(credentials.consumerKey ?? ''),
+      consumerSecret: String(credentials.consumerSecret ?? ''),
+    }, { from: query.from, to: query.to, maxPages: 5 });
+    return reply.send({
+      source: 'woocommerce', from: query.from, to: query.to, refundPolicy,
+      complete: true, orderCount: orders.length,
+      sales: summarizeCompletedOrderSales(orders, refundPolicy),
+      persisted: false,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo leer WooCommerce';
+    return sendError(reply, message.startsWith('Ventana de compra inválida') ? 400 : 502, message, 'WOOCOMMERCE_PREVIEW_FAILED');
+  }
 });
 
 app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -617,6 +704,10 @@ app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: Fas
   const integration = getIntegrationById((req.params as any).id);
   if (!integration) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
+  }
+
+  if (!integration.isActive) {
+    return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   }
 
   try {
@@ -668,13 +759,26 @@ app.post('/api/public/leads/:token', async (req: AnyFastifyRequest, reply: Fasti
     return sendError(reply, 404, 'Webhook no encontrado', 'NOT_FOUND');
   }
 
-  const body = (req.body ?? {}) as Record<string, any>;
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return sendError(reply, 400, 'El formulario debe ser un objeto JSON', 'INVALID_PAYLOAD');
+  }
   const name = pickLeadField(body, ['name', 'fullname', 'yourname', 'nombre', 'nombrecompleto']);
   const email = pickLeadField(body, ['email', 'youremail', 'correo', 'correoelectronico']);
   const phone = pickLeadField(body, ['phone', 'phonenumber', 'yourphone', 'telefono', 'tel', 'movil']);
   const message = pickLeadField(body, ['message', 'yourmessage', 'mensaje', 'comments', 'comentario', 'comentarios']);
+  if (!name && !email && !phone && !message) {
+    return sendError(reply, 400, 'El formulario no contiene campos de contacto reconocidos', 'INVALID_PAYLOAD');
+  }
 
-  const lead = insertLead({
+  let deliveryIdentity;
+  try {
+    deliveryIdentity = readLeadDeliveryIdentity(body);
+  } catch (error) {
+    return sendError(reply, 400, error instanceof Error ? error.message : 'Identificador de entrega inválido', 'INVALID_PAYLOAD');
+  }
+
+  const result = insertLead({
     clientId: integration.clientId,
     integrationId: integration.id,
     source: integration.config.leadSource?.trim() || 'WordPress',
@@ -683,11 +787,12 @@ app.post('/api/public/leads/:token', async (req: AnyFastifyRequest, reply: Fasti
     phone: phone ? phone.slice(0, 300) : null,
     message: message ? message.slice(0, 5000) : null,
     rawPayload: body,
+    dedupeKey: deliveryIdentity ? leadDedupeKey(deliveryIdentity) : null,
   });
 
   updateIntegrationSyncState(integration.id, { status: 'connected', lastError: null, lastSync: new Date().toISOString() });
 
-  return reply.code(201).send({ ok: true, leadId: lead.id });
+  return reply.code(result.duplicate ? 200 : 201).send({ ok: true, leadId: result.lead.id, duplicate: result.duplicate });
 });
 
 app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -701,7 +806,51 @@ app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return sendError(reply, 400, 'clientId es obligatorio', 'INVALID_PAYLOAD');
   }
 
-  return reply.send({ leads: listLeadsByClient(clientId) });
+  try {
+    return reply.send(listLeadsByClient(clientId, parseLeadQuery((req.query ?? {}) as Record<string, unknown>)));
+  } catch (error) {
+    return sendError(reply, 400, error instanceof Error ? error.message : 'Filtros de leads inválidos', 'INVALID_PAYLOAD');
+  }
+});
+
+for (const [action, active] of [['disable', false], ['enable', true]] as const) {
+  app.post(`/api/integrations/:id/${action}`, (req: AnyFastifyRequest, reply: FastifyReply) => {
+    if (!requireSession(req, reply, ['admin'])) return;
+    const integration = setClientIntegrationActive(String((req.params as any).id), active);
+    if (!integration) return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
+    return reply.send({ integration });
+  });
+}
+
+function startMonthlyKpiCloseScheduler() {
+  if (process.env.NODE_ENV === 'test' || process.env.INFIDASH_MONTHLY_AUTO_CLOSE !== '1') return;
+  const globalState = globalThis as typeof globalThis & { __infidashMonthlyCloseTimer?: ReturnType<typeof setTimeout> };
+  if (globalState.__infidashMonthlyCloseTimer) return;
+  const schedule = (delay: number) => {
+    globalState.__infidashMonthlyCloseTimer = setTimeout(run, Math.max(1, delay));
+  };
+  const run = () => {
+    try {
+      const result = closeDueMonthlyKpiCycles(new Date());
+      if (result.pending) {
+        schedule(10_000);
+        return;
+      }
+      const untilClose = nextMadridCloseInstant(new Date()).getTime() - Date.now();
+      schedule(Math.min(untilClose, 24 * 60 * 60 * 1000));
+    } catch (error) {
+      console.error('[infidash] monthly KPI close failed; retrying', error);
+      schedule(60_000);
+    }
+  };
+  schedule(Math.min(10_000, nextMadridCloseInstant(new Date()).getTime() - Date.now()));
+}
+
+app.post('/api/integrations/:id/rotate-webhook', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['admin'])) return;
+  const integration = rotateClientIntegrationWebhook(String((req.params as any).id));
+  if (!integration) return sendError(reply, 404, 'Webhook de WordPress no encontrado', 'NOT_FOUND');
+  return reply.send({ integration });
 });
 
 app.delete('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -922,6 +1071,31 @@ app.get('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: F
   return reply.send({ kpis: listMonthlyKpis((req.params as any).clientId, monthKey) });
 });
 
+app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+  const clientId = String((req.params as any).clientId);
+  const client = getClientByIdRecord(clientId);
+  if (!client) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  const from = (req.query as any)?.from;
+  const to = (req.query as any)?.to;
+  if (typeof from !== 'string' || typeof to !== 'string') return sendError(reply, 400, 'from y to son obligatorios', 'INVALID_PERIOD');
+  try {
+    summarizeDailyStats([], from, to);
+    const stats = listDailyStats(clientId).filter((stat) => stat.statDate >= from && stat.statDate <= to);
+    const pdf = await buildDailyStatsPdf({ clientName: client.name, from, to, generatedAt: new Date().toISOString(), stats });
+    return reply.header('Cache-Control', 'private, no-store')
+      .header('Content-Disposition', `attachment; filename="infidash-${from}-${to}.pdf"`)
+      .type('application/pdf').send(pdf);
+  } catch (error) {
+    return sendError(reply, 400, error instanceof Error ? error.message : 'Periodo de informe inválido', 'INVALID_PERIOD');
+  }
+});
+
+app.get('/api/clients/:clientId/monthly-kpi-cycles', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+  return reply.send({ cycles: listMonthlyKpiCycles(String((req.params as any).clientId)) });
+});
+
 app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = requireSession(req, reply, ['admin']);
   if (!session) {
@@ -934,7 +1108,9 @@ app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: 
     return sendError(reply, 400, 'departmentKey, metricKey y monthKey son obligatorios', 'INVALID_PAYLOAD');
   }
 
-  const kpi = saveMonthlyKpi({
+  let kpi;
+  try {
+    kpi = saveMonthlyKpi({
     clientId: (req.params as any).clientId,
     departmentKey: normalizedDepartmentKey,
     metricKey,
@@ -949,7 +1125,11 @@ app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: 
     notes: typeof notes === 'string' ? notes : null,
     createdByUserId: session.user.id,
     updatedByUserId: session.user.id,
-  });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo guardar el KPI';
+    return sendError(reply, /cerrad/i.test(message) ? 409 : 400, message, /cerrad/i.test(message) ? 'MONTHLY_KPI_CLOSED' : 'INVALID_PAYLOAD');
+  }
 
   if (!kpi) {
     return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
@@ -964,10 +1144,16 @@ app.put('/api/monthly-kpis/:id', (req: AnyFastifyRequest, reply: FastifyReply) =
     return;
   }
 
-  const current = listMonthlyKpis(typeof (req.body as any)?.clientId === 'string' ? (req.body as any).clientId : '', typeof (req.body as any)?.monthKey === 'string' ? (req.body as any).monthKey : undefined).find((item) => item.id === (req.params as any).id) ?? null;
-  const kpi = saveMonthlyKpi({
+  const current = getMonthlyKpiById((req.params as any).id);
+  if (!current) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
+  if (typeof (req.body as any)?.clientId === 'string' && (req.body as any).clientId !== current.clientId) {
+    return sendError(reply, 400, 'El KPI no pertenece a ese cliente', 'INVALID_PAYLOAD');
+  }
+  let kpi;
+  try {
+    kpi = saveMonthlyKpi({
     id: (req.params as any).id,
-    clientId: typeof (req.body as any)?.clientId === 'string' ? (req.body as any).clientId : current?.clientId ?? '',
+    clientId: current.clientId,
     departmentKey: ((req.body as any)?.departmentKey === 'web' || (req.body as any)?.departmentKey === 'rrss' ? (req.body as any).departmentKey : (req.body as any)?.departmentKey === 'publicidad' ? (req.body as any).departmentKey : current?.departmentKey ?? 'publicidad') as any,
     metricKey: typeof (req.body as any)?.metricKey === 'string' ? (req.body as any).metricKey : current?.metricKey ?? '',
     monthKey: typeof (req.body as any)?.monthKey === 'string' ? (req.body as any).monthKey : current?.monthKey ?? '',
@@ -981,7 +1167,11 @@ app.put('/api/monthly-kpis/:id', (req: AnyFastifyRequest, reply: FastifyReply) =
     notes: typeof (req.body as any)?.notes === 'string' ? (req.body as any).notes : current?.notes ?? null,
     createdByUserId: current?.createdByUserId ?? session.user.id,
     updatedByUserId: session.user.id,
-  });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo actualizar el KPI';
+    return sendError(reply, /cerrad/i.test(message) ? 409 : 400, message, /cerrad/i.test(message) ? 'MONTHLY_KPI_CLOSED' : 'INVALID_PAYLOAD');
+  }
 
   if (!kpi) {
     return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
@@ -996,12 +1186,37 @@ app.post('/api/monthly-kpis/:id/close', (req: AnyFastifyRequest, reply: FastifyR
     return;
   }
 
-  const kpi = closeMonthlyKpi((req.params as any).id);
-  if (!kpi) {
+  const existing = getMonthlyKpiById((req.params as any).id);
+  if (!existing) {
     return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
   }
+  closeMonthlyKpiCycle(existing.clientId, existing.monthKey, session.user.id);
+  return reply.send({ kpi: getMonthlyKpiById(existing.id) });
+});
 
-  return reply.send({ kpi });
+app.post('/api/monthly-kpis/:id/reopen', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) return;
+  const reason = (req.body as any)?.reason;
+  if (typeof reason !== 'string' || !reason.trim() || reason.trim().length > 500) {
+    return sendError(reply, 400, 'La reapertura requiere un motivo de hasta 500 caracteres', 'INVALID_PAYLOAD');
+  }
+  try {
+    const existing = getMonthlyKpiById(String((req.params as any).id));
+    if (!existing) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
+    const cycle = reopenMonthlyKpiCycle(existing.clientId, existing.monthKey, session.user.id, reason);
+    if (!cycle) return sendError(reply, 409, 'El ciclo no está cerrado', 'MONTHLY_KPI_CONFLICT');
+    return reply.send({ kpi: getMonthlyKpiById(existing.id) });
+  } catch (error) {
+    return sendError(reply, 409, error instanceof Error ? error.message : 'No se pudo reabrir el KPI', 'MONTHLY_KPI_CONFLICT');
+  }
+});
+
+app.get('/api/monthly-kpis/:id/events', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['admin'])) return;
+  const id = String((req.params as any).id);
+  if (!getMonthlyKpiById(id)) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
+  return reply.send({ events: listMonthlyKpiEvents(id) });
 });
 
 app.post('/api/admin/backup', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1051,6 +1266,7 @@ if (process.env.NODE_ENV !== 'test') {
 
 if (process.env.NODE_ENV !== 'test') {
   startClaritySyncScheduler();
+  startMonthlyKpiCloseScheduler();
   void app
     .listen({ port, host: '0.0.0.0' })
     .then(() => {
