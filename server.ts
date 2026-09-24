@@ -63,6 +63,7 @@ import { parseLeadQuery } from './src/lib/leadQuery.js';
 import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
 import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
 import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPdf.js';
+import { shouldServeHttp } from './src/lib/serverRuntime.js';
 
 const app = fastify({
   logger: false,
@@ -1246,7 +1247,7 @@ app.get('/api/dashboard/summary', (req: AnyFastifyRequest, reply: FastifyReply) 
   });
 });
 
-if (process.env.NODE_ENV !== 'test') {
+if (shouldServeHttp(process.env)) {
   if (existsSync(distPath)) {
     app.register(fastifyStatic, {
       root: distPath,
@@ -1267,6 +1268,9 @@ if (process.env.NODE_ENV !== 'test') {
 if (process.env.NODE_ENV !== 'test') {
   startClaritySyncScheduler();
   startMonthlyKpiCloseScheduler();
+}
+
+if (shouldServeHttp(process.env)) {
   void app
     .listen({ port, host: '0.0.0.0' })
     .then(() => {
