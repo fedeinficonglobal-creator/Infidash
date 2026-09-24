@@ -127,6 +127,62 @@ test('viewer cannot create daily stats', async () => {
   assert.equal(body.code, 'FORBIDDEN');
 });
 
+test('WordPress integration probes the REST API and only reports connected on success', async () => {
+  let probeStatus = 200;
+  let receivedAuthorization: string | undefined;
+  const server = createServer((req, res) => {
+    receivedAuthorization = req.headers.authorization;
+    res.writeHead(probeStatus, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ name: 'WordPress REST API' }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object' && typeof address.port === 'number');
+
+  try {
+    const { response: clientResponse, body: clientBody } = await request('/api/clients', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ name: `WordPress QA ${Date.now()}` }),
+    });
+    assert.equal(clientResponse.status, 201, JSON.stringify(clientBody));
+
+    const { response: integrationResponse, body: integrationBody } = await request('/api/integrations', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        clientId: clientBody.client.id,
+        provider: 'wordpress',
+        config: { siteUrl: `http://127.0.0.1:${address.port}`, restNamespace: '/wp-json/wp/v2' },
+        credentials: { username: 'wp-agent', applicationPassword: 'app-password-fixture' },
+      }),
+    });
+    assert.equal(integrationResponse.status, 201, JSON.stringify(integrationBody));
+    assert.equal(integrationBody.integration.status, 'pending');
+
+    const integrationId = integrationBody.integration.id as string;
+    const { response: probeResponse, body: probeBody } = await request(`/api/integrations/${integrationId}/test`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(probeResponse.status, 200, JSON.stringify(probeBody));
+    assert.equal(probeBody.ready, true);
+    assert.equal(probeBody.integration.status, 'connected');
+    assert.equal(receivedAuthorization, `Basic ${Buffer.from('wp-agent:app-password-fixture').toString('base64')}`);
+
+    probeStatus = 503;
+    const { response: failedProbeResponse, body: failedProbeBody } = await request(`/api/integrations/${integrationId}/test`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(failedProbeResponse.status, 200);
+    assert.equal(failedProbeBody.ready, false);
+    assert.equal(failedProbeBody.integration.status, 'error');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test('lead pages and filtered counts exclude raw payload; disabling and rotating webhook credentials reject old URLs', async () => {
   const auth = { authorization: `Bearer ${adminToken}` };
   const { response: clientResponse, body: clientBody } = await request('/api/clients', {
