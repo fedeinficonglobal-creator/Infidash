@@ -210,11 +210,13 @@ export class EditorialApiRepository {
       }
       const duplicate=await client.query('SELECT id FROM editorial.publications WHERE content_id=$1 AND account_id=$2 AND occurrence_key=$3 FOR UPDATE',[input.contentId,input.accountId,occurrenceKey]);
       if(duplicate.rows[0]) throw new ContentApiError(409,'PUBLICATION_EXISTS','Ya existe una publicación para esa cuenta y ocurrencia');
+      const headerImageUrl=(content.seo && typeof content.seo==='object')?(content.seo as any).headerImageUrl??null:null;
+      const media=(Array.isArray(input.media)&&input.media.length)?input.media:(headerImageUrl?[{url:headerImageUrl}]:[]);
       const publicationId=randomUUID();
       const publicationResult=await client.query(
         `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9) RETURNING *`,
-        [publicationId,input.clientId,input.contentId,input.accountId,occurrenceKey,content.approved_revision_id,input.copy??null,json(input.media??[]),input.desiredScheduledAt],
+        [publicationId,input.clientId,input.contentId,input.accountId,occurrenceKey,content.approved_revision_id,input.copy??null,json(media),input.desiredScheduledAt],
       );
       const jobId=randomUUID();
       const jobResult=await client.query(
@@ -481,8 +483,8 @@ export class EditorialApiRepository {
     if(job.kind!=='generate_content') throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de contenido no corresponde al trabajo');
     const plan=await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
     if(!plan.rows[0]) throw new ContentApiError(409,'TARGET_MISSING','La propuesta ya no existe');
-    const contentId=item.contentId??randomUUID();
-    const current=await client.query('SELECT * FROM editorial.contents WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,contentId]);
+    const current=await client.query('SELECT * FROM editorial.contents WHERE client_id=$1 AND plan_item_id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+    const contentId=current.rows[0]?(current.rows[0] as any).id:(item.contentId??randomUUID());
     const revisionNumber=current.rows[0]?Number((current.rows[0] as any).current_revision)+1:1;
     const revisionId=randomUUID();
     const snapshot={title:item.title,bodyHtml:item.bodyHtml??null,bodyText:item.bodyText??null,excerpt:item.excerpt??null,seo:item.seo??{}};

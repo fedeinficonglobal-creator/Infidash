@@ -154,6 +154,126 @@
       "onError": "continueErrorOutput"
     },
     {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://inficonglobal.es/wp-json/wp/v2/posts/{{ $('WP INF Global').first().json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"featured_media\": {{ $('Preparar imagen para WordPress').first().json.featuredMediaId }}}",
+        "options": {}
+      },
+      "id": "a1e5f4c2-6b3d-4e7a-9c1f-2d8b6a4e0f53",
+      "name": "Asignar imagen cabecera",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3168,
+        2512
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'gpt-image-1-mini', prompt: 'Imagen de cabecera fotorrealista y profesional, sin texto superpuesto, para un articulo de blog de marketing digital titulado: ' + $('Preparar contenido aprobado').first().json.title, size: '1536x1024', quality: 'medium', output_format: 'jpeg', output_compression: 80 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-header-image-generate-v1",
+      "name": "Generar imagen cabecera IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3424,
+        2680
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data[0].b64_json",
+        "options": {
+          "fileName": "cabecera.jpg",
+          "mimeType": "image/jpeg"
+        }
+      },
+      "id": "convert-header-image-generate-v1",
+      "name": "Convertir imagen cabecera a binario",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -3384,
+        2680
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://inficonglobal.es/wp-json/wp/v2/media",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "wordpressApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Disposition",
+              "value": "=attachment; filename=\"cabecera-{{ $('Validar trabajo').first().json.job.id }}.jpg\""
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/jpeg"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "upload-header-image-wp-generate-v1",
+      "name": "Subir imagen a WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3344,
+        2680
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let featuredMediaId=0;let headerImageUrl=null;try{const uploaded=$('Subir imagen a WordPress').first().json;if(uploaded&&uploaded.id)featuredMediaId=Number(uploaded.id);if(uploaded&&uploaded.source_url)headerImageUrl=uploaded.source_url;}catch(e){}return [{json:{featuredMediaId,headerImageUrl}}];"
+      },
+      "id": "prepare-header-image-generate-v1",
+      "name": "Preparar imagen para WordPress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3304,
+        2680
+      ]
+    },
+    {
       "parameters": {},
       "id": "trigger-generate-v1",
       "name": "Trabajo recibido",
@@ -300,7 +420,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const prepared=$('Preparar contenido aprobado').first().json;const cleaned=$('Limpia HTML2').first().json;const wp=$('WP INF Global').first().json;const bodyHtml=cleaned.message?.content;if(!bodyHtml)throw new Error('El humanizador no devolvio HTML');if(!wp.id)throw new Error('WordPress no devolvio post id');const bodyText=bodyHtml.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/\\s+/g,' ').trim();const excerptLimit=200;const excerpt=bodyText.length<=excerptLimit?bodyText:bodyText.slice(0,excerptLimit).replace(/\\s+\\S*$/,'')+'…';const content={contentId:job.id,title:prepared.title,bodyHtml,bodyText,excerpt,seo:{keywords:prepared.keywords,entities:prepared.Entidades},promptVersion:'inficon-generate-v1',sourceReferences:[]};const event={schemaVersion:1,clientId:job.client_id,entityType:'content',entityId:content.contentId,eventType:'wordpress.draft_created',sourceEventId:`wordpress:${prepared.siteKey}:${wp.id}:draft`,occurredAt:new Date().toISOString(),payload:{siteKey:prepared.siteKey,postId:String(wp.id),editUrl:wp.link??null,status:'draft'}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',content,event,result:{workflowVersion:1,wordpressStatus:'draft',wordpressPostId:String(wp.id)},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const prepared=$('Preparar contenido aprobado').first().json;const cleaned=$('Limpia HTML2').first().json;const wp=$('WP INF Global').first().json;let headerImageUrl=null;try{headerImageUrl=$('Preparar imagen para WordPress').first().json.headerImageUrl??null;}catch(e){}const bodyHtml=cleaned.message?.content;if(!bodyHtml)throw new Error('El humanizador no devolvio HTML');if(!wp.id)throw new Error('WordPress no devolvio post id');const bodyText=bodyHtml.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/\\s+/g,' ').trim();const excerptLimit=200;const excerpt=bodyText.length<=excerptLimit?bodyText:bodyText.slice(0,excerptLimit).replace(/\\s+\\S*$/,'')+'…';const content={contentId:job.id,title:prepared.title,bodyHtml,bodyText,excerpt,seo:{keywords:prepared.keywords,entities:prepared.Entidades,headerImageUrl},promptVersion:'inficon-generate-v1',sourceReferences:[]};const event={schemaVersion:1,clientId:job.client_id,entityType:'content',entityId:content.contentId,eventType:'wordpress.draft_created',sourceEventId:`wordpress:${prepared.siteKey}:${wp.id}:draft`,occurredAt:new Date().toISOString(),payload:{siteKey:prepared.siteKey,postId:String(wp.id),editUrl:wp.link??null,status:'draft'}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',content,event,result:{workflowVersion:1,wordpressStatus:'draft',wordpressPostId:String(wp.id)},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "normalize-generate-v1",
       "name": "Normalizar borrador y contenido",
@@ -592,6 +712,71 @@
       "main": [
         [
           {
+            "node": "Generar imagen cabecera IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar imagen cabecera IA": {
+      "main": [
+        [
+          {
+            "node": "Convertir imagen cabecera a binario",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar imagen para WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir imagen cabecera a binario": {
+      "main": [
+        [
+          {
+            "node": "Subir imagen a WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar imagen para WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir imagen a WordPress": {
+      "main": [
+        [
+          {
+            "node": "Preparar imagen para WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar imagen para WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar imagen para WordPress": {
+      "main": [
+        [
+          {
             "node": "WP INF Global",
             "type": "main",
             "index": 0
@@ -603,7 +788,7 @@
       "main": [
         [
           {
-            "node": "Heartbeat despues de WordPress",
+            "node": "Asignar imagen cabecera",
             "type": "main",
             "index": 0
           }
@@ -611,6 +796,24 @@
         [
           {
             "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Asignar imagen cabecera": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat despues de WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heartbeat despues de WordPress",
             "type": "main",
             "index": 0
           }

@@ -79,6 +79,40 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3f6e9c1a-8d2b-4a5e-9f0c-7b1d4e6a2c58",
+              "leftValue": "={{ $('Validar trabajo').first().json.job.payload.publication.media?.[0]?.url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "reuse-image-check-publish-v1",
+      "name": "Ya hay imagen reutilizable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -520,
+        -160
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "https://api.openai.com/v1/images/generations",
         "sendHeaders": true,
@@ -144,7 +178,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=generatedImagePath??requested.media?.[0]?.url??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=requested.media?.[0]?.url??generatedImagePath??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key}}];"
       },
       "id": "prepare-publish-v1",
       "name": "Preparar publicacion",
@@ -440,6 +474,24 @@
     },
     "Cargar contexto Infidash": {
       "main": [
+        [
+          {
+            "node": "Ya hay imagen reutilizable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ya hay imagen reutilizable": {
+      "main": [
+        [
+          {
+            "node": "Preparar publicacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Generar imagen IA",
