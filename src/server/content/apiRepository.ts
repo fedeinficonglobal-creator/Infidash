@@ -182,7 +182,7 @@ export class EditorialApiRepository {
   async listPublishingAccounts(clientId: string) {
     const result = await this.pool.query(
       `SELECT id,client_id,provider,instance_key,external_account_id,platform,label,timezone,active
-       FROM editorial.publishing_accounts WHERE client_id=$1 AND active=TRUE ORDER BY label,id`, [clientId],
+       FROM editorial.publishing_accounts WHERE client_id=$1 AND active=TRUE AND provider='postiz' ORDER BY label,id`, [clientId],
     );
     return result.rows;
   }
@@ -199,8 +199,8 @@ export class EditorialApiRepository {
       if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
       if(content.version!==input.expectedVersion) throw new ContentApiError(409,'STALE_VERSION','El contenido fue modificado antes de programarse');
       if(content.status!=='approved' || !content.approved_revision_id) throw new ContentApiError(409,'REVISION_NOT_APPROVED','El contenido debe tener una revisión aprobada');
-      const accountResult=await client.query('SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE FOR SHARE',[input.clientId,input.accountId]);
-      if(!accountResult.rows[0]) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','La cuenta no pertenece al cliente o está desactivada');
+      const accountResult=await client.query("SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE AND provider='postiz' FOR SHARE",[input.clientId,input.accountId]);
+      if(!accountResult.rows[0]) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','La cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
       const existingJob=await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
       if(existingJob.rows[0]){
         const job=existingJob.rows[0] as any;
