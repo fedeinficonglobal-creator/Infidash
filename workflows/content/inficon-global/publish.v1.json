@@ -178,7 +178,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=requested.media?.[0]?.url??generatedImagePath??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=requested.media?.[0]?.url??generatedImagePath??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');const instanceKey=String(account.instance_key||'').toLowerCase();let postizSettings;if(instanceKey.includes('facebook')){postizSettings=[{key:'__type',stringValue:'facebook'}];}else if(instanceKey.includes('instagram')){postizSettings=[{key:'post_type',stringValue:'post'}];}else if(instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google')){postizSettings=[{key:'topicType',stringValue:'STANDARD'},{key:'callToActionType',stringValue:'LEARN_MORE'},{key:'callToActionUrl',stringValue:requested.externalUrl??''}];}else{postizSettings=[];}return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key,postizSettings}}];"
       },
       "id": "prepare-publish-v1",
       "name": "Preparar publicacion",
@@ -198,20 +198,7 @@
             {
               "integrationId": "={{ $('Preparar publicacion').first().json.integrationId }}",
               "settings": {
-                "setting": [
-                  {
-                    "key": "topicType",
-                    "stringValue": "STANDARD"
-                  },
-                  {
-                    "key": "callToActionType",
-                    "stringValue": "LEARN_MORE"
-                  },
-                  {
-                    "key": "callToActionUrl",
-                    "stringValue": "={{ $('Preparar publicacion').first().json.externalUrl }}"
-                  }
-                ]
+                "setting": "={{ $('Preparar publicacion').first().json.postizSettings }}"
               },
               "value": {
                 "contentItem": [
