@@ -105,6 +105,7 @@ export interface PublishingAccount {
 
 export interface EditorialCalendar { id: string; clientId: string; title: string; status: string; startDate: string | null; endDate: string | null; }
 export interface ContentJob { id: string; clientId: string; kind: JobKind; status: string; targetId: string | null; attemptCount?: number; nextAttemptAt?: string | null; lockedUntil?: string | null; lastError: string | null; createdAt: string; updatedAt: string; }
+export interface EditorialReadiness { enabled: boolean; jobs: Record<JobKind, boolean>; }
 export interface Page<T> { items: T[]; nextCursor: string | null; }
 
 export class ContentApiRequestError extends Error {
@@ -196,4 +197,12 @@ export function getContentJob(token: string, id: string, signal?: AbortSignal) {
 
 export function getContentJobs(token: string, filters: { clientId?: string; status?: string; cursor?: string; limit?: number }, signal?: AbortSignal) {
   return request<Page<ContentJob>>(`/api/content/jobs${queryString(filters)}`, token, { signal });
+}
+
+export function getEditorialReadiness(token: string, clientId: string) {
+  return request<EditorialReadiness>(`/api/clients/${encodeURIComponent(clientId)}/editorial-readiness`, token);
+}
+
+export function recoverPlanJob(token: string, id: string) {
+  return request<{ job: ContentJob }>(`/api/content/jobs/${encodeURIComponent(id)}/recover`, token, { method: 'POST' });
 }

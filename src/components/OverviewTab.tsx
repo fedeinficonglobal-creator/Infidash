@@ -7,6 +7,7 @@ import { getClientDashboard, getClientIntegrations, getGa4TrafficSnapshot, getGo
 import { useClientStore } from '../store/useClientStore.js';
 import { buildComparisonPeriod, type ComparisonMetric } from '../lib/overviewComparison.js';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
+import { hasClarityMetric } from '../lib/clarityAvailability.js';
 
 const PERIOD_OPTIONS = [7, 14, 30] as const;
 type PeriodOption = (typeof PERIOD_OPTIONS)[number];
@@ -202,6 +203,8 @@ const comparison = useMemo(() => buildComparisonPeriod(dailyStats, comparisonWin
 const periodLabel = `Últimos ${comparisonWindow} días`;
 const latestStat = dailyStats.at(-1) ?? null;
 const latestUxSnapshot = uxSnapshots.at(-1) ?? null;
+const hasUxMetric = (metric: 'sessions' | 'pageViews' | 'rageClicks' | 'deadClicks' | 'scrollDepthAvg') =>
+  latestUxSnapshot !== null && hasClarityMetric(latestUxSnapshot, metric);
 const firstVisibleStat = chartData[0] ?? null;
 const lastVisibleStat = chartData.at(-1) ?? null;
 const salesDelta = firstVisibleStat && lastVisibleStat && firstVisibleStat.sales > 0
@@ -283,25 +286,31 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
     </div>
   </div>
 
+  {latestUxSnapshot?.source === 'clarity' && !hasUxMetric('sessions') && (
+    <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      Este snapshot de Clarity está incompleto. Sincroniza la integración para actualizar las métricas disponibles.
+    </p>
+  )}
+
   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Sesiones</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? formatPlain(latestUxSnapshot.sessions) : '0'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('sessions') ? formatPlain(latestUxSnapshot!.sessions) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">{latestUxSnapshot?.source ?? 'Sin datos reales'}</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Páginas vistas</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? formatPlain(latestUxSnapshot.pageViews) : '0'}</p>
-      <p className="text-xs text-slate-500 mt-1">{latestUxSnapshot ? 'Sincronizado desde backend' : 'Sin datos reales'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('pageViews') ? formatPlain(latestUxSnapshot!.pageViews) : '—'}</p>
+      <p className="text-xs text-slate-500 mt-1">{hasUxMetric('pageViews') ? 'Sincronizado desde backend' : latestUxSnapshot?.source === 'clarity' ? 'No disponible en la exportación de Clarity' : 'Sin datos reales'}</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Clics de fricción</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? formatPlain(latestUxSnapshot.rageClicks + latestUxSnapshot.deadClicks) : '0'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('rageClicks') && hasUxMetric('deadClicks') ? formatPlain(latestUxSnapshot!.rageClicks + latestUxSnapshot!.deadClicks) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">Rage + dead clicks</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Scroll medio</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{latestUxSnapshot ? `${formatPercent(latestUxSnapshot.scrollDepthAvg)}%` : '0%'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('scrollDepthAvg') ? `${formatPercent(latestUxSnapshot!.scrollDepthAvg)}%` : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">Profundidad media de lectura</p>
     </div>
   </div>

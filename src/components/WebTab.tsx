@@ -2,10 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link2, PencilLine, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
 import { buildClientSignals } from '../lib/clientSignals.js';
-import { canPersistPlanRows } from '../lib/planStorage.js';
+import { currentPlanPeriodKey, useOperationalPlan } from '../lib/useOperationalPlan.js';
 import {
-  getWebPlanInitialRows,
-  getWebMonthLabel,
   loadWebPlanRows,
   removeWebPlanRow,
   saveWebPlanRows,
@@ -25,32 +23,33 @@ const EMPTY_FORM = {
 };
 
 export function WebTab({ client }: { client: Client }) {
-  const { currentUser } = useClientStore();
+  const { currentUser, sessionToken } = useClientStore();
   const isAdmin = currentUser?.role === 'admin';
   const signals = buildClientSignals(client);
-  const [rows, setRows] = useState<WebPlanRow[]>([]);
-  const [loadedClientId, setLoadedClientId] = useState<string | null>(null);
+  const [periodKey, setPeriodKey] = useState(currentPlanPeriodKey);
+  const [search, setSearch] = useState('');
+  const plan = useOperationalPlan<WebPlanRow>({ token: sessionToken, clientId: client.id, domain: 'web', periodKey, loadLocal: loadWebPlanRows, saveLocal: saveWebPlanRows });
+  const { rows, saveRows } = plan;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<WebPlanRow | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const monthLabel = useMemo(() => getWebMonthLabel(), []);
+  const monthLabel = useMemo(() => new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(`${periodKey}-01T12:00:00`)), [periodKey]);
+  const previousMonthLabel = useMemo(() => {
+    const date = new Date(`${periodKey}-01T12:00:00`);
+    date.setMonth(date.getMonth() - 1);
+    return new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(date);
+  }, [periodKey]);
+  const visibleRows = rows.filter((row) => `${row.cliente} ${row.web} ${row.kpi}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
 
   useEffect(() => {
-    const loaded = loadWebPlanRows(client.id);
-    setRows(getWebPlanInitialRows(loaded));
-    setLoadedClientId(client.id);
     setIsModalOpen(false);
     setEditingRow(null);
     setForm(EMPTY_FORM);
     setError(null);
-  }, [client.id, client.name, client.slug]);
-
-  useEffect(() => {
-    if (!canPersistPlanRows(client.id, loadedClientId)) return;
-    saveWebPlanRows(client.id, rows);
-  }, [client.id, loadedClientId, rows]);
+    setSearch('');
+  }, [client.id, periodKey]);
 
   const openCreateModal = () => {
     setEditingRow(null);
@@ -91,7 +90,7 @@ export function WebTab({ client }: { client: Client }) {
     setForm(EMPTY_FORM);
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     setError(null);
@@ -101,7 +100,7 @@ export function WebTab({ client }: { client: Client }) {
         id: editingRow?.id,
         ...form,
       };
-      setRows((current) => upsertWebPlanRow(current, payload));
+      await saveRows(upsertWebPlanRow(rows, payload));
       closeModal();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar la fila web');
@@ -110,11 +109,15 @@ export function WebTab({ client }: { client: Client }) {
     }
   };
 
-  const handleDelete = (rowId: string) => {
+  const handleDelete = async (rowId: string) => {
     const target = rows.find((row) => row.id === rowId);
     if (!window.confirm(`¿Eliminar la fila web de ${target?.cliente ?? 'este cliente'}?`)) return;
-    setRows((current) => removeWebPlanRow(current, rowId));
-    if (editingRow?.id === rowId) closeModal();
+    try {
+      await saveRows(removeWebPlanRow(rows, rowId));
+      if (editingRow?.id === rowId) closeModal();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo eliminar la fila');
+    }
   };
 
   return (
@@ -122,7 +125,7 @@ export function WebTab({ client }: { client: Client }) {
       <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1">Web · {client.name}</h2>
-          <p className="text-slate-500 font-medium">Planifica WEB, KPI, umbral de leads y el seguimiento mensual de abril/mayo.</p>
+          <p className="text-slate-500 font-medium">Plan compartido de WEB, KPI, umbral de leads y seguimiento mensual.</p>
         </div>
         <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">Salud del cliente</p>
@@ -130,20 +133,34 @@ export function WebTab({ client }: { client: Client }) {
         </div>
       </header>
 
-      <div role="note" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Borrador local de abril/mayo; no es seguimiento actual ni se comparte entre navegadores. La persistencia y migración se completarán en la fase 4B.
+      <div className="mb-6 flex flex-wrap items-end gap-3">
+        <label className="text-sm font-semibold text-slate-700">Mes del plan
+          <input type="month" value={periodKey} onChange={(event) => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) setPeriodKey(event.target.value); }} className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2" />
+        </label>
+        <label className="text-sm font-semibold text-slate-700">Buscar filas
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cliente, web o KPI" className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2" />
+        </label>
+        <button type="button" onClick={() => void plan.reload().catch((cause) => plan.setError(cause instanceof Error ? cause.message : 'No se pudo recargar'))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold">Recargar plan</button>
       </div>
+
+      {(plan.error || error) && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{plan.error || error}</div>}
+      {isAdmin && plan.ready && plan.localRows.length > 0 && <div role="note" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p>Hay {plan.localRows.length} filas guardadas solo en este navegador. Para {monthLabel}: {plan.importPreview.newCount} nuevas, {plan.importPreview.duplicateCount} duplicadas y {plan.importPreview.conflictCount} con conflicto de ID. Las filas en conflicto permanecerán en el borrador local.</p>
+        <details className="mt-2"><summary className="cursor-pointer font-semibold">Vista previa del borrador local</summary><ul className="mt-2 list-disc pl-5">{plan.localRows.map((row) => <li key={row.id}>{row.cliente || 'Sin cliente'} · {row.web || 'Sin web'}</li>)}</ul></details>
+        <button type="button" disabled={plan.saving} onClick={() => void plan.importLocal().catch(() => {})} className="mt-2 rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white disabled:opacity-50">Importar filas nuevas</button>
+      </div>}
 
       <section className="mb-8 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-100 bg-gradient-to-r from-blue-50 to-amber-50 p-6 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-2">{monthLabel}</p>
             <h3 className="text-xl font-bold text-slate-900">Seguimiento Web editable</h3>
-            <p className="text-sm text-slate-500 mt-1">Campos como en la hoja: cliente, web, KPI, umbral, abril, acción mayo, mayo y WPO.</p>
+            <p className="text-sm text-slate-500 mt-1">Los campos heredados de abril/mayo corresponden al mes anterior y al mes seleccionado.</p>
           </div>
           {isAdmin && <button
             type="button"
             onClick={openCreateModal}
+            disabled={!plan.ready || plan.saving}
             className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 transition-colors hover:bg-brand-primary/90"
           >
             <Plus className="size-4" /> Añadir fila
@@ -155,30 +172,30 @@ export function WebTab({ client }: { client: Client }) {
             <thead>
               <tr>
                 <th className="bg-slate-50 px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200" colSpan={5}>INFORMACIÓN BASE</th>
-                <th className="bg-pink-50 px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200">ABRIL</th>
-                <th className="bg-amber-50 px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200" colSpan={3}>MAYO</th>
+                <th className="bg-pink-50 px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200">{previousMonthLabel}</th>
+                <th className="bg-amber-50 px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200" colSpan={3}>{monthLabel}</th>
               </tr>
               <tr className="bg-white text-slate-700">
                 <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-blue-50">Cliente</th>
                 <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200">Web</th>
                 <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-yellow-50">KPI</th>
                 <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-emerald-50">Umbral leads</th>
-                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-pink-50">Leads - Abril</th>
-                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-amber-50">Acción mayo "Markdown Elementor para IA"</th>
-                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-amber-50">Leads - Mayo</th>
-                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-amber-50">WPO - Mayo</th>
+                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-pink-50">Leads - {previousMonthLabel}</th>
+                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-amber-50">Acción - {monthLabel}</th>
+                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-amber-50">Leads - {monthLabel}</th>
+                <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-widest border-b border-slate-200 bg-amber-50">WPO - {monthLabel}</th>
                 <th className="px-5 py-4 text-right text-xs font-extrabold uppercase tracking-widest border-b border-slate-200">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
+              {visibleRows.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-500">
-                    No hay filas guardadas para este cliente. Usa <strong>Añadir fila</strong> para crear un borrador.
+                    {plan.loading ? 'Cargando plan…' : rows.length ? 'Ninguna fila coincide con la búsqueda.' : 'No hay filas compartidas para este cliente y mes.'}
                   </td>
                 </tr>
               )}
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <tr key={row.id} className="group align-top even:bg-slate-50/40 hover:bg-slate-50 transition-colors">
                   <td className="px-5 py-4 border-b border-slate-100 text-sm font-bold text-slate-900">{row.cliente}</td>
                   <td className="px-5 py-4 border-b border-slate-100 text-sm text-slate-700 whitespace-pre-wrap break-all">
@@ -284,7 +301,7 @@ export function WebTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700">
-                  <span>Leads - Abril</span>
+                  <span>Leads - {previousMonthLabel}</span>
                   <input
                     type="text"
                     required
@@ -295,7 +312,7 @@ export function WebTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700 md:col-span-2">
-                  <span className="flex items-center gap-2"><Sparkles className="size-4 text-slate-400" /> Acción mayo "Markdown Elementor para IA"</span>
+                  <span className="flex items-center gap-2"><Sparkles className="size-4 text-slate-400" /> Acción - {monthLabel}</span>
                   <textarea
                     required
                     rows={4}
@@ -306,7 +323,7 @@ export function WebTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700">
-                  <span>Leads - Mayo</span>
+                  <span>Leads - {monthLabel}</span>
                   <input
                     type="text"
                     required
@@ -317,7 +334,7 @@ export function WebTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700">
-                  <span>WPO - Mayo</span>
+                  <span>WPO - {monthLabel}</span>
                   <input
                     type="text"
                     required

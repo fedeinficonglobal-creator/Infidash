@@ -31,6 +31,9 @@ import {
   saveGoogleAdsSnapshot,
   getLatestUxSnapshot,
   getMonthlyKpiById,
+  getOperationalPlan,
+  getReportRun,
+  getReportRunPdf,
   getSessionByToken,
   insertLead,
   listClients,
@@ -43,10 +46,14 @@ import {
   listMonthlyKpiEvents,
   listMonthlyKpiCycles,
   listRrssChannels,
+  listReportRuns,
   listUsers,
   removeClientIntegration,
   rotateClientIntegrationWebhook,
   saveMonthlyKpi,
+  saveOperationalPlan,
+  saveReportRun,
+  recordReportSend,
   saveWooCommerceSalesSnapshot,
   saveRrssChannel,
   setClientIntegrationStatus,
@@ -60,6 +67,7 @@ import {
 } from './src/lib/database.js';
 import { canAccessClient } from './src/lib/auth.js';
 import { fetchClaritySnapshots } from './src/lib/claritySync.js';
+import { hasClarityMetric } from './src/lib/clarityAvailability.js';
 import { contentRoutes } from './src/server/content/routes.js';
 import { closeEditorialPool } from './src/server/content/postgres.js';
 import { LoginThrottle } from './src/lib/loginThrottle.js';
@@ -74,7 +82,9 @@ import { parseLeadQuery } from './src/lib/leadQuery.js';
 import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
 import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
 import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPdf.js';
+import { reportSmtpConfigured, sendReportEmail } from './src/lib/reportEmail.js';
 import { shouldServeHttp } from './src/lib/serverRuntime.js';
+import { isOperationalPlanDomain, isPlanPeriod, normalizeOperationalPlanRows } from './src/lib/operationalPlanValidation.js';
 
 const app = fastify({
   logger: false,
@@ -300,6 +310,7 @@ async function testWordPressConnection(integration: any, fetchImpl: typeof fetch
 }
 
 let claritySyncRunning = false;
+const CLARITY_AUTOMATIC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 async function syncAllClarityIntegrations() {
   if (claritySyncRunning) {
@@ -310,6 +321,11 @@ async function syncAllClarityIntegrations() {
   try {
     const integrations = listIntegrationsByProvider('clarity');
     for (const integration of integrations) {
+      const lastSyncAt = integration.lastSync ? Date.parse(integration.lastSync) : NaN;
+      const latestSnapshot = getLatestUxSnapshot(integration.clientId);
+      if (integration.status === 'connected' && Number.isFinite(lastSyncAt) &&
+        Date.now() - lastSyncAt < CLARITY_AUTOMATIC_INTERVAL_MS && latestSnapshot?.source === 'clarity' &&
+        hasClarityMetric(latestSnapshot, 'sessions')) continue;
       try {
         await syncClarityIntegration(integration.id);
       } catch (error) {
@@ -331,8 +347,10 @@ function startClaritySyncScheduler() {
     return;
   }
 
-  const intervalMs = Number(process.env.CLARITY_SYNC_INTERVAL_MS ?? 15 * 60 * 1000);
-  const safeInterval = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 15 * 60 * 1000;
+  // Clarity allows only ten export requests per project per day. One automatic
+  // request per day leaves room for manual checks and avoids exhausting quota.
+  const intervalMs = Number(process.env.CLARITY_SYNC_INTERVAL_MS ?? CLARITY_AUTOMATIC_INTERVAL_MS);
+  const safeInterval = Number.isFinite(intervalMs) && intervalMs >= CLARITY_AUTOMATIC_INTERVAL_MS ? intervalMs : CLARITY_AUTOMATIC_INTERVAL_MS;
   const globalState = globalThis as typeof globalThis & { __infidashClaritySyncInterval?: ReturnType<typeof setInterval> };
   if (globalState.__infidashClaritySyncInterval) {
     return;
@@ -1335,6 +1353,34 @@ app.post('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: 
   return reply.code(201).send({ snapshot });
 });
 
+app.get('/api/clients/:clientId/operational-plans/:domain', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  const { clientId, domain } = req.params as { clientId: string; domain: unknown };
+  const periodKey = (req.query as any)?.period;
+  if (!isOperationalPlanDomain(domain) || !isPlanPeriod(periodKey)) return sendError(reply, 400, 'Dominio o periodo inválido', 'INVALID_PAYLOAD');
+  if (!requireClientAccess(reply, session, clientId)) return;
+  if (!getClientByIdRecord(clientId)) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  return reply.send({ plan: getOperationalPlan(clientId, domain, periodKey) });
+});
+
+app.put('/api/clients/:clientId/operational-plans/:domain', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) return;
+  const { clientId, domain } = req.params as { clientId: string; domain: unknown };
+  const { periodKey, version, rows } = (req.body ?? {}) as any;
+  if (!isOperationalPlanDomain(domain) || !isPlanPeriod(periodKey) || !Number.isInteger(version) || version < 0) {
+    return sendError(reply, 400, 'Dominio, periodo o versión inválidos', 'INVALID_PAYLOAD');
+  }
+  if (!requireClientAccess(reply, session, clientId)) return;
+  if (!getClientByIdRecord(clientId)) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  const normalizedRows = normalizeOperationalPlanRows(domain, rows);
+  if (!normalizedRows) return sendError(reply, 400, 'Filas del plan inválidas o demasiado numerosas', 'INVALID_PAYLOAD');
+  const saved = saveOperationalPlan({ clientId, domain, periodKey, version, rows: normalizedRows });
+  if (!saved) return sendError(reply, 409, 'El plan cambió en otro navegador. Recarga antes de guardar.', 'STALE_VERSION');
+  return reply.send({ plan: saved });
+});
+
 app.get('/api/clients/:clientId/rrss-channels', (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
@@ -1427,6 +1473,72 @@ app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyReques
       .type('application/pdf').send(pdf);
   } catch (error) {
     return sendError(reply, 400, error instanceof Error ? error.message : 'Periodo de informe inválido', 'INVALID_PERIOD');
+  }
+});
+
+app.get('/api/clients/:clientId/report-runs', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  const clientId = String((req.params as any).clientId);
+  if (!requireClientAccess(reply, session, clientId)) return;
+  const before = (req.query as any)?.before;
+  const match = typeof before === 'string' ? /^(\d{4}-\d\d-\d\dT[^|]+)\|([0-9a-f-]{36})$/.exec(before) : null;
+  if (before !== undefined && (!match || Number.isNaN(Date.parse(match[1])))) return sendError(reply, 400, 'Cursor no válido', 'INVALID_CURSOR');
+  const page = listReportRuns(clientId, 51, match ? { at: match[1], id: match[2] } : undefined);
+  const runs = page.slice(0, 50);
+  const last = runs.at(-1);
+  return reply.send({ runs, nextCursor: page.length > 50 && last ? `${last.generatedAt}|${last.id}` : null, smtpConfigured: reportSmtpConfigured() });
+});
+
+app.post('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) return;
+  const clientId = String((req.params as any).clientId);
+  if (!requireClientAccess(reply, session, clientId)) return;
+  const client = getClientByIdRecord(clientId);
+  if (!client) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  const { from, to } = (req.body ?? {}) as any;
+  try {
+    summarizeDailyStats([], from, to);
+    const stats = listDailyStats(clientId).filter((stat) => stat.statDate >= from && stat.statDate <= to);
+    const pdf = await buildDailyStatsPdf({ clientName: client.name, from, to, generatedAt: new Date().toISOString(), stats });
+    return reply.code(201).send({ run: saveReportRun({ clientId, from, to, createdByUserId: session.user.id, pdf }) });
+  } catch (error) {
+    return sendError(reply, 400, error instanceof Error ? error.message : 'Periodo no válido', 'INVALID_PERIOD');
+  }
+});
+
+app.get('/api/clients/:clientId/report-runs/:id/daily.pdf', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  const clientId = String((req.params as any).clientId);
+  if (!requireClientAccess(reply, session, clientId)) return;
+  const run = getReportRun(clientId, String((req.params as any).id));
+  if (!run) return sendError(reply, 404, 'Informe no encontrado', 'NOT_FOUND');
+  const pdf = getReportRunPdf(clientId, run.id);
+  return reply.header('Cache-Control', 'private, no-store')
+    .header('Content-Disposition', `attachment; filename="infidash-${run.from}-${run.to}.pdf"`)
+    .type('application/pdf').send(pdf);
+});
+
+app.post('/api/clients/:clientId/report-runs/:id/send', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['admin']);
+  if (!session) return;
+  const clientId = String((req.params as any).clientId);
+  if (!requireClientAccess(reply, session, clientId)) return;
+  const run = getReportRun(clientId, String((req.params as any).id));
+  const client = getClientByIdRecord(clientId);
+  if (!run || !client) return sendError(reply, 404, 'Informe no encontrado', 'NOT_FOUND');
+  const recipient = (req.body as any)?.recipient;
+  if (typeof recipient !== 'string' || recipient.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return sendError(reply, 400, 'Correo destinatario no válido', 'INVALID_RECIPIENT');
+  if (!reportSmtpConfigured()) return sendError(reply, 503, 'SMTP no configurado', 'SMTP_UNCONFIGURED');
+  try {
+    await sendReportEmail({ recipient, clientName: client.name, from: run.from, to: run.to, pdf: getReportRunPdf(clientId, run.id)! });
+    recordReportSend(clientId, run.id, recipient, null);
+    return reply.send({ run: getReportRun(clientId, run.id) });
+  } catch {
+    recordReportSend(clientId, run.id, recipient, 'Entrega no confirmada');
+    return sendError(reply, 502, 'No se pudo confirmar la entrega SMTP; revisa el buzón antes de repetir', 'SMTP_DELIVERY_UNKNOWN');
   }
 });
 

@@ -61,6 +61,26 @@ export interface ClientDashboardResponse {
   latestUxSnapshot: UxSnapshot | null;
 }
 
+export interface OperationalPlan<T> {
+  clientId: string;
+  domain: 'web' | 'rrss';
+  periodKey: string;
+  version: number;
+  rows: T[];
+  updatedAt: string | null;
+}
+
+export async function getOperationalPlan<T>(token: string, clientId: string, domain: 'web' | 'rrss', periodKey: string) {
+  return apiRequest<{ plan: OperationalPlan<T> }>(`/api/clients/${encodeURIComponent(clientId)}/operational-plans/${domain}?period=${encodeURIComponent(periodKey)}`, {}, token);
+}
+
+export async function saveOperationalPlan<T>(token: string, clientId: string, domain: 'web' | 'rrss', plan: Pick<OperationalPlan<T>, 'periodKey' | 'version' | 'rows'>) {
+  return apiRequest<{ plan: OperationalPlan<T> }>(`/api/clients/${encodeURIComponent(clientId)}/operational-plans/${domain}`, {
+    method: 'PUT',
+    body: JSON.stringify(plan),
+  }, token);
+}
+
 export interface ApiClient {
   id: string;
   name: string;
@@ -306,6 +326,38 @@ export async function fetchDailyReportPdf(token: string, clientId: string, from:
     throw new Error(body?.error ?? `No se pudo generar el PDF (${response.status})`);
   }
   return response.blob();
+}
+
+export interface SavedReportRun {
+  id: string;
+  clientId: string;
+  from: string;
+  to: string;
+  generatedAt: string;
+  createdByUserId: string;
+  bytes: number;
+  lastSentAt: string | null;
+  lastSentTo: string | null;
+  lastSendError: string | null;
+}
+
+export function listSavedReportRuns(token: string, clientId: string, before?: string) {
+  const query = before ? `?before=${encodeURIComponent(before)}` : '';
+  return apiRequest<{ runs: SavedReportRun[]; nextCursor: string | null; smtpConfigured: boolean }>(`/api/clients/${encodeURIComponent(clientId)}/report-runs${query}`, {}, token);
+}
+
+export function createSavedReportRun(token: string, clientId: string, from: string, to: string) {
+  return apiRequest<{ run: SavedReportRun }>(`/api/clients/${encodeURIComponent(clientId)}/report-runs`, { method: 'POST', body: JSON.stringify({ from, to }) }, token);
+}
+
+export async function fetchSavedReportPdf(token: string, clientId: string, id: string) {
+  const response = await fetch(`/api/clients/${encodeURIComponent(clientId)}/report-runs/${encodeURIComponent(id)}/daily.pdf`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error('No se pudo descargar el informe guardado');
+  return response.blob();
+}
+
+export function sendSavedReportRun(token: string, clientId: string, id: string, recipient: string) {
+  return apiRequest<{ run: SavedReportRun }>(`/api/clients/${encodeURIComponent(clientId)}/report-runs/${encodeURIComponent(id)}/send`, { method: 'POST', body: JSON.stringify({ recipient }) }, token);
 }
 
 export async function createClient(
