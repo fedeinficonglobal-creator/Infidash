@@ -128,14 +128,14 @@ export function RrssTab({ client }: { client: Client }) {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-2">{monthLabel}</p>
             <h3 className="text-xl font-bold text-slate-900">Plan RRSS editable</h3>
-            <p className="text-sm text-slate-500 mt-1">AÃ±ade y edita filas con WEB, RRSS, objetivo, inspiraciÃ³n/idea y competidores.</p>
+            <p className="text-sm text-slate-500 mt-1">Añade y edita filas con WEB, RRSS, objetivo, inspiración/idea y competidores.</p>
           </div>
           {isAdmin && <button
             type="button"
             onClick={openCreateModal}
             className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 transition-colors hover:bg-brand-primary/90"
           >
-            <Plus className="size-4" /> AÃ±adir fila
+            <Plus className="size-4" /> Añadir fila
           </button>}
         </div>
 
@@ -155,7 +155,7 @@ export function RrssTab({ client }: { client: Client }) {
               {planRows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500">
-                    No hay filas creadas todavÃ­a. Usa <strong>AÃ±adir fila</strong> para empezar con el plan de RRSS.
+                    No hay filas creadas todavía. Usa <strong>Añadir fila</strong> para empezar con el plan de RRSS.
                   </td>
                 </tr>
               ) : (
@@ -206,7 +206,7 @@ export function RrssTab({ client }: { client: Client }) {
             <div className="flex items-center justify-between border-b border-slate-100 p-6">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-1">{monthLabel}</p>
-                <h3 className="text-xl font-bold text-slate-900">{editingRow ? 'Editar fila RRSS' : 'AÃ±adir fila RRSS'}</h3>
+                <h3 className="text-xl font-bold text-slate-900">{editingRow ? 'Editar fila RRSS' : 'Añadir fila RRSS'}</h3>
               </div>
               <button type="button" onClick={closeModal} className="text-slate-400 transition-colors hover:text-slate-600">
                 <X className="size-5" />
@@ -252,7 +252,7 @@ export function RrssTab({ client }: { client: Client }) {
                     rows={4}
                     value={form.objetivo}
                     onChange={(e) => setForm((prev) => ({ ...prev, objetivo: e.target.value }))}
-                    placeholder="Describe el objetivo de la comunicaciÃ³n..."
+                    placeholder="Describe el objetivo de la comunicación..."
                     className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-normal outline-none transition-all focus:ring-2 focus:ring-brand-primary"
                   />
                 </label>
@@ -295,7 +295,7 @@ export function RrssTab({ client }: { client: Client }) {
                   disabled={isSavingPlan}
                   className="inline-flex items-center gap-2 rounded-lg bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 transition-colors hover:bg-brand-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSavingPlan ? 'Guardando...' : editingRow ? 'Guardar cambios' : 'AÃ±adir fila'}
+                  {isSavingPlan ? 'Guardando...' : editingRow ? 'Guardar cambios' : 'Añadir fila'}
                 </button>
               </div>
             </form>
