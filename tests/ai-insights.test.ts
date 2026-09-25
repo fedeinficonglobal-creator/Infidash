@@ -2,6 +2,9 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import type { Client } from '../src/store/useClientStore.js';
 import { buildAiInsightPlan } from '../src/lib/aiInsights.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { AiInsightsTab } from '../src/components/AiInsightsTab.js';
 
 const baseClient = {
   id: 'client-1',
@@ -27,4 +30,11 @@ test('buildAiInsightPlan builds an actionable plan for the active client', () =>
   assert.ok(plan.priorityItems[0].startsWith('Escalar')); 
   assert.ok(plan.contentPillars.some((pillar) => pillar.toLowerCase().includes('producto')));
   assert.ok(plan.budgetFocus.includes('remarketing'));
+});
+
+test('insights disclose that recommendations are deterministic, not generative AI', () => {
+  const html = renderToStaticMarkup(createElement(AiInsightsTab, { client: baseClient }));
+  assert.match(html, /Resumen basado en reglas/);
+  assert.match(html, /no se usa un modelo generativo/);
+  assert.doesNotMatch(html, /Resumen Ejecutivo IA/);
 });

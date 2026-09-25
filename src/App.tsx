@@ -16,7 +16,8 @@ import { LoginScreen } from './components/LoginScreen';
 import { UsersAdminTab } from './components/UsersAdminTab';
 import { ContentTab } from './components/content/ContentTab';
 import { useClientStore } from './store/useClientStore';
-import { Zap, Bell, ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
+import { getAvatarInitials } from './lib/avatarInitials.js';
+import { ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
 
 export default function App() {
   const {
@@ -116,12 +117,7 @@ export default function App() {
              </div>
           </div>
 
-          <div className="flex items-center gap-6">
-             <div className="flex items-center gap-4 px-4 py-2 bg-slate-50 rounded-full border border-slate-100">
-                <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-slate-600 tracking-wide uppercase">SISTEMA SINCRONIZADO</span>
-             </div>
-
+             <div className="flex items-center gap-6">
              <div className="flex items-center gap-3 border-l border-slate-200 pl-6">
                 {currentUser.role === 'admin' && (
                   <button
@@ -134,10 +130,6 @@ export default function App() {
                     <Settings2 className="size-5 group-hover:rotate-45 transition-transform" />
                   </button>
                 )}
-                <button type="button" className="p-2 text-slate-400 hover:text-slate-600 transition-colors relative group rounded-xl hover:bg-slate-50">
-                  <Bell className="size-5 group-hover:rotate-12 transition-transform" />
-                  <span className="absolute top-2 right-2 size-2 bg-brand-accent rounded-full border-2 border-white" />
-                </button>
                 <button
                    type="button"
                    onClick={() => {
@@ -147,7 +139,7 @@ export default function App() {
                    className="flex items-center gap-3 pl-3 active:scale-95 transition-transform cursor-pointer group"
                 >
                    <div className="size-10 bg-slate-100 rounded-full flex items-center justify-center border-2 border-white overflow-hidden shadow-sm">
-                      <img src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=100&h=100&auto=format&fit=crop" alt="Profile" />
+                      <span aria-label={`Iniciales de ${currentUser.name}`} className="text-sm font-bold text-slate-700">{getAvatarInitials(currentUser.name)}</span>
                    </div>
                    <div className="hidden md:block">
                       <p className="text-sm font-bold text-slate-900 leading-none mb-1">{currentUser.name}</p>
@@ -165,13 +157,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* Global AI Floating Action */}
-      <button className="fixed bottom-8 right-8 size-14 bg-slate-900 rounded-full shadow-2xl flex items-center justify-center group hover:scale-110 transition-all z-50">
-         <Zap className="size-6 text-amber-400 group-hover:scale-125 transition-transform fill-amber-400" />
-         <div className="absolute right-16 bg-white px-4 py-2 rounded-xl shadow-xl border border-slate-100 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-            <p className="text-xs font-bold text-slate-900">Analizador Inteligente Activo</p>
-         </div>
-      </button>
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { ContentApiError, encodeCursor, redactSecrets, requestHash, sanitizeErro
 import { assertContentTransition, assertPlanTransition, assertPublicationTransition } from './transitions.js';
 import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
 
-type Filters = { clientId?: string; from?: string; to?: string; status?: string; format?: string; search?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
+type Filters = { clientId?: string; clientIds?: string[]; from?: string; to?: string; status?: string; format?: string; search?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
 
 function page<T extends Record<string, any>>(rows: T[], limit: number, atField = 'created_at') {
   const hasMore = rows.length > limit;
@@ -19,11 +19,12 @@ function json(value: unknown) { return JSON.stringify(value ?? {}); }
 export class EditorialApiRepository {
   constructor(private readonly pool: Pool = getEditorialPool()) {}
 
-  async summary(filters: { clientId?: string; from?: string; to?: string }) {
+  async summary(filters: { clientId?: string; clientIds?: string[]; from?: string; to?: string }) {
     const scoped = (clientColumn: string, dateColumn: string) => {
       const values: unknown[] = [];
       const where: string[] = [];
       if (filters.clientId) { values.push(filters.clientId); where.push(`${clientColumn} = $${values.length}`); }
+      else if (Array.isArray(filters.clientIds)) { values.push(filters.clientIds); where.push(`${clientColumn} = ANY($${values.length})`); }
       if (filters.from) { values.push(filters.from); where.push(`${dateColumn} >= $${values.length}`); }
       if (filters.to) { values.push(filters.to); where.push(`${dateColumn} < $${values.length}`); }
       return { values, sql: where.length ? ` WHERE ${where.join(' AND ')}` : '' };
@@ -46,6 +47,7 @@ export class EditorialApiRepository {
     const values: unknown[] = [];
     const where: string[] = [];
     if (filters.clientId) { values.push(filters.clientId); where.push(`p.client_id = $${values.length}`); }
+    else if (Array.isArray(filters.clientIds)) { values.push(filters.clientIds); where.push(`p.client_id = ANY($${values.length})`); }
     if (filters.from) { values.push(filters.from); where.push(`${filters.includeUndated ? '(p.planned_at IS NULL OR ' : ''}p.planned_at >= $${values.length}${filters.includeUndated ? ')' : ''}`); }
     if (filters.to) { values.push(filters.to); where.push(`${filters.includeUndated ? '(p.planned_at IS NULL OR ' : ''}p.planned_at < $${values.length}${filters.includeUndated ? ')' : ''}`); }
     if (filters.status) { values.push(filters.status); where.push(`p.status = $${values.length}`); }
@@ -363,10 +365,11 @@ export class EditorialApiRepository {
   async getJob(id:string){ const result=await this.pool.query(`SELECT id,client_id,kind,target_id,status,attempt_count,next_attempt_at,locked_until,execution_id,last_error,created_at,updated_at,completed_at
     FROM editorial.jobs WHERE id=$1`,[id]); return result.rows[0]??null; }
 
-  async listJobs(filters: { clientId?: string; status?: string; cursor?: { at: string; id: string } | null; limit: number }) {
+  async listJobs(filters: { clientId?: string; clientIds?: string[]; status?: string; cursor?: { at: string; id: string } | null; limit: number }) {
     const values: unknown[] = [];
     const where: string[] = [];
     if (filters.clientId) { values.push(filters.clientId); where.push(`client_id=$${values.length}`); }
+    else if (Array.isArray(filters.clientIds)) { values.push(filters.clientIds); where.push(`client_id=ANY($${values.length})`); }
     if (filters.status) { values.push(filters.status); where.push(`status=$${values.length}`); }
     if (filters.cursor) {
       values.push(filters.cursor.at, filters.cursor.id);

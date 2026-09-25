@@ -24,6 +24,7 @@ import {
   getIntegrationById,
   getIntegrationByWebhookSecret,
   getIntegrationCredentialsById,
+  getWooCommerceSalesSnapshot,
   getLatestUxSnapshot,
   getMonthlyKpiById,
   getSessionByToken,
@@ -42,6 +43,7 @@ import {
   removeClientIntegration,
   rotateClientIntegrationWebhook,
   saveMonthlyKpi,
+  saveWooCommerceSalesSnapshot,
   saveRrssChannel,
   setClientIntegrationStatus,
   setClientIntegrationActive,
@@ -52,12 +54,14 @@ import {
   upsertUxSnapshot,
   type UserRole,
 } from './src/lib/database.js';
+import { canAccessClient } from './src/lib/auth.js';
 import { fetchClaritySnapshots } from './src/lib/claritySync.js';
 import { contentRoutes } from './src/server/content/routes.js';
 import { closeEditorialPool } from './src/server/content/postgres.js';
 import { LoginThrottle } from './src/lib/loginThrottle.js';
 import { redactIntegrationSecrets } from './src/lib/integrationPresentation.js';
 import { fetchWooCommercePurchaseWindow, parseWooRefundPolicy, probeWooCommerceOrders, summarizeCompletedOrderSales } from './src/lib/woocommerce.js';
+import { validateWooCommerceSnapshot, wooCommerceSourceKey } from './src/lib/woocommerceSnapshot.js';
 import { sumRevenueWindow } from './src/lib/dashboardMetrics.js';
 import { parseLeadQuery } from './src/lib/leadQuery.js';
 import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
@@ -146,6 +150,13 @@ function requireSession(req: AnyFastifyRequest, reply: FastifyReply, roles?: Use
   }
 
   return session;
+}
+
+/** Call after requireSession for any route scoped to a single clientId. Sends 403 and returns false when denied. */
+function requireClientAccess(reply: FastifyReply, session: { user: { role: UserRole; clientIds: string[] | null } }, clientId: string) {
+  if (canAccessClient(session.user, clientId)) return true;
+  sendError(reply, 403, 'No tienes acceso a este cliente', 'FORBIDDEN');
+  return false;
 }
 
 function parseNumber(value: unknown, fallback = 0) {
@@ -359,13 +370,16 @@ app.post('/api/users', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return;
   }
 
-  const { email, name, password, role } = (req.body ?? {}) as any;
+  const { email, name, password, role, clientIds } = (req.body ?? {}) as any;
   if (typeof email !== 'string' || typeof name !== 'string' || typeof password !== 'string') {
     return sendError(reply, 400, 'email, name y password son obligatorios', 'INVALID_PAYLOAD');
   }
+  if (clientIds !== undefined && (!Array.isArray(clientIds) || clientIds.some((id: unknown) => typeof id !== 'string'))) {
+    return sendError(reply, 400, 'clientIds debe ser una lista de texto', 'INVALID_PAYLOAD');
+  }
 
   const normalizedRole: UserRole = role === 'viewer' ? 'viewer' : 'admin';
-  const user = createUser({ email, name, password, role: normalizedRole });
+  const user = createUser({ email, name, password, role: normalizedRole, clientIds });
   return reply.code(201).send({ user });
 });
 
@@ -375,10 +389,16 @@ app.patch('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return;
   }
 
+  const bodyClientIds = (req.body as any)?.clientIds;
+  if (bodyClientIds !== undefined && (!Array.isArray(bodyClientIds) || bodyClientIds.some((id: unknown) => typeof id !== 'string'))) {
+    return sendError(reply, 400, 'clientIds debe ser una lista de texto', 'INVALID_PAYLOAD');
+  }
+
   const updated = updateUserRole((req.params as any).id, {
     role: (req.body as any)?.role === 'viewer' ? 'viewer' : (req.body as any)?.role === 'admin' ? 'admin' : undefined,
     active: typeof (req.body as any)?.active === 'boolean' ? (req.body as any).active : undefined,
     name: typeof (req.body as any)?.name === 'string' ? (req.body as any).name : undefined,
+    clientIds: bodyClientIds,
   });
 
   if (!updated) {
@@ -423,7 +443,8 @@ app.get('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
   }
 
   const endDate = new Date().toISOString().slice(0, 10);
-  const clients = listClientsWithLatestStat().map((client) => ({
+  const scope = session.user.role === 'admin' ? undefined : session.user.clientIds ?? [];
+  const clients = listClientsWithLatestStat({ clientIds: scope }).map((client) => ({
     ...client,
     revenue30d: sumRevenueWindow(listDailyStats(client.id), endDate, 30),
   }));
@@ -440,6 +461,9 @@ app.get('/api/clients/:slug', (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!client) {
     return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   }
+  if (!requireClientAccess(reply, session, client.id)) {
+    return;
+  }
 
   return reply.send({ client });
 });
@@ -453,6 +477,9 @@ app.get('/api/clients/:clientId/dashboard', (req: AnyFastifyRequest, reply: Fast
   const client = getClientBySlug((req.params as any).clientId) ?? listClients().find((item) => item.id === (req.params as any).clientId) ?? null;
   if (!client) {
     return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  }
+  if (!requireClientAccess(reply, session, client.id)) {
+    return;
   }
 
   const dailyStats = listDailyStats(client.id);
@@ -540,6 +567,10 @@ app.delete('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyRepl
 app.get('/api/clients/:clientId/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
+    return;
+  }
+
+  if (!requireClientAccess(reply, session, (req.params as any).clientId)) {
     return;
   }
 
@@ -662,13 +693,14 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
 });
 
 app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+  const session = requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'woocommerce') {
     return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
   }
+  if (!requireClientAccess(reply, session, integration.clientId)) return;
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   const query = req.query as Record<string, unknown>;
   if (typeof query.from !== 'string' || typeof query.to !== 'string') {
@@ -693,6 +725,54 @@ app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastif
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo leer WooCommerce';
     return sendError(reply, message.startsWith('Ventana de compra inválida') ? 400 : 502, message, 'WOOCOMMERCE_PREVIEW_FAILED');
+  }
+});
+
+app.post('/api/integrations/:id/woocommerce/sales-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['admin'])) return;
+  reply.header('Cache-Control', 'no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'woocommerce') return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  const body = req.body as Record<string, unknown> | null;
+  if (typeof body?.from !== 'string' || typeof body?.to !== 'string') return sendError(reply, 400, 'Indica las fechas de compra desde y hasta', 'INVALID_RANGE');
+  let refundPolicy;
+  try { refundPolicy = parseWooRefundPolicy(integration.config.refundPolicy); }
+  catch { return sendError(reply, 400, 'Política de reembolsos inválida', 'INVALID_REFUND_POLICY'); }
+  const credentials = getIntegrationCredentialsById(integration.id) ?? {};
+  try {
+    const storeUrl = String(integration.config.storeUrl ?? '');
+    const orders = await fetchWooCommercePurchaseWindow({ storeUrl, consumerKey: String(credentials.consumerKey ?? ''), consumerSecret: String(credentials.consumerSecret ?? '') },
+      { from: body.from, to: body.to, maxPages: 5 });
+    validateWooCommerceSnapshot({ from: body.from, to: body.to, orders });
+    const snapshot = saveWooCommerceSalesSnapshot({ integrationId: integration.id, sourceKey: wooCommerceSourceKey(storeUrl), from: body.from, to: body.to, orders });
+    return reply.send({ source: 'woocommerce', from: body.from, to: body.to, refundPolicy, complete: true,
+      orderCount: orders.length, sales: summarizeCompletedOrderSales(orders, refundPolicy), persisted: true, syncedAt: snapshot.syncedAt });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo sincronizar WooCommerce';
+    return sendError(reply, message.startsWith('Ventana de compra inválida') ? 400 : 502, message, 'WOOCOMMERCE_SYNC_FAILED');
+  }
+});
+
+app.get('/api/integrations/:id/woocommerce/sales-snapshot', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  reply.header('Cache-Control', 'private, no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'woocommerce') return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
+  if (!requireClientAccess(reply, session, integration.clientId)) return;
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  const { from, to } = req.query as Record<string, string>;
+  if (!from || !to) return sendError(reply, 400, 'Indica las fechas de compra desde y hasta', 'INVALID_RANGE');
+  try {
+    const snapshot = getWooCommerceSalesSnapshot({ integrationId: integration.id, sourceKey: wooCommerceSourceKey(String(integration.config.storeUrl ?? '')), from, to });
+    if (!snapshot) return reply.send({ source: 'woocommerce', from, to, refundPolicy: parseWooRefundPolicy(integration.config.refundPolicy),
+      complete: false, orderCount: 0, sales: [], persisted: false });
+    const refundPolicy = parseWooRefundPolicy(integration.config.refundPolicy);
+    return reply.send({ source: 'woocommerce', from, to, refundPolicy, complete: true, orderCount: snapshot.orders.length,
+      sales: summarizeCompletedOrderSales(snapshot.orders, refundPolicy), persisted: true, syncedAt: snapshot.syncedAt });
+  } catch (error) {
+    return sendError(reply, 400, error instanceof Error ? error.message : 'No se pudo leer el resumen guardado', 'SNAPSHOT_READ_FAILED');
   }
 });
 
@@ -806,6 +886,9 @@ app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!clientId) {
     return sendError(reply, 400, 'clientId es obligatorio', 'INVALID_PAYLOAD');
   }
+  if (!requireClientAccess(reply, session, clientId)) {
+    return;
+  }
 
   try {
     return reply.send(listLeadsByClient(clientId, parseLeadQuery((req.query ?? {}) as Record<string, unknown>)));
@@ -875,7 +958,14 @@ app.get('/api/daily-stats', (req: AnyFastifyRequest, reply: FastifyReply) => {
   }
 
   const clientId = typeof (req.query as any).clientId === 'string' ? (req.query as any).clientId : undefined;
-  return reply.send({ stats: listDailyStats(clientId) });
+  if (clientId) {
+    if (!requireClientAccess(reply, session, clientId)) {
+      return;
+    }
+    return reply.send({ stats: listDailyStats(clientId) });
+  }
+  const scope = session.user.role === 'admin' ? undefined : session.user.clientIds ?? [];
+  return reply.send({ stats: listDailyStats(undefined, { clientIds: scope }) });
 });
 
 app.get('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -887,6 +977,9 @@ app.get('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) =>
   const stat = getDailyStatById((req.params as any).id);
   if (!stat) {
     return sendError(reply, 404, 'Estadística no encontrada', 'NOT_FOUND');
+  }
+  if (!requireClientAccess(reply, session, stat.clientId)) {
+    return;
   }
 
   return reply.send({ stat });
@@ -967,6 +1060,9 @@ app.get('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: F
   if (!session) {
     return;
   }
+  if (!requireClientAccess(reply, session, (req.params as any).clientId)) {
+    return;
+  }
 
   return reply.send({ snapshots: listUxSnapshots((req.params as any).clientId) });
 });
@@ -1008,6 +1104,9 @@ app.post('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: 
 app.get('/api/clients/:clientId/rrss-channels', (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
+    return;
+  }
+  if (!requireClientAccess(reply, session, (req.params as any).clientId)) {
     return;
   }
 
@@ -1067,14 +1166,19 @@ app.get('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: F
   if (!session) {
     return;
   }
+  if (!requireClientAccess(reply, session, (req.params as any).clientId)) {
+    return;
+  }
 
   const monthKey = typeof (req.query as any).monthKey === 'string' && (req.query as any).monthKey.trim() ? (req.query as any).monthKey : undefined;
   return reply.send({ kpis: listMonthlyKpis((req.params as any).clientId, monthKey) });
 });
 
 app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
   const clientId = String((req.params as any).clientId);
+  if (!requireClientAccess(reply, session, clientId)) return;
   const client = getClientByIdRecord(clientId);
   if (!client) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   const from = (req.query as any)?.from;
@@ -1093,8 +1197,11 @@ app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyReques
 });
 
 app.get('/api/clients/:clientId/monthly-kpi-cycles', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
-  return reply.send({ cycles: listMonthlyKpiCycles(String((req.params as any).clientId)) });
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  const clientId = String((req.params as any).clientId);
+  if (!requireClientAccess(reply, session, clientId)) return;
+  return reply.send({ cycles: listMonthlyKpiCycles(clientId) });
 });
 
 app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1241,9 +1348,10 @@ app.get('/api/dashboard/summary', (req: AnyFastifyRequest, reply: FastifyReply) 
     return;
   }
 
+  const scope = session.user.role === 'admin' ? undefined : session.user.clientIds ?? [];
   return reply.send({
-    summary: getDashboardHealthSummary(),
-    clients: listClients(),
+    summary: getDashboardHealthSummary({ clientIds: scope }),
+    clients: listClients({ clientIds: scope }),
   });
 });
 

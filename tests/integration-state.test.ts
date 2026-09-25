@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveIntegrationSaveState, statusForIntegrationView } from '../src/lib/integrationState.js';
+import { hasManualIntegrationSync, resolveIntegrationSaveState, statusForIntegrationView } from '../src/lib/integrationState.js';
+
+test('only integrations with a real implemented sync adapter expose manual sync', () => {
+  assert.equal(hasManualIntegrationSync('clarity'), true);
+  for (const provider of ['wordpress', 'woocommerce', 'meta_ads', 'google_ads']) {
+    assert.equal(hasManualIntegrationSync(provider), false);
+  }
+});
 
 test('saving complete provider fields stays pending until a real probe or sync succeeds', () => {
   assert.deepEqual(resolveIntegrationSaveState({ provider: 'clarity', configurationUnchanged: false, missingFields: [] }), {

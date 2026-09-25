@@ -10,6 +10,7 @@ export interface SessionUser {
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  clientIds: string[] | null;
 }
 
 export interface LoginResponse {
@@ -218,6 +219,7 @@ export async function createUserAccount(
     name: string;
     password: string;
     role?: UserRole;
+    clientIds?: string[];
   },
 ) {
   return apiRequest<{ user: SessionUser }>('/api/users', {
@@ -233,6 +235,7 @@ export async function updateUserAccount(
     name?: string;
     role?: UserRole;
     active?: boolean;
+    clientIds?: string[];
   },
 ) {
   return apiRequest<{ user: SessionUser }>(`/api/users/${encodeURIComponent(userId)}`, {
@@ -430,7 +433,8 @@ export interface WooCommerceSalesPreview {
   to: string;
   refundPolicy: 'subtract' | 'ignore';
   complete: boolean;
-  persisted: false;
+  persisted: boolean;
+  syncedAt?: string;
   orderCount: number;
   sales: Array<{
     purchaseDate: string;
@@ -450,6 +454,17 @@ export async function getWooCommerceSalesPreview(token: string, integrationId: s
     `/api/integrations/${encodeURIComponent(integrationId)}/woocommerce/sales-preview?${query}`,
     {}, token,
   );
+}
+
+export async function syncWooCommerceSales(token: string, integrationId: string, from: string, to: string) {
+  return apiRequest<WooCommerceSalesPreview>(`/api/integrations/${encodeURIComponent(integrationId)}/woocommerce/sales-sync`, {
+    method: 'POST', body: JSON.stringify({ from, to }),
+  }, token);
+}
+
+export async function getWooCommerceSalesSnapshot(token: string, integrationId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  return apiRequest<WooCommerceSalesPreview>(`/api/integrations/${encodeURIComponent(integrationId)}/woocommerce/sales-snapshot?${query}`, {}, token);
 }
 
 export async function deleteClientIntegration(token: string, integrationId: string) {

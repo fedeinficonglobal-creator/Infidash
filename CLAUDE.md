@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides Claude Code-specific architecture and operational context. Follow `AGENTS.md` for the concise repository-wide contributor guidance.
 
 ## What this is
 
-Infidash: a marketing agency dashboard (React + Fastify) for tracking clients, sales, traffic, SEO, RRSS (social), AI insights, reports, integrations, and an editorial "Contenidos" module that dispatches content-generation/publishing jobs to n8n workflows. Auth is local (email/password, sessions), with `admin`/`viewer` roles. UI copy and API error messages are in Spanish.
+Infidash: a marketing agency dashboard (React + Fastify) for tracking clients, sales, traffic, SEO, RRSS (social), deterministic rule-based insights, reports, integrations, and an editorial "Contenidos" module that dispatches content-generation/publishing jobs to n8n workflows. Auth is local (email/password, sessions), with `admin`/`viewer` roles. UI copy and API error messages are in Spanish.
 
 ## Commands
 
@@ -14,7 +14,7 @@ npm run api              # Fastify API on http://127.0.0.1:4000 (alias: npm run 
 npm run build             # production build (vite build)
 npm run preview           # preview the build
 npm run lint              # tsc --noEmit for both tsconfig.json and tsconfig.node.json (no separate linter)
-npm run test              # tsx --test tests/*.test.ts
+npm test                   # safe unit and contract suites (node scripts/run-tests.mjs unit)
 npm run db:migrate:editorial   # apply pending `editorial` schema migrations (advisory lock + checksum)
 npm run content:import    # dry-run import of a Content Hub export; add -- --apply to write
 npm run clean             # rm -rf dist/ and server.js (does not touch data/)
@@ -22,7 +22,7 @@ npm run clean             # rm -rf dist/ and server.js (does not touch data/)
 
 Run the frontend and API in two separate terminals during development (`npm run dev` + `npm run api`). `DATABASE_URL` must be set (via `.env`/`.env.local`, copy from `.env.example`) — the app refuses to start without it; other env vars (`API_PORT`/`PORT`, `DATABASE_SSL`, `INFIDASH_BACKUP_DIR`, `APP_URL`, `EDITORIAL_DB_POOL_MAX`/`EDITORIAL_DB_IDLE_TIMEOUT_MS`/`EDITORIAL_DB_CONNECTION_TIMEOUT_MS`) are documented in `.env.example` and `README.md`.
 
-To run a single test file: `npx tsx --test tests/content-workflows.test.ts`. Note `tests/api-regression.test.ts` is an integration test — it makes real HTTP calls to `API_BASE_URL` (default `http://127.0.0.1:4000`) and expects the API already running with seeded data; the rest of the suite is self-contained unit tests. `npm run test` sets no `NODE_ENV`, but `server.ts` skips its listener/scheduler when `NODE_ENV=test`.
+Run one safe file with `npx tsx --test tests/<name>.test.ts`. `npm test` and `npm run test:unit` run the guarded safe suite; `npm run test:db` runs DB-mutating tests and `npm run test:api` starts an isolated API before HTTP regressions. Both require `INFIDASH_TEST_DATABASE_URL` for a disposable loopback PostgreSQL database with a distinct `test` name segment; API tests also require loopback `INFIDASH_TEST_API_BASE_URL`. Never use shared, staging, or production data. See `docs/testing.md`. The API and database suites are separate from `npm test`.
 
 ## Architecture
 
@@ -39,7 +39,8 @@ When adding a data access function, match the pattern of the module you're exten
 
 - `server.ts` — single Fastify entrypoint. Registers `contentRoutes` (editorial module) as a plugin, then defines all core REST routes inline (auth, users, clients, daily-stats, integrations, ux-snapshots, rrss-channels, monthly-kpis, backups, dashboard summary). Auth is a bearer/session token checked per-route via `requireSession(req, reply, roles)`; there's no global auth middleware/hook. Serves the built SPA (`dist/`) and falls back to `index.html` for non-`/api` routes in non-test mode.
 - `src/lib/database.ts` — core data layer (see above) plus session/user management, backups (`createDatabaseBackup`, writes to `INFIDASH_BACKUP_DIR`), and a Clarity (UX analytics) integration sync path called both from a route and from a background interval (`startClaritySyncScheduler`, skipped when `NODE_ENV=test`).
-- **WordPress lead capture** (as of 2026-09-22): before this, the `wordpress` integration's config fields (`leadFormPath`, `restNamespace`, etc.) were saved but never consumed by anything, "Probar conexión" (`testIntegrationById`/`testClientIntegration`) only checked field completeness (never actually contacted WordPress), and the Leads tab (`LeadsTab.tsx`) rendered a hardcoded `dummyLeads` array — none of it was real. Now: each `wordpress`-provider integration (any provider whose catalog `capabilities` include `'leads'`) gets a random `webhook_secret` (`saveClientIntegration`, `src/lib/database.ts`) shown in both `IntegrationsTab.tsx` and `LeadsTab.tsx` as a copyable URL (`/api/public/leads/:token`, no session — the token itself is the auth). Point a WordPress form plugin's webhook feature (Fluent Forms' native webhook action, or a Contact Form 7 → webhook plugin) at that URL; `pickLeadField` (`server.ts`) heuristically matches common field-name variants (name/email/phone/message, ES and EN) and stores the full raw payload in `leads.raw_payload_json` regardless. `POST /api/integrations/:id/test` now does a real HTTP GET (Basic Auth from the stored `username`/`applicationPassword`) against `siteUrl + restNamespace` for `wordpress` integrations before reporting success. `GET /api/leads?clientId=` (session-authed) backs `LeadsTab.tsx`'s real leads list — the KPI cards above it (conversion %, CPL, pipeline) are still synthetic, derived from `buildClientSignals`, not from real lead data; that's unchanged and out of scope for this fix.
+- **WooCommerce sales**: connection testing probes the read-only WooCommerce v3 orders API. An administrator can synchronize a bounded purchase-date window (31 days / at most 500 orders); complete snapshots are keyed by integration, HTTPS store identity and exact dates. Viewers can read that exact snapshot or request a transient preview. Only `completed` orders count; `total` already includes VAT and shipping; attribution is `date_created` in the store timezone; refund handling is client-configurable and applied when aggregating; currencies are never mixed. Snapshot persistence needs PostgreSQL tests before production use.
+- **Lead capture**: WordPress integrations expose a rotatable bearer webhook URL for `POST /api/public/leads/:token`. Configure Fluent Forms or Contact Form 7 to send form submissions through WP Webhooks using POST. The receiver maps common Spanish/English contact fields, supports delivery idempotency when `infidash_provider`, `infidash_form_id`, and `infidash_delivery_id` are supplied, and enforces integration disable/rotation. Authenticated lead listing is paginated/filterable and does not return the raw payload. Do not infer conversion, CPL, or pipeline value without compatible source data.
 - `src/lib/auth.ts`, `kpiThresholds.ts`, `integrationCatalog.ts`, `claritySync.ts` — supporting logic for password hashing/session tokens, per-client KPI threshold config, the catalog of supported integration providers/capabilities, and fetching Clarity UX snapshots.
 - `src/server/content/` — the editorial module, structured as its own mini-service:
   - `contracts.ts` — shared validation/enum helpers and `ContentApiError`.
@@ -90,7 +91,7 @@ Getting a job to go from "created in Infidash" to "n8n actually executes it" req
 - `src/App.tsx` — top-level shell; renders `LoginScreen` until a session exists, then `Sidebar` + one of the per-domain tab components based on `activeTabId` from `useClientStore`.
 - `src/store/useClientStore.ts` (Zustand) — session bootstrap/login/logout, client list, active client/tab selection; wraps `src/services/infidashApi.ts`.
 - `src/store/useContentStore.ts` (Zustand) — editorial/content state; wraps `src/services/contentApi.ts`.
-- `src/services/*.ts` — thin fetch wrappers per backend surface (`infidashApi.ts` core API, `contentApi.ts` editorial API, `aiService.ts` Gemini-backed AI insights, `healthService.ts`).
+- `src/services/*.ts` — API clients (`infidashApi.ts`, `contentApi.ts`); `aiService.ts` is not the current Insights implementation. Insights are deterministic rules, not generated by a model.
 - `src/components/*Tab.tsx` — one component per sidebar section (Overview, Sales, Traffic, Web, SEO, Leads, RRSS, AI Insights, Reports, Integrations); `src/components/content/` holds the Contenidos tab.
 - Frontend imports use explicit `.js` extensions on relative paths even though the source is `.ts`/`.tsx` (ESM `moduleResolution: bundler` convention used throughout this repo) — follow this when adding imports.
 - Path alias `@/*` maps to the repo root (`tsconfig.json`, `vite.config.ts`).

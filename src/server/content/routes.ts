@@ -3,8 +3,9 @@ import { EditorialApiRepository } from './apiRepository.js';
 import { getEditorialPool } from './postgres.js';
 import { authenticateServiceToken, serviceCan, type ServicePrincipal } from './serviceAuth.js';
 import { CALENDAR_STATUSES, CONTENT_STATUSES, ContentApiError, JOB_KINDS, PLAN_STATUSES, PUBLICATION_STATUSES, assertEnum, decodeCursor, optionalString, parseLimit, redactSecrets, requireObject, requirePositiveVersion, requireString, sanitizeError } from './contracts.js';
+import { canAccessClient } from '../../lib/auth.js';
 
-type HumanSession = { user: { id: string; role: 'admin' | 'viewer' } };
+type HumanSession = { user: { id: string; role: 'admin' | 'viewer'; clientIds: string[] | null } };
 type Request = FastifyRequest<{ Body: any; Params: any; Querystring: any; Headers: any }>;
 
 const queryOf = (request: Request) => request.query as Record<string, any>;
@@ -75,6 +76,10 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     return session;
   }
 
+  function requireClientAccess(session: HumanSession, clientId: string) {
+    if (!canAccessClient(session.user, clientId)) throw new ContentApiError(403, 'FORBIDDEN', 'No tienes acceso a este cliente');
+  }
+
   async function requireService(request: Request, scope: string, clientId?: string | null) {
     const token = bearer(request);
     if (!token) throw new ContentApiError(401, 'SERVICE_UNAUTHENTICATED', 'Token de servicio obligatorio');
@@ -89,21 +94,28 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   };
 
   app.get('/api/content/summary', route(async (request, reply) => {
-    await requireHuman(request);
+    const session = await requireHuman(request);
     const query = queryOf(request);
-    return reply.send({ summary: await repository.summary({ clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined, from: asDate(query.from, 'from'), to: asDate(query.to, 'to') }) });
+    const clientId = optionalString(query.clientId, 'clientId', 200) ?? undefined;
+    if (clientId) requireClientAccess(session, clientId);
+    const clientIds = (clientId || session.user.role === 'admin') ? undefined : (session.user.clientIds ?? []);
+    return reply.send({ summary: await repository.summary({ clientId, clientIds, from: asDate(query.from, 'from'), to: asDate(query.to, 'to') }) });
   }));
 
   app.get('/api/content/calendar', route(async (request, reply) => {
-    await requireHuman(request);
+    const session = await requireHuman(request);
     const query = queryOf(request);
-    const result = await repository.calendar({ clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined, from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, search: optionalString(query.search, 'search', 200) ?? undefined, includeUndated: query.includeUndated === 'true', cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) });
+    const clientId = optionalString(query.clientId, 'clientId', 200) ?? undefined;
+    if (clientId) requireClientAccess(session, clientId);
+    const clientIds = (clientId || session.user.role === 'admin') ? undefined : (session.user.clientIds ?? []);
+    const result = await repository.calendar({ clientId, clientIds, from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, search: optionalString(query.search, 'search', 200) ?? undefined, includeUndated: query.includeUndated === 'true', cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) });
     return reply.send(result);
   }));
 
   app.get('/api/clients/:clientId/editorial-calendars', route(async (request, reply) => {
-    await requireHuman(request);
+    const session = await requireHuman(request);
     const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
     return reply.send(await repository.listCalendars(clientId, parseLimit(queryOf(request).limit), decodeCursor(queryOf(request).cursor)));
   }));
 
@@ -116,15 +128,19 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   }));
 
   app.get('/api/content/plan-items', route(async (request, reply) => {
-    await requireHuman(request);
+    const session=await requireHuman(request);
     const query=queryOf(request);
-    return reply.send(await repository.listPlanItems({clientId:optionalString(query.clientId,'clientId',200)??undefined,from:asDate(query.from,'from'),to:asDate(query.to,'to'),status:optionalString(query.status,'status',50)??undefined,format:optionalString(query.format,'format',100)??undefined,search:optionalString(query.search,'search',200)??undefined,includeUndated:query.includeUndated==='true',cursor:decodeCursor(query.cursor),limit:parseLimit(query.limit)}));
+    const clientId=optionalString(query.clientId,'clientId',200)??undefined;
+    if(clientId) requireClientAccess(session,clientId);
+    const clientIds=(clientId||session.user.role==='admin')?undefined:(session.user.clientIds??[]);
+    return reply.send(await repository.listPlanItems({clientId,clientIds,from:asDate(query.from,'from'),to:asDate(query.to,'to'),status:optionalString(query.status,'status',50)??undefined,format:optionalString(query.format,'format',100)??undefined,search:optionalString(query.search,'search',200)??undefined,includeUndated:query.includeUndated==='true',cursor:decodeCursor(query.cursor),limit:parseLimit(query.limit)}));
   }));
 
   app.get('/api/content/plan-items/:id', route(async (request, reply) => {
-    await requireHuman(request);
+    const session=await requireHuman(request);
     const item=await repository.getPlanItem(requireString(paramsOf(request).id,'id',100));
     if(!item) throw new ContentApiError(404,'NOT_FOUND','Propuesta no encontrada');
+    requireClientAccess(session,(item as any).client_id);
     return reply.send({planItem:item});
   }));
 
@@ -141,8 +157,10 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   }));
 
   app.get('/api/content/items/:id', route(async (request, reply) => {
-    await requireHuman(request); const content=await repository.getContent(requireString(paramsOf(request).id,'id',100));
-    if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado'); return reply.send({content});
+    const session=await requireHuman(request); const content=await repository.getContent(requireString(paramsOf(request).id,'id',100));
+    if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
+    requireClientAccess(session,(content as any).client_id);
+    return reply.send({content});
   }));
 
   app.patch('/api/content/items/:id', route(async (request, reply) => {
@@ -164,14 +182,18 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   }));
 
   app.get('/api/content/jobs', route(async (request, reply) => {
-    await requireHuman(request);
+    const session = await requireHuman(request);
     const query = queryOf(request);
     const status = optionalString(query.status, 'status', 30);
     if (status && !['pending', 'running', 'succeeded', 'failed', 'unknown', 'cancelled'].includes(status)) {
       throw new ContentApiError(400, 'INVALID_PAYLOAD', 'status no es válido');
     }
+    const clientId = optionalString(query.clientId, 'clientId', 200) ?? undefined;
+    if (clientId) requireClientAccess(session, clientId);
+    const clientIds = (clientId || session.user.role === 'admin') ? undefined : (session.user.clientIds ?? []);
     return reply.send(await repository.listJobs({
-      clientId: optionalString(query.clientId, 'clientId', 200) ?? undefined,
+      clientId,
+      clientIds,
       status: status ?? undefined,
       cursor: decodeCursor(query.cursor),
       limit: parseLimit(query.limit),
@@ -179,17 +201,25 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   }));
 
   app.get('/api/content/jobs/:id', route(async (request, reply) => {
-    await requireHuman(request); const job=await repository.getJob(requireString(paramsOf(request).id,'id',100));
-    if(!job) throw new ContentApiError(404,'NOT_FOUND','Trabajo no encontrado'); return reply.send({job});
+    const session=await requireHuman(request); const job=await repository.getJob(requireString(paramsOf(request).id,'id',100));
+    if(!job) throw new ContentApiError(404,'NOT_FOUND','Trabajo no encontrado');
+    requireClientAccess(session,(job as any).client_id);
+    return reply.send({job});
   }));
 
   app.get('/api/content/items/:id/publications', route(async (request, reply) => {
-    await requireHuman(request); return reply.send(await repository.listPublications(requireString(paramsOf(request).id,'id',100),parseLimit(queryOf(request).limit),decodeCursor(queryOf(request).cursor)));
+    const session=await requireHuman(request);
+    const contentId=requireString(paramsOf(request).id,'id',100);
+    const content=await repository.getContent(contentId);
+    if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
+    requireClientAccess(session,(content as any).client_id);
+    return reply.send(await repository.listPublications(contentId,parseLimit(queryOf(request).limit),decodeCursor(queryOf(request).cursor)));
   }));
 
   app.get('/api/clients/:clientId/publishing-accounts', route(async (request, reply) => {
-    await requireHuman(request);
+    const session=await requireHuman(request);
     const clientId=requireString(paramsOf(request).clientId,'clientId',200);
+    requireClientAccess(session,clientId);
     return reply.send({accounts:await repository.listPublishingAccounts(clientId)});
   }));
 

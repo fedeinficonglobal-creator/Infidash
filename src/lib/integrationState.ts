@@ -6,6 +6,10 @@ export function hasLiveIntegrationAdapter(provider: string): provider is LiveInt
   return provider === 'clarity' || provider === 'wordpress';
 }
 
+export function hasManualIntegrationSync(provider: string) {
+  return provider === 'clarity';
+}
+
 export function statusForIntegrationView(provider: string, status: IntegrationStatus): IntegrationStatus {
   return status === 'connected' && !hasLiveIntegrationAdapter(provider) ? 'pending' : status;
 }
