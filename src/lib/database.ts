@@ -11,6 +11,7 @@ import { dueMonthlyKpiMonth, nextMonthKey } from './monthlyCloseClock.js';
 import { parseWooRefundPolicy } from './woocommerce.js';
 import type { WooCommerceOrderSummary } from './woocommerce.js';
 import type { Ga4LandingPage, Ga4SessionsPoint, Ga4TopPage, Ga4TrafficSource } from './ga4.js';
+import type { GoogleAdsCampaign } from './googleAds.js';
 import {
   buildIntegrationCapabilitySummary,
   buildIntegrationDisplayName,
@@ -946,6 +947,18 @@ function initializeSchema(db: AppDatabase) {
       CHECK (period_from <= period_to)
     );
 
+    CREATE TABLE IF NOT EXISTS google_ads_snapshots (
+      integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+      customer_id TEXT NOT NULL,
+      period_from TEXT NOT NULL,
+      period_to TEXT NOT NULL,
+      campaigns_json JSONB NOT NULL,
+      currency_code TEXT NOT NULL,
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (integration_id, customer_id, period_from, period_to),
+      CHECK (period_from <= period_to)
+    );
+
     CREATE TABLE IF NOT EXISTS daily_stats (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1795,6 +1808,9 @@ export function saveClientIntegration(input: IntegrationInput) {
   if (provider === 'ga4' && config.propertyId && !/^\d+$/.test(config.propertyId)) {
     throw new Error('El Property ID de GA4 debe ser numérico');
   }
+  if (provider === 'google_ads' && config.customerId && !/^\d+$/.test(config.customerId)) {
+    throw new Error('El Customer ID de Google Ads debe ser numérico, sin guiones');
+  }
   const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...(input.credentials ?? {}) });
   const missingFields = listMissingIntegrationFields(definition, config, credentials);
   const configurationUnchanged = Boolean(existing)
@@ -1961,6 +1977,41 @@ export function getGa4Snapshot(input: Pick<Ga4TrafficSnapshot, 'integrationId' |
   return {
     integrationId: row.integration_id, propertyId: row.property_id, from: row.period_from, to: row.period_to,
     sessionsSeries, trafficSources, topPages, landingPages, syncedAt: row.synced_at,
+  };
+}
+
+export interface GoogleAdsSnapshot {
+  integrationId: string;
+  customerId: string;
+  from: string;
+  to: string;
+  campaigns: GoogleAdsCampaign[];
+  currencyCode: string;
+  syncedAt: string;
+}
+
+/** Replaces one fully-read Google Ads campaign report window atomically. Credentials are never stored per-client. */
+export function saveGoogleAdsSnapshot(input: Omit<GoogleAdsSnapshot, 'syncedAt'>) {
+  const syncedAt = nowIso();
+  getDatabase().prepare(`INSERT INTO google_ads_snapshots
+      (integration_id, customer_id, period_from, period_to, campaigns_json, currency_code, synced_at)
+    VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)
+    ON CONFLICT (integration_id, customer_id, period_from, period_to)
+    DO UPDATE SET campaigns_json = EXCLUDED.campaigns_json, currency_code = EXCLUDED.currency_code, synced_at = EXCLUDED.synced_at`)
+    .run(input.integrationId, input.customerId, input.from, input.to, JSON.stringify(input.campaigns), input.currencyCode, syncedAt);
+  return { ...input, syncedAt };
+}
+
+export function getGoogleAdsSnapshot(input: Pick<GoogleAdsSnapshot, 'integrationId' | 'customerId' | 'from' | 'to'>): GoogleAdsSnapshot | null {
+  const row = getDatabase().prepare(`SELECT integration_id, customer_id, period_from, period_to, campaigns_json, currency_code, synced_at
+    FROM google_ads_snapshots WHERE integration_id = ? AND customer_id = ? AND period_from = ? AND period_to = ?`)
+    .get(input.integrationId, input.customerId, input.from, input.to) as any;
+  if (!row) return null;
+  const campaigns = typeof row.campaigns_json === 'string' ? JSON.parse(row.campaigns_json) : row.campaigns_json;
+  if (!Array.isArray(campaigns)) throw new Error('El resumen de Google Ads guardado no es válido');
+  return {
+    integrationId: row.integration_id, customerId: row.customer_id, from: row.period_from, to: row.period_to,
+    campaigns, currencyCode: row.currency_code, syncedAt: row.synced_at,
   };
 }
 

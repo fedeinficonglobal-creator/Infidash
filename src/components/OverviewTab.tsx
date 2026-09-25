@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { MetricCard, HealthScoreCard } from './DashboardComponents';
 import { ArrowDownRight, ArrowUpRight, AlertTriangle, LoaderCircle, RefreshCw, ShoppingCart, UserCheck, Zap } from 'lucide-react';
 import { type Client } from '../store/useClientStore';
-import { getClientDashboard, getClientIntegrations, getGa4TrafficSnapshot, type DailyStat, type Ga4TrafficReport, type UxSnapshot } from '../services/infidashApi.js';
+import { getClientDashboard, getClientIntegrations, getGa4TrafficSnapshot, getGoogleAdsCampaignsSnapshot, type DailyStat, type Ga4TrafficReport, type GoogleAdsCampaignReport, type UxSnapshot } from '../services/infidashApi.js';
 import { useClientStore } from '../store/useClientStore.js';
 import { buildComparisonPeriod, type ComparisonMetric } from '../lib/overviewComparison.js';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
@@ -110,23 +110,36 @@ const chartWrapperRef = useRef<HTMLDivElement | null>(null);
 const [chartWidth, setChartWidth] = useState(0);
 const [ga4Report, setGa4Report] = useState<Ga4TrafficReport | null>(null);
 const [ga4Loading, setGa4Loading] = useState(true);
+const [googleAdsReport, setGoogleAdsReport] = useState<GoogleAdsCampaignReport | null>(null);
+const [googleAdsLoading, setGoogleAdsLoading] = useState(true);
 
 useEffect(() => {
   let cancelled = false;
   setGa4Report(null);
   setGa4Loading(true);
+  setGoogleAdsReport(null);
+  setGoogleAdsLoading(true);
   if (!sessionToken) {
     setGa4Loading(false);
+    setGoogleAdsLoading(false);
     return () => { cancelled = true; };
   }
   const to = new Date().toISOString().slice(0, 10);
   const from = new Date(Date.parse(`${to}T00:00:00.000Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
-  void getClientIntegrations(sessionToken, client.id)
-    .then(({ integrations }) => integrations.find((item) => item.provider === 'ga4' && item.isActive) ?? null)
-    .then((integration) => (integration ? getGa4TrafficSnapshot(sessionToken, integration.id, from, to) : null))
-    .then((result) => { if (!cancelled) setGa4Report(result); })
-    .catch(() => { if (!cancelled) setGa4Report(null); })
-    .finally(() => { if (!cancelled) setGa4Loading(false); });
+  void getClientIntegrations(sessionToken, client.id).then(({ integrations }) => {
+    const ga4Integration = integrations.find((item) => item.provider === 'ga4' && item.isActive) ?? null;
+    const googleAdsIntegration = integrations.find((item) => item.provider === 'google_ads' && item.isActive) ?? null;
+    void (ga4Integration ? getGa4TrafficSnapshot(sessionToken, ga4Integration.id, from, to) : Promise.resolve(null))
+      .then((result) => { if (!cancelled) setGa4Report(result); })
+      .catch(() => { if (!cancelled) setGa4Report(null); })
+      .finally(() => { if (!cancelled) setGa4Loading(false); });
+    void (googleAdsIntegration ? getGoogleAdsCampaignsSnapshot(sessionToken, googleAdsIntegration.id, from, to) : Promise.resolve(null))
+      .then((result) => { if (!cancelled) setGoogleAdsReport(result); })
+      .catch(() => { if (!cancelled) setGoogleAdsReport(null); })
+      .finally(() => { if (!cancelled) setGoogleAdsLoading(false); });
+  }).catch(() => {
+    if (!cancelled) { setGa4Loading(false); setGoogleAdsLoading(false); }
+  });
   return () => { cancelled = true; };
 }, [client.id, sessionToken]);
 
@@ -335,6 +348,53 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
         <p className="mt-2 text-xs font-bold text-slate-900 truncate" title={ga4Report.topPages[0]?.pagePath}>{ga4Report.topPages[0]?.pagePath ?? '—'}</p>
       </div>
     </div>
+  )}
+</div>
+
+<div className="mb-8 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+  <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-lg font-bold text-slate-900">Inversión Google Ads</h3>
+        <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Google Ads</span>
+      </div>
+      <p className="text-xs text-slate-400 font-medium tracking-wide">Últimos 30 días sincronizados desde Tráfico</p>
+    </div>
+    <div className="text-xs text-slate-500 text-right">
+      <p className="font-semibold text-slate-700">Última sincronización</p>
+      <p>{googleAdsReport?.syncedAt ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(googleAdsReport.syncedAt)) : 'Sin sincronizar'}</p>
+    </div>
+  </div>
+
+  {googleAdsLoading ? (
+    <p className="text-sm text-slate-500" role="status">Cargando Google Ads...</p>
+  ) : !googleAdsReport?.complete ? (
+    <div>
+      <p className="text-sm text-amber-800">Sin datos de Google Ads sincronizados todavía.</p>
+      <button type="button" onClick={() => setActiveTab('traffic')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Tráfico</button>
+    </div>
+  ) : (
+    (() => {
+      const totalCost = googleAdsReport.campaigns.reduce((sum, campaign) => sum + campaign.cost, 0);
+      const totalConversions = googleAdsReport.campaigns.reduce((sum, campaign) => sum + campaign.conversions, 0);
+      const totalConversionsValue = googleAdsReport.campaigns.reduce((sum, campaign) => sum + campaign.conversionsValue, 0);
+      return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Inversión (30d)</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{totalCost.toLocaleString('es-ES', { style: 'currency', currency: googleAdsReport.currencyCode || 'EUR' })}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Conversiones (30d)</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(totalConversions)}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">ROAS</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{totalCost > 0 ? `${(totalConversionsValue / totalCost).toFixed(2)}x` : '—'}</p>
+          </div>
+        </div>
+      );
+    })()
   )}
 </div>
 

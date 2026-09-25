@@ -6,6 +6,7 @@ import {
   getWooCommerceSalesPreview,
   getClientIntegrations,
   getGa4ServiceAccountEmail,
+  getGoogleAdsManagerAccount,
   saveClientIntegration,
   syncClientIntegration,
   testClientIntegration,
@@ -25,6 +26,7 @@ import {
   Globe,
   KeyRound,
   LoaderCircle,
+  Megaphone,
   RefreshCcw,
   Save,
   ShieldCheck,
@@ -96,8 +98,9 @@ function integrationCardIcon(provider: IntegrationProvider) {
     case 'clarity':
       return Globe;
     case 'meta_ads':
-    case 'google_ads':
       return BarChart3;
+    case 'google_ads':
+      return Megaphone;
     case 'wordpress':
       return FileText;
     case 'woocommerce':
@@ -148,6 +151,8 @@ export function IntegrationsTab({ client }: { client: Client }) {
   const [ga4ServiceAccountEmail, setGa4ServiceAccountEmail] = useState<string | null>(null);
   const [ga4ServiceAccountError, setGa4ServiceAccountError] = useState<string | null>(null);
   const [ga4EmailCopied, setGa4EmailCopied] = useState(false);
+  const [googleAdsLoginCustomerId, setGoogleAdsLoginCustomerId] = useState<string | null>(null);
+  const [googleAdsManagerError, setGoogleAdsManagerError] = useState<string | null>(null);
 
   useEffect(() => {
     previewRequestId.current += 1;
@@ -164,6 +169,17 @@ export function IntegrationsTab({ client }: { client: Client }) {
     void getGa4ServiceAccountEmail(sessionToken)
       .then(({ email }) => { if (!cancelled) setGa4ServiceAccountEmail(email); })
       .catch((error) => { if (!cancelled) setGa4ServiceAccountError(error instanceof Error ? error.message : 'No se pudo obtener la cuenta de servicio de GA4'); });
+    return () => { cancelled = true; };
+  }, [selectedProvider, sessionToken]);
+
+  useEffect(() => {
+    if (selectedProvider !== 'google_ads' || !sessionToken) return;
+    let cancelled = false;
+    setGoogleAdsLoginCustomerId(null);
+    setGoogleAdsManagerError(null);
+    void getGoogleAdsManagerAccount(sessionToken)
+      .then(({ loginCustomerId }) => { if (!cancelled) setGoogleAdsLoginCustomerId(loginCustomerId); })
+      .catch((error) => { if (!cancelled) setGoogleAdsManagerError(error instanceof Error ? error.message : 'No se pudo obtener la cuenta de gestor de Google Ads'); });
     return () => { cancelled = true; };
   }, [selectedProvider, sessionToken]);
 
@@ -795,8 +811,22 @@ export function IntegrationsTab({ client }: { client: Client }) {
               </section>
             )}
 
+            {selectedProvider === 'google_ads' && (
+              <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 space-y-2" aria-label="Cuenta de gestor de Google Ads">
+                <h4 className="text-sm font-bold text-slate-900">Cuenta de gestor (MCC) compartida de Infidash</h4>
+                <p className="text-xs text-slate-600">Esta integración usa la cuenta de gestor de Infidash, no credenciales propias del cliente. Confirma que el Customer ID que vas a introducir está enlazado bajo esta MCC:</p>
+                {googleAdsManagerError ? (
+                  <p role="alert" className="text-xs text-rose-700">{googleAdsManagerError}</p>
+                ) : !googleAdsLoginCustomerId ? (
+                  <p className="text-xs text-slate-500" role="status">Cargando…</p>
+                ) : (
+                  <code className="inline-block rounded-lg bg-white px-3 py-2 text-xs text-slate-800 border border-slate-200">{googleAdsLoginCustomerId}</code>
+                )}
+              </section>
+            )}
+
             <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-xs text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads, <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos y <strong className="text-slate-900">Google Analytics 4</strong> trae tráfico a la pestaña Tráfico. La sincronización completa de ventas y tráfico se ejecuta desde Ventas y Tráfico mediante una acción administrativa. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
+              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads, <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos, <strong className="text-slate-900">Google Analytics 4</strong> trae tráfico a la pestaña Tráfico y <strong className="text-slate-900">Google Ads</strong> trae inversión y campañas también a Tráfico. La sincronización completa de ventas, tráfico y campañas se ejecuta desde Ventas y Tráfico mediante una acción administrativa. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
