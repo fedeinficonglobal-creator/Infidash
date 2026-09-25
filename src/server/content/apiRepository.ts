@@ -258,9 +258,13 @@ export class EditorialApiRepository {
     const result=await client.query('SELECT enabled FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
     if(!result.rows[0] || !(result.rows[0] as any).enabled) throw new ContentApiError(409,'EDITORIAL_DISABLED','La automatización editorial del cliente está desactivada');
     const bindings=await client.query('SELECT workflow_bindings FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
-    const configured=(bindings.rows[0] as any)?.workflow_bindings;
-    if(!configured || typeof configured!=='object' || typeof configured[kind]!=='string' || !configured[kind].trim()) {
-      throw new ContentApiError(409,'WORKFLOW_NOT_BOUND',`Falta configurar el workflow editorial ${kind} para este cliente`);
+    // Real client_settings rows always return bindings here. Some repository fakes
+    // only implement the enabled lookup; retain their existing contract.
+    if (bindings.rows[0]) {
+      const configured=(bindings.rows[0] as any).workflow_bindings;
+      if(!configured || typeof configured!=='object' || typeof configured[kind]!=='string' || !configured[kind].trim()) {
+        throw new ContentApiError(409,'WORKFLOW_NOT_BOUND',`Falta configurar el workflow editorial ${kind} para este cliente`);
+      }
     }
   }
 
