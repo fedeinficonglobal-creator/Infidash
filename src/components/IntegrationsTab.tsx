@@ -5,6 +5,7 @@ import {
   deleteClientIntegration,
   getWooCommerceSalesPreview,
   getClientIntegrations,
+  getGa4ServiceAccountEmail,
   saveClientIntegration,
   syncClientIntegration,
   testClientIntegration,
@@ -17,6 +18,7 @@ import {
   BarChart3,
   Check,
   CheckCircle2,
+  Compass,
   Copy,
   Eye,
   FileText,
@@ -100,6 +102,8 @@ function integrationCardIcon(provider: IntegrationProvider) {
       return FileText;
     case 'woocommerce':
       return ShoppingCart;
+    case 'ga4':
+      return Compass;
     default:
       return Workflow;
   }
@@ -141,6 +145,9 @@ export function IntegrationsTab({ client }: { client: Client }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewRequestId = useRef(0);
+  const [ga4ServiceAccountEmail, setGa4ServiceAccountEmail] = useState<string | null>(null);
+  const [ga4ServiceAccountError, setGa4ServiceAccountError] = useState<string | null>(null);
+  const [ga4EmailCopied, setGa4EmailCopied] = useState(false);
 
   useEffect(() => {
     previewRequestId.current += 1;
@@ -148,6 +155,17 @@ export function IntegrationsTab({ client }: { client: Client }) {
     setSalesPreview(null);
     setPreviewError(null);
   }, [editingId, client.id]);
+
+  useEffect(() => {
+    if (selectedProvider !== 'ga4' || !sessionToken) return;
+    let cancelled = false;
+    setGa4ServiceAccountEmail(null);
+    setGa4ServiceAccountError(null);
+    void getGa4ServiceAccountEmail(sessionToken)
+      .then(({ email }) => { if (!cancelled) setGa4ServiceAccountEmail(email); })
+      .catch((error) => { if (!cancelled) setGa4ServiceAccountError(error instanceof Error ? error.message : 'No se pudo obtener la cuenta de servicio de GA4'); });
+    return () => { cancelled = true; };
+  }, [selectedProvider, sessionToken]);
 
   const selectedDefinition = useMemo(() => getIntegrationProviderDefinition(selectedProvider), [selectedProvider]);
   const currentIntegration = useMemo(
@@ -749,8 +767,36 @@ export function IntegrationsTab({ client }: { client: Client }) {
               </section>
             )}
 
+            {selectedProvider === 'ga4' && (
+              <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 space-y-2" aria-label="Cuenta de servicio de GA4">
+                <h4 className="text-sm font-bold text-slate-900">Autoriza la cuenta de servicio de Infidash</h4>
+                <p className="text-xs text-slate-600">En GA4 → Administración → Acceso a la propiedad, añade esta cuenta con rol de Lector para esta propiedad:</p>
+                {ga4ServiceAccountError ? (
+                  <p role="alert" className="text-xs text-rose-700">{ga4ServiceAccountError}</p>
+                ) : !ga4ServiceAccountEmail ? (
+                  <p className="text-xs text-slate-500" role="status">Cargando…</p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <code className="rounded-lg bg-white px-3 py-2 text-xs text-slate-800 border border-slate-200">{ga4ServiceAccountEmail}</code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(ga4ServiceAccountEmail).then(() => {
+                          setGa4EmailCopied(true);
+                          setTimeout(() => setGa4EmailCopied(false), 2000);
+                        });
+                      }}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                    >
+                      {ga4EmailCopied ? 'Copiado' : 'Copiar'}
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
+
             <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-xs text-slate-600 leading-relaxed">
-              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads y <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos. La sincronización completa de ventas se ejecuta desde Ventas mediante una acción administrativa. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
+              <strong className="text-slate-900">Análisis/UX</strong> alimenta analítica de comportamiento, <strong className="text-slate-900">WordPress</strong> captura leads, <strong className="text-slate-900">WooCommerce</strong> permite probar el acceso a pedidos y <strong className="text-slate-900">Google Analytics 4</strong> trae tráfico a la pestaña Tráfico. La sincronización completa de ventas y tráfico se ejecuta desde Ventas y Tráfico mediante una acción administrativa. Los importes, impuestos, envíos, fechas y reembolsos de pedidos se corrigen en WooCommerce; aquí solo se edita la política de cálculo por cliente.
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">

@@ -1,9 +1,9 @@
 import type { IntegrationStatus } from './integrationCatalog.js';
 
-export type LiveIntegrationProvider = 'clarity' | 'wordpress';
+export type LiveIntegrationProvider = 'clarity' | 'wordpress' | 'ga4';
 
 export function hasLiveIntegrationAdapter(provider: string): provider is LiveIntegrationProvider {
-  return provider === 'clarity' || provider === 'wordpress';
+  return provider === 'clarity' || provider === 'wordpress' || provider === 'ga4';
 }
 
 export function hasManualIntegrationSync(provider: string) {

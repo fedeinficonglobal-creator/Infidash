@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { MetricCard, HealthScoreCard } from './DashboardComponents';
 import { ArrowDownRight, ArrowUpRight, AlertTriangle, LoaderCircle, RefreshCw, ShoppingCart, UserCheck, Zap } from 'lucide-react';
 import { type Client } from '../store/useClientStore';
-import { getClientDashboard, type DailyStat, type UxSnapshot } from '../services/infidashApi.js';
+import { getClientDashboard, getClientIntegrations, getGa4TrafficSnapshot, type DailyStat, type Ga4TrafficReport, type UxSnapshot } from '../services/infidashApi.js';
 import { useClientStore } from '../store/useClientStore.js';
 import { buildComparisonPeriod, type ComparisonMetric } from '../lib/overviewComparison.js';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
@@ -108,6 +108,27 @@ const [statsError, setStatsError] = useState<string | null>(null);
 const [comparisonWindow, setComparisonWindow] = useState<PeriodOption>(7);
 const chartWrapperRef = useRef<HTMLDivElement | null>(null);
 const [chartWidth, setChartWidth] = useState(0);
+const [ga4Report, setGa4Report] = useState<Ga4TrafficReport | null>(null);
+const [ga4Loading, setGa4Loading] = useState(true);
+
+useEffect(() => {
+  let cancelled = false;
+  setGa4Report(null);
+  setGa4Loading(true);
+  if (!sessionToken) {
+    setGa4Loading(false);
+    return () => { cancelled = true; };
+  }
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.parse(`${to}T00:00:00.000Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
+  void getClientIntegrations(sessionToken, client.id)
+    .then(({ integrations }) => integrations.find((item) => item.provider === 'ga4' && item.isActive) ?? null)
+    .then((integration) => (integration ? getGa4TrafficSnapshot(sessionToken, integration.id, from, to) : null))
+    .then((result) => { if (!cancelled) setGa4Report(result); })
+    .catch(() => { if (!cancelled) setGa4Report(null); })
+    .finally(() => { if (!cancelled) setGa4Loading(false); });
+  return () => { cancelled = true; };
+}, [client.id, sessionToken]);
 
 useEffect(() => {
 let cancelled = false;
@@ -271,6 +292,50 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
       <p className="text-xs text-slate-500 mt-1">Profundidad media de lectura</p>
     </div>
   </div>
+</div>
+
+<div className="mb-8 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+  <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-6">
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-lg font-bold text-slate-900">Tráfico GA4</h3>
+        <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Google Analytics 4</span>
+      </div>
+      <p className="text-xs text-slate-400 font-medium tracking-wide">Últimos 30 días sincronizados desde Tráfico</p>
+    </div>
+    <div className="text-xs text-slate-500 text-right">
+      <p className="font-semibold text-slate-700">Última sincronización</p>
+      <p>{ga4Report?.syncedAt ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ga4Report.syncedAt)) : 'Sin sincronizar'}</p>
+    </div>
+  </div>
+
+  {ga4Loading ? (
+    <p className="text-sm text-slate-500" role="status">Cargando GA4...</p>
+  ) : !ga4Report?.complete ? (
+    <div>
+      <p className="text-sm text-amber-800">Sin datos de Google Analytics 4 sincronizados todavía.</p>
+      <button type="button" onClick={() => setActiveTab('traffic')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Tráfico</button>
+    </div>
+  ) : (
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Sesiones (30d)</p>
+        <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.sessions, 0))}</p>
+      </div>
+      <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Conversiones (30d)</p>
+        <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.conversions, 0))}</p>
+      </div>
+      <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Principal fuente</p>
+        <p className="mt-2 text-xl font-bold text-slate-900">{ga4Report.trafficSources[0]?.channelGroup ?? '—'}</p>
+      </div>
+      <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Página más vista</p>
+        <p className="mt-2 text-xs font-bold text-slate-900 truncate" title={ga4Report.topPages[0]?.pagePath}>{ga4Report.topPages[0]?.pagePath ?? '—'}</p>
+      </div>
+    </div>
+  )}
 </div>
 
 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

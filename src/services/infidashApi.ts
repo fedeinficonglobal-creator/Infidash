@@ -79,11 +79,11 @@ export interface ApiClient {
 export interface ApiIntegration {
   id: string;
   clientId: string;
-  provider: 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce';
+  provider: 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce' | 'ga4';
   label: string;
   status: 'connected' | 'pending' | 'error' | 'disabled';
   isActive: boolean;
-  capabilities: Array<'analytics' | 'ads' | 'leads' | 'sales'>;
+  capabilities: Array<'analytics' | 'ads' | 'leads' | 'sales' | 'traffic'>;
   config: Record<string, string>;
   secretKeys: string[];
   webhookSecret: string | null;
@@ -465,6 +465,45 @@ export async function syncWooCommerceSales(token: string, integrationId: string,
 export async function getWooCommerceSalesSnapshot(token: string, integrationId: string, from: string, to: string) {
   const query = new URLSearchParams({ from, to });
   return apiRequest<WooCommerceSalesPreview>(`/api/integrations/${encodeURIComponent(integrationId)}/woocommerce/sales-snapshot?${query}`, {}, token);
+}
+
+export interface Ga4TrafficReport {
+  source: 'ga4';
+  from: string;
+  to: string;
+  propertyId: string;
+  complete: boolean;
+  persisted: boolean;
+  syncedAt?: string;
+  samplingWarning: boolean;
+  timeZone: string | null;
+  sessionsSeries: Array<{ date: string; sessions: number; conversions: number }>;
+  trafficSources: Array<{ channelGroup: string; sessions: number; conversions: number }>;
+  topPages: Array<{ pagePath: string; pageViews: number; sessions: number }>;
+  landingPages: Array<{ landingPage: string; sessions: number; conversions: number }>;
+}
+
+export async function getGa4ServiceAccountEmail(token: string) {
+  return apiRequest<{ email: string }>('/api/integrations/ga4/service-account', {}, token);
+}
+
+export async function getGa4TrafficPreview(token: string, integrationId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  return apiRequest<Ga4TrafficReport>(
+    `/api/integrations/${encodeURIComponent(integrationId)}/ga4/traffic-preview?${query}`,
+    {}, token,
+  );
+}
+
+export async function syncGa4Traffic(token: string, integrationId: string, from: string, to: string) {
+  return apiRequest<Ga4TrafficReport>(`/api/integrations/${encodeURIComponent(integrationId)}/ga4/traffic-sync`, {
+    method: 'POST', body: JSON.stringify({ from, to }),
+  }, token);
+}
+
+export async function getGa4TrafficSnapshot(token: string, integrationId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  return apiRequest<Ga4TrafficReport>(`/api/integrations/${encodeURIComponent(integrationId)}/ga4/traffic-snapshot?${query}`, {}, token);
 }
 
 export async function deleteClientIntegration(token: string, integrationId: string) {
