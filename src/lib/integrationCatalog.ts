@@ -55,10 +55,10 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
       },
       {
         key: 'exportUrl',
-        label: 'URL de exportación',
+        label: 'URL de exportación (avanzado)',
         type: 'url',
-        placeholder: 'https://api.clarity.example/export/{projectId}',
-        help: 'Opcional. Si no la rellenas, se usa CLARITY_EXPORT_URL del servidor.',
+        placeholder: 'https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1',
+        help: 'Opcional. Si no la rellenas, se usa la API oficial de Microsoft Clarity; el token identifica el proyecto.',
       },
     ],
     credentialFields: [

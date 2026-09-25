@@ -1,5 +1,7 @@
 import { nowIso } from './auth.js';
 
+const DEFAULT_CLARITY_EXPORT_URL = 'https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1';
+
 export interface ClarityIntegrationContext {
   clientId: string;
   integrationId: string;
@@ -263,10 +265,7 @@ export function normalizeClaritySnapshots(payload: unknown, clientId: string, fa
 }
 
 export function resolveClarityExportUrl(context: ClarityIntegrationContext) {
-  const template = context.exportUrl?.trim() || process.env.CLARITY_EXPORT_URL?.trim() || process.env.CLARITY_EXPORT_URL_TEMPLATE?.trim();
-  if (!template) {
-    throw new Error('Define CLARITY_EXPORT_URL o exportUrl en la integración para poder sincronizar Análisis/UX');
-  }
+  const template = context.exportUrl?.trim() || process.env.CLARITY_EXPORT_URL?.trim() || process.env.CLARITY_EXPORT_URL_TEMPLATE?.trim() || DEFAULT_CLARITY_EXPORT_URL;
 
   const replacements: Record<string, string> = {
     projectId: context.projectId?.trim() ?? '',
