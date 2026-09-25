@@ -12,7 +12,7 @@ import {
   type ApiIntegration,
   type WooCommerceSalesPreview,
 } from '../services/infidashApi.js';
-import { hasManualIntegrationSync } from '../lib/integrationState.js';
+import { hasLiveIntegrationAdapter, hasManualIntegrationSync } from '../lib/integrationState.js';
 import {
   AlertCircle,
   BarChart3,
@@ -636,7 +636,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
                           disabled={testingId === integration.id}
                           className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-brand-primary transition hover:bg-brand-primary/5 disabled:cursor-wait"
                         >
-                          {testingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} {integration.provider === 'wordpress' || integration.provider === 'woocommerce' ? 'Probar conexión' : 'Validar campos'}
+                          {testingId === integration.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} {hasLiveIntegrationAdapter(integration.provider) || integration.provider === 'woocommerce' ? 'Probar conexión' : 'Validar campos'}
                         </button>
                         {hasManualIntegrationSync(integration.provider) && <button
                           type="button"
