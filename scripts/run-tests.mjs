@@ -148,7 +148,14 @@ if (suite === 'db' || suite === 'api') {
   }
 }
 
-const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...selectedFiles], {
+// node:test runs multiple test files in parallel by default. The db-tier files share one
+// live Postgres database and each call getDatabase() -> initializeSchema(), whose
+// `CREATE TABLE IF NOT EXISTS` statements are not safe against true concurrent execution
+// (two files bootstrapping at once can both pass the existence check and then race to
+// create the same table, failing with "duplicate key value violates unique constraint
+// pg_type_typname_nsp_index"). Force sequential file execution for this tier.
+const concurrencyArgs = suite === 'db' ? ['--test-concurrency=1'] : [];
+const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...concurrencyArgs, ...selectedFiles], {
   cwd: root,
   env: childEnv,
   stdio: 'inherit',
