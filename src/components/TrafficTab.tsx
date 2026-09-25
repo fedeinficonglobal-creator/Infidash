@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Compass } from 'lucide-react';
+import { Compass, Megaphone } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
-import { getClientIntegrations, getGa4TrafficPreview, getGa4TrafficSnapshot, syncGa4Traffic, type ApiIntegration, type Ga4TrafficReport } from '../services/infidashApi.js';
+import {
+  getClientIntegrations, getGa4TrafficPreview, getGa4TrafficSnapshot, syncGa4Traffic,
+  getGoogleAdsCampaignsPreview, getGoogleAdsCampaignsSnapshot, syncGoogleAdsCampaigns,
+  type ApiIntegration, type Ga4TrafficReport, type GoogleAdsCampaignReport,
+} from '../services/infidashApi.js';
 import { isValidInclusiveDateRange } from '../lib/dateRange.js';
 
 function defaultWindow() {
@@ -24,6 +28,14 @@ export function TrafficTab({ client }: { client: Client }) {
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
 
+  const [adsIntegrations, setAdsIntegrations] = useState<ApiIntegration[]>([]);
+  const [adsIntegrationLoading, setAdsIntegrationLoading] = useState(true);
+  const [adsRange, setAdsRange] = useState(defaultWindow);
+  const [adsReport, setAdsReport] = useState<GoogleAdsCampaignReport | null>(null);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const [adsError, setAdsError] = useState<string | null>(null);
+  const adsRequestId = useRef(0);
+
   useEffect(() => {
     const id = ++requestId.current;
     let cancelled = false;
@@ -37,16 +49,47 @@ export function TrafficTab({ client }: { client: Client }) {
       return () => { cancelled = true; };
     }
     void getClientIntegrations(sessionToken, client.id).then(({ integrations: rows }) => {
-      if (!cancelled && id === requestId.current) setIntegrations(rows.filter((item) => item.provider === 'ga4'));
+      if (!cancelled && id === requestId.current) {
+        setIntegrations(rows.filter((item) => item.provider === 'ga4'));
+        setAdsIntegrations(rows.filter((item) => item.provider === 'google_ads'));
+      }
     }).catch((cause) => {
       if (!cancelled && id === requestId.current) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar las integraciones');
     }).finally(() => {
-      if (!cancelled && id === requestId.current) setIntegrationLoading(false);
+      if (!cancelled && id === requestId.current) {
+        setIntegrationLoading(false);
+        setAdsIntegrationLoading(false);
+      }
     });
     return () => { cancelled = true; };
   }, [client.id, sessionToken]);
 
   const activeIntegration = integrations.find((item) => item.isActive);
+  const activeAdsIntegration = adsIntegrations.find((item) => item.isActive);
+
+  const handleAdsQuery = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!sessionToken || !activeAdsIntegration) return;
+    if (!isValidInclusiveDateRange(adsRange.from, adsRange.to, 31)) {
+      setAdsError('Selecciona un periodo válido de hasta 31 días.');
+      return;
+    }
+    const id = ++adsRequestId.current;
+    setAdsLoading(true);
+    setAdsError(null);
+    setAdsReport(null);
+    try {
+      const result = isAdmin
+        ? await syncGoogleAdsCampaigns(sessionToken, activeAdsIntegration.id, adsRange.from, adsRange.to)
+        : await getGoogleAdsCampaignsSnapshot(sessionToken, activeAdsIntegration.id, adsRange.from, adsRange.to).then((saved) =>
+          saved.complete ? saved : getGoogleAdsCampaignsPreview(sessionToken, activeAdsIntegration.id, adsRange.from, adsRange.to));
+      if (id === adsRequestId.current) setAdsReport(result);
+    } catch (cause) {
+      if (id === adsRequestId.current) setAdsError(cause instanceof Error ? cause.message : 'No se pudo consultar Google Ads');
+    } finally {
+      if (id === adsRequestId.current) setAdsLoading(false);
+    }
+  };
 
   const handleQuery = async (event: FormEvent) => {
     event.preventDefault();
@@ -176,6 +219,59 @@ export function TrafficTab({ client }: { client: Client }) {
           </div>
         </div>
       )}
+
+      <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm" aria-label="Consulta de inversión Google Ads">
+        <div className="flex items-start gap-4">
+          <Megaphone className="mt-1 size-7 shrink-0 text-brand-primary" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-bold text-slate-900">Inversión publicitaria (Google Ads)</h3>
+            <p className="mt-1 text-sm text-slate-600">Campañas, inversión, clics, conversiones y ROAS de la cuenta de Google Ads del cliente, mediante la cuenta de gestor (MCC) compartida de Infidash.</p>
+            {adsIntegrationLoading ? <p className="mt-4 text-sm text-slate-500" role="status">Cargando integración…</p> : !activeAdsIntegration ? (
+              <div className="mt-4">
+                <p className="text-sm text-amber-800">No hay una integración de Google Ads activa para este cliente.</p>
+                <button type="button" onClick={() => setActiveTab('integrations')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Integraciones</button>
+              </div>
+            ) : (
+              <form className="mt-5 space-y-4" onSubmit={(event) => void handleAdsQuery(event)}>
+                <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                  <label className="text-xs font-bold text-slate-600">Desde<input aria-label="Desde (Google Ads)" type="date" value={adsRange.from} max={adsRange.to} onChange={(event) => { adsRequestId.current += 1; setAdsLoading(false); setAdsRange((current) => ({ ...current, from: event.target.value })); setAdsReport(null); setAdsError(null); }} className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></label>
+                  <label className="text-xs font-bold text-slate-600">Hasta<input aria-label="Hasta (Google Ads)" type="date" value={adsRange.to} min={adsRange.from} onChange={(event) => { adsRequestId.current += 1; setAdsLoading(false); setAdsRange((current) => ({ ...current, to: event.target.value })); setAdsReport(null); setAdsError(null); }} className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></label>
+                  <button type="submit" disabled={adsLoading || !isValidInclusiveDateRange(adsRange.from, adsRange.to, 31)} className="rounded-xl bg-brand-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{adsLoading ? 'Consultando…' : isAdmin ? 'Sincronizar' : 'Consultar'}</button>
+                </div>
+                <p className="text-xs text-slate-500">Máximo 31 días. Los administradores guardan sincronizaciones completas; viewers consultan lo ya guardado y pueden ver una vista previa si aún no existe.</p>
+              </form>
+            )}
+            {adsError && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-800" role="alert">{adsError}</p>}
+          </div>
+        </div>
+
+        {adsReport && (
+          <div className="mt-6" aria-live="polite">
+            <p className="text-xs text-slate-500">{adsReport.persisted ? 'Sincronización guardada' : 'Vista previa sin guardar'} · cuenta {adsReport.customerId}{adsReport.accountName ? ` (${adsReport.accountName})` : ''}.</p>
+            {adsReport.campaigns.length === 0 ? (
+              <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">No hay campañas con datos en el periodo.</p>
+            ) : (
+              <table className="mt-4 w-full text-left text-sm">
+                <thead className="text-xs text-slate-400">
+                  <tr><th className="pb-2">Campaña</th><th className="pb-2">Estado</th><th className="pb-2">Inversión</th><th className="pb-2">Clics</th><th className="pb-2">Conv.</th><th className="pb-2">ROAS</th></tr>
+                </thead>
+                <tbody>
+                  {adsReport.campaigns.map((campaign) => (
+                    <tr key={campaign.id} className="border-t border-slate-100">
+                      <td className="py-2 truncate max-w-[16rem]" title={campaign.name}>{campaign.name}</td>
+                      <td className="py-2">{campaign.status}</td>
+                      <td className="py-2">{campaign.cost.toLocaleString('es-ES', { style: 'currency', currency: adsReport.currencyCode || 'EUR' })}</td>
+                      <td className="py-2">{campaign.clicks}</td>
+                      <td className="py-2">{campaign.conversions}</td>
+                      <td className="py-2">{campaign.cost > 0 ? `${(campaign.conversionsValue / campaign.cost).toFixed(2)}x` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

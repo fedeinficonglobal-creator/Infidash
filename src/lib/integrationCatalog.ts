@@ -121,7 +121,7 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
   {
     provider: 'google_ads',
     label: 'Google Ads',
-    description: 'Publicidad de Google con datos de campañas, conversiones y coste por resultado.',
+    description: 'Inversión, campañas, conversiones y ROAS de una cuenta de Google Ads, mediante la cuenta de gestor (MCC) compartida de Infidash.',
     capabilities: ['ads'],
     configFields: [
       {
@@ -129,54 +129,11 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
         label: 'Customer ID',
         type: 'text',
         required: true,
-        placeholder: '123-456-7890',
-        help: 'Cuenta de Google Ads que se va a conectar.',
-      },
-      {
-        key: 'conversionActionId',
-        label: 'Conversion Action ID',
-        type: 'text',
-        placeholder: '987654321',
-        help: 'Acción de conversión principal para el seguimiento.',
-      },
-      {
-        key: 'attributionWindow',
-        label: 'Ventana de atribución',
-        type: 'text',
-        defaultValue: '30d',
-        help: 'Ventana de atribución que se mostrará en el panel.',
+        placeholder: '1234567890',
+        help: 'Cuenta de Google Ads del cliente, enlazada bajo la cuenta de gestor de Infidash. Solo dígitos, sin guiones.',
       },
     ],
-    credentialFields: [
-      {
-        key: 'developerToken',
-        label: 'Developer Token',
-        type: 'password',
-        required: true,
-        placeholder: '••••••••',
-      },
-      {
-        key: 'clientId',
-        label: 'Client ID',
-        type: 'text',
-        required: true,
-        placeholder: '123.apps.googleusercontent.com',
-      },
-      {
-        key: 'clientSecret',
-        label: 'Client Secret',
-        type: 'password',
-        required: true,
-        placeholder: '••••••••',
-      },
-      {
-        key: 'refreshToken',
-        label: 'Refresh Token',
-        type: 'password',
-        required: true,
-        placeholder: '••••••••',
-      },
-    ],
+    credentialFields: [],
   },
   {
     provider: 'wordpress',

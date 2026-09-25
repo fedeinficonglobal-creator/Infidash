@@ -506,6 +506,51 @@ export async function getGa4TrafficSnapshot(token: string, integrationId: string
   return apiRequest<Ga4TrafficReport>(`/api/integrations/${encodeURIComponent(integrationId)}/ga4/traffic-snapshot?${query}`, {}, token);
 }
 
+export interface GoogleAdsCampaignReport {
+  source: 'google_ads';
+  from: string;
+  to: string;
+  customerId: string;
+  currencyCode: string;
+  accountName: string;
+  complete: boolean;
+  persisted: boolean;
+  syncedAt?: string;
+  campaigns: Array<{
+    id: string;
+    name: string;
+    status: string;
+    cost: number;
+    clicks: number;
+    impressions: number;
+    conversions: number;
+    conversionsValue: number;
+  }>;
+}
+
+export async function getGoogleAdsManagerAccount(token: string) {
+  return apiRequest<{ loginCustomerId: string }>('/api/integrations/google-ads/manager-account', {}, token);
+}
+
+export async function getGoogleAdsCampaignsPreview(token: string, integrationId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  return apiRequest<GoogleAdsCampaignReport>(
+    `/api/integrations/${encodeURIComponent(integrationId)}/google-ads/campaigns-preview?${query}`,
+    {}, token,
+  );
+}
+
+export async function syncGoogleAdsCampaigns(token: string, integrationId: string, from: string, to: string) {
+  return apiRequest<GoogleAdsCampaignReport>(`/api/integrations/${encodeURIComponent(integrationId)}/google-ads/campaigns-sync`, {
+    method: 'POST', body: JSON.stringify({ from, to }),
+  }, token);
+}
+
+export async function getGoogleAdsCampaignsSnapshot(token: string, integrationId: string, from: string, to: string) {
+  const query = new URLSearchParams({ from, to });
+  return apiRequest<GoogleAdsCampaignReport>(`/api/integrations/${encodeURIComponent(integrationId)}/google-ads/campaigns-snapshot?${query}`, {}, token);
+}
+
 export async function deleteClientIntegration(token: string, integrationId: string) {
   return apiRequest<void>(`/api/integrations/${encodeURIComponent(integrationId)}`, {
     method: 'DELETE',

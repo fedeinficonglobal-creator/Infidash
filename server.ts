@@ -27,6 +27,8 @@ import {
   getWooCommerceSalesSnapshot,
   getGa4Snapshot,
   saveGa4Snapshot,
+  getGoogleAdsSnapshot,
+  saveGoogleAdsSnapshot,
   getLatestUxSnapshot,
   getMonthlyKpiById,
   getSessionByToken,
@@ -65,6 +67,7 @@ import { redactIntegrationSecrets } from './src/lib/integrationPresentation.js';
 import { fetchWooCommercePurchaseWindow, parseWooRefundPolicy, probeWooCommerceOrders, summarizeCompletedOrderSales } from './src/lib/woocommerce.js';
 import { validateWooCommerceSnapshot, wooCommerceSourceKey } from './src/lib/woocommerceSnapshot.js';
 import { createGa4AccessTokenProvider, fetchGa4TrafficReport, parseGa4ServiceAccount, probeGa4Property } from './src/lib/ga4.js';
+import { createGoogleAdsAccessTokenProvider, fetchGoogleAdsCampaignReport, probeGoogleAdsAccount } from './src/lib/googleAds.js';
 import { isValidInclusiveDateRange } from './src/lib/dateRange.js';
 import { sumRevenueWindow } from './src/lib/dashboardMetrics.js';
 import { parseLeadQuery } from './src/lib/leadQuery.js';
@@ -90,6 +93,25 @@ if (process.env.GA4_SERVICE_ACCOUNT_JSON) {
     });
   } catch (error) {
     console.error('[infidash] GA4_SERVICE_ACCOUNT_JSON inválido:', error instanceof Error ? error.message : error);
+  }
+}
+
+// One shared Google Ads manager-account (MCC) credential for every client (per-client config is only a Customer ID).
+// A bad/missing credential breaks Google Ads for all clients at once, so fail loudly here rather than on first sync.
+let googleAdsService: { getAccessToken: () => Promise<string>; developerToken: string; loginCustomerId: string } | null = null;
+if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN && process.env.GOOGLE_ADS_CLIENT_ID && process.env.GOOGLE_ADS_CLIENT_SECRET && process.env.GOOGLE_ADS_REFRESH_TOKEN && process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
+  try {
+    const getAccessToken = createGoogleAdsAccessTokenProvider({
+      clientId: process.env.GOOGLE_ADS_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_ADS_CLIENT_SECRET,
+      refreshToken: process.env.GOOGLE_ADS_REFRESH_TOKEN,
+    });
+    googleAdsService = { getAccessToken, developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN, loginCustomerId: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '') };
+    googleAdsService.getAccessToken().catch((error) => {
+      console.error('[infidash] No se pudo obtener un token de Google Ads al arrancar; revisa GOOGLE_ADS_REFRESH_TOKEN:', error instanceof Error ? error.message : error);
+    });
+  } catch (error) {
+    console.error('[infidash] Credenciales de Google Ads inválidas:', error instanceof Error ? error.message : error);
   }
 }
 const loginThrottle = new LoginThrottle();
@@ -730,6 +752,28 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     }
   }
 
+  if (result.ready && result.integration.provider === 'google_ads') {
+    if (!googleAdsService) {
+      const updated = setClientIntegrationStatus(result.integration.id, 'error', 'Google Ads no está configurado en el servidor');
+      result = { ...result, integration: updated ?? result.integration, ready: false, summary: 'Google Ads no está configurado en el servidor' };
+    } else {
+      const customerId = String(result.integration.config?.customerId ?? '');
+      const probe = await probeGoogleAdsAccount({ customerId }, googleAdsService.getAccessToken, googleAdsService.developerToken, googleAdsService.loginCustomerId);
+      const updated = setClientIntegrationStatus(
+        result.integration.id,
+        probe.ok ? 'connected' : 'error',
+        probe.ok ? null : probe.error,
+        probe.ok ? new Date().toISOString() : undefined,
+      );
+      result = {
+        ...result,
+        integration: updated ?? result.integration,
+        ready: probe.ok,
+        summary: probe.ok ? 'Acceso a la cuenta de Google Ads verificado' : (probe.error ?? 'No se pudo conectar con Google Ads'),
+      };
+    }
+  }
+
   return reply.send(result);
 });
 
@@ -891,6 +935,78 @@ app.get('/api/integrations/:id/ga4/traffic-snapshot', (req: AnyFastifyRequest, r
     source: 'ga4', from, to, propertyId, complete: true, persisted: true, syncedAt: snapshot.syncedAt,
     sessionsSeries: snapshot.sessionsSeries, trafficSources: snapshot.trafficSources, topPages: snapshot.topPages, landingPages: snapshot.landingPages,
     samplingWarning: false, timeZone: null,
+  });
+});
+
+app.get('/api/integrations/google-ads/manager-account', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+  if (!googleAdsService) return sendError(reply, 503, 'Google Ads no está configurado en el servidor', 'GOOGLE_ADS_NOT_CONFIGURED');
+  return reply.send({ loginCustomerId: googleAdsService.loginCustomerId });
+});
+
+app.get('/api/integrations/:id/google-ads/campaigns-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  reply.header('Cache-Control', 'no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
+  if (!requireClientAccess(reply, session, integration.clientId)) return;
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  if (!googleAdsService) return sendError(reply, 503, 'Google Ads no está configurado en el servidor', 'GOOGLE_ADS_NOT_CONFIGURED');
+  const query = req.query as Record<string, unknown>;
+  if (typeof query.from !== 'string' || typeof query.to !== 'string' || !isValidInclusiveDateRange(query.from, query.to, 31)) {
+    return sendError(reply, 400, 'Indica un rango de fechas válido de hasta 31 días', 'INVALID_RANGE');
+  }
+  const customerId = String(integration.config?.customerId ?? '');
+  try {
+    const report = await fetchGoogleAdsCampaignReport({ customerId, from: query.from, to: query.to }, googleAdsService.getAccessToken, googleAdsService.developerToken, googleAdsService.loginCustomerId);
+    return reply.send({ source: 'google_ads', from: query.from, to: query.to, customerId, complete: true, persisted: false, ...report });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo leer Google Ads';
+    return sendError(reply, message.startsWith('Ventana de fechas de Google Ads inválida') ? 400 : 502, message, 'GOOGLE_ADS_PREVIEW_FAILED');
+  }
+});
+
+app.post('/api/integrations/:id/google-ads/campaigns-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['admin'])) return;
+  reply.header('Cache-Control', 'no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  if (!googleAdsService) return sendError(reply, 503, 'Google Ads no está configurado en el servidor', 'GOOGLE_ADS_NOT_CONFIGURED');
+  const body = req.body as Record<string, unknown> | null;
+  if (typeof body?.from !== 'string' || typeof body?.to !== 'string' || !isValidInclusiveDateRange(body.from, body.to, 31)) {
+    return sendError(reply, 400, 'Indica un rango de fechas válido de hasta 31 días', 'INVALID_RANGE');
+  }
+  const customerId = String(integration.config?.customerId ?? '');
+  try {
+    const report = await fetchGoogleAdsCampaignReport({ customerId, from: body.from, to: body.to }, googleAdsService.getAccessToken, googleAdsService.developerToken, googleAdsService.loginCustomerId);
+    const snapshot = saveGoogleAdsSnapshot({ integrationId: integration.id, customerId, from: body.from, to: body.to, campaigns: report.campaigns, currencyCode: report.currencyCode });
+    return reply.send({ source: 'google_ads', from: body.from, to: body.to, customerId, complete: true, persisted: true, syncedAt: snapshot.syncedAt, ...report });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo sincronizar Google Ads';
+    return sendError(reply, message.startsWith('Ventana de fechas de Google Ads inválida') ? 400 : 502, message, 'GOOGLE_ADS_SYNC_FAILED');
+  }
+});
+
+app.get('/api/integrations/:id/google-ads/campaigns-snapshot', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  reply.header('Cache-Control', 'private, no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
+  if (!requireClientAccess(reply, session, integration.clientId)) return;
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  const { from, to } = req.query as Record<string, string>;
+  if (!from || !to) return sendError(reply, 400, 'Indica un rango de fechas', 'INVALID_RANGE');
+  const customerId = String(integration.config?.customerId ?? '');
+  const snapshot = getGoogleAdsSnapshot({ integrationId: integration.id, customerId, from, to });
+  if (!snapshot) {
+    return reply.send({ source: 'google_ads', from, to, customerId, complete: false, persisted: false, campaigns: [], currencyCode: '', accountName: '' });
+  }
+  return reply.send({
+    source: 'google_ads', from, to, customerId, complete: true, persisted: true, syncedAt: snapshot.syncedAt,
+    campaigns: snapshot.campaigns, currencyCode: snapshot.currencyCode, accountName: '',
   });
 });
 
