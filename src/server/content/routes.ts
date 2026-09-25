@@ -207,6 +207,22 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     return reply.send({job});
   }));
 
+  app.post('/api/content/jobs/:id/recover', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const id = requireString(paramsOf(request).id, 'id', 100);
+    const job = await repository.getJob(id);
+    if (!job) throw new ContentApiError(404, 'NOT_FOUND', 'Trabajo no encontrado');
+    requireClientAccess(session, (job as any).client_id);
+    return reply.send({ job: await repository.recoverPlanJob(id, session.user.id) });
+  }));
+
+  app.get('/api/clients/:clientId/editorial-readiness', route(async (request, reply) => {
+    const session = await requireHuman(request);
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    return reply.send(await repository.readiness(clientId));
+  }));
+
   app.get('/api/content/items/:id/publications', route(async (request, reply) => {
     const session=await requireHuman(request);
     const contentId=requireString(paramsOf(request).id,'id',100);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Calendar, FileText, LoaderCircle, Save, Share2, Download, Mail } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
 import { createDailyStat, fetchDailyReportPdf, getDailyStats, type DailyStat } from '../services/infidashApi';
+import { SavedReportsPanel } from './SavedReportsPanel.js';
 
 function todayISODate() {
   return new Date().toISOString().slice(0, 10);
@@ -460,6 +461,7 @@ export function ReportsTab({ client }: { client: Client }) {
         </div>
       </div>
 
+      <SavedReportsPanel token={sessionToken} clientId={client.id} from={reportFrom} to={reportTo} canManage={canManageReports} />
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100">
           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Exportación y sincronización</h3>

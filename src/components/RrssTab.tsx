@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Plus, PencilLine, Trash2, Link2, Target, Sparkles, X } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
-import { canPersistPlanRows } from '../lib/planStorage.js';
+import { currentPlanPeriodKey, useOperationalPlan } from '../lib/useOperationalPlan.js';
 import {
-  getRrssMonthLabel,
   loadRrssPlanRows,
   removeRrssPlanRow,
   saveRrssPlanRows,
@@ -20,32 +19,28 @@ const EMPTY_FORM = {
 };
 
 export function RrssTab({ client }: { client: Client }) {
-  const { currentUser } = useClientStore();
+  const { currentUser, sessionToken } = useClientStore();
   const isAdmin = currentUser?.role === 'admin';
-  const [planRows, setPlanRows] = useState<RrssPlanRow[]>([]);
-  const [loadedPlanClientId, setLoadedPlanClientId] = useState<string | null>(null);
+  const [periodKey, setPeriodKey] = useState(currentPlanPeriodKey);
+  const [search, setSearch] = useState('');
+  const plan = useOperationalPlan<RrssPlanRow>({ token: sessionToken, clientId: client.id, domain: 'rrss', periodKey, loadLocal: loadRrssPlanRows, saveLocal: saveRrssPlanRows });
+  const { rows: planRows, saveRows } = plan;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<RrssPlanRow | null>(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const monthLabel = useMemo(() => getRrssMonthLabel(), []);
+  const monthLabel = useMemo(() => new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(`${periodKey}-01T12:00:00`)), [periodKey]);
+  const visibleRows = planRows.filter((row) => `${row.web} ${row.rrss} ${row.objetivo} ${row.competidores}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
 
 
   useEffect(() => {
-    setPlanRows(loadRrssPlanRows(client.id));
-    setLoadedPlanClientId(client.id);
     setPlanError(null);
     setIsModalOpen(false);
     setEditingRow(null);
     setForm(EMPTY_FORM);
-  }, [client.id]);
-
-  useEffect(() => {
-    if (!canPersistPlanRows(client.id, loadedPlanClientId)) return;
-
-    saveRrssPlanRows(client.id, planRows);
-  }, [client.id, loadedPlanClientId, planRows]);
+    setSearch('');
+  }, [client.id, periodKey]);
 
   const openCreateModal = () => {
     setEditingRow(null);
@@ -89,7 +84,7 @@ export function RrssTab({ client }: { client: Client }) {
         competidores: form.competidores,
       };
 
-      setPlanRows((current) => upsertRrssPlanRow(current, payload));
+      await saveRows(upsertRrssPlanRow(planRows, payload));
       closeModal();
     } catch (error) {
       setPlanError(error instanceof Error ? error.message : 'No se pudo guardar la fila RRSS');
@@ -98,16 +93,18 @@ export function RrssTab({ client }: { client: Client }) {
     }
   };
 
-  const handleDeleteRow = (rowId: string) => {
+  const handleDeleteRow = async (rowId: string) => {
     const current = planRows.find((row) => row.id === rowId);
-    const confirmed = window.confirm(`Â¿Eliminar esta fila RRSS${current?.web ? ` de ${current.web}` : ''}?`);
+    const confirmed = window.confirm(`¿Eliminar esta fila RRSS${current?.web ? ` de ${current.web}` : ''}?`);
     if (!confirmed) {
       return;
     }
 
-    setPlanRows((rows) => removeRrssPlanRow(rows, rowId));
-    if (editingRow?.id === rowId) {
-      closeModal();
+    try {
+      await saveRows(removeRrssPlanRow(planRows, rowId));
+      if (editingRow?.id === rowId) closeModal();
+    } catch (cause) {
+      setPlanError(cause instanceof Error ? cause.message : 'No se pudo eliminar la fila RRSS');
     }
   };
 
@@ -116,13 +113,26 @@ export function RrssTab({ client }: { client: Client }) {
       <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1 flex items-center gap-3">Redes Sociales</h2>
-          <p className="text-slate-500 font-medium">Plan de contenidos de {client.name} Â· borrador local en este navegador.</p>
+          <p className="text-slate-500 font-medium">Plan compartido de contenidos de {client.name}.</p>
         </div>
       </header>
 
-      <div role="note" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        No hay una fuente social conectada: aquí se mantiene el plan de contenidos, pero no se presentan cifras sintéticas de audiencia o rendimiento. El plan es un borrador local de este navegador.
+      <div className="mb-6 flex flex-wrap items-end gap-3">
+        <label className="text-sm font-semibold text-slate-700">Mes del plan
+          <input type="month" value={periodKey} onChange={(event) => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) setPeriodKey(event.target.value); }} className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2" />
+        </label>
+        <label className="text-sm font-semibold text-slate-700">Buscar filas
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Web, red u objetivo" className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2" />
+        </label>
+        <button type="button" onClick={() => void plan.reload().catch((cause) => plan.setError(cause instanceof Error ? cause.message : 'No se pudo recargar'))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold">Recargar plan</button>
       </div>
+      <div role="note" className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">No hay una fuente social conectada: el plan es compartido, pero no muestra cifras sintéticas de audiencia o rendimiento.</div>
+      {(plan.error || planError) && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{plan.error || planError}</div>}
+      {isAdmin && plan.ready && plan.localRows.length > 0 && <div role="note" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p>Hay {plan.localRows.length} filas guardadas solo en este navegador. Para {monthLabel}: {plan.importPreview.newCount} nuevas, {plan.importPreview.duplicateCount} duplicadas y {plan.importPreview.conflictCount} con conflicto de ID. Las filas en conflicto permanecerán en el borrador local.</p>
+        <details className="mt-2"><summary className="cursor-pointer font-semibold">Vista previa del borrador local</summary><ul className="mt-2 list-disc pl-5">{plan.localRows.map((row) => <li key={row.id}>{row.web || 'Sin web'} · {row.rrss || 'Sin red'}</li>)}</ul></details>
+        <button type="button" disabled={plan.saving} onClick={() => void plan.importLocal().catch(() => {})} className="mt-2 rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white disabled:opacity-50">Importar filas nuevas</button>
+      </div>}
       <section className="mb-8 rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between p-6 border-b border-slate-100 bg-gradient-to-r from-amber-50 to-white">
           <div>
@@ -133,6 +143,7 @@ export function RrssTab({ client }: { client: Client }) {
           {isAdmin && <button
             type="button"
             onClick={openCreateModal}
+            disabled={!plan.ready || plan.saving}
             className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 transition-colors hover:bg-brand-primary/90"
           >
             <Plus className="size-4" /> Añadir fila
@@ -152,14 +163,14 @@ export function RrssTab({ client }: { client: Client }) {
               </tr>
             </thead>
             <tbody>
-              {planRows.length === 0 ? (
+              {visibleRows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500">
-                    No hay filas creadas todavía. Usa <strong>Añadir fila</strong> para empezar con el plan de RRSS.
+                    {plan.loading ? 'Cargando plan…' : planRows.length ? 'Ninguna fila coincide con la búsqueda.' : 'No hay filas compartidas para este cliente y mes.'}
                   </td>
                 </tr>
               ) : (
-                planRows.map((row) => (
+                visibleRows.map((row) => (
                   <tr key={row.id} className="group align-top even:bg-amber-50/30 hover:bg-slate-50/90 transition-colors">
                     <td className="px-5 py-4 border-b border-slate-100 align-top">
                       {row.web ? (
@@ -167,13 +178,13 @@ export function RrssTab({ client }: { client: Client }) {
                           {row.web}
                         </a>
                       ) : (
-                        <span className="text-sm text-slate-400">â€”</span>
+                        <span className="text-sm text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words">{row.rrss || 'â€”'}</td>
-                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[280px]">{row.objetivo || 'â€”'}</td>
-                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[280px]">{row.inspoIdea || 'â€”'}</td>
-                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[260px]">{row.competidores || 'â€”'}</td>
+                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words">{row.rrss || '—'}</td>
+                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[280px]">{row.objetivo || '—'}</td>
+                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[280px]">{row.inspoIdea || '—'}</td>
+                    <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[260px]">{row.competidores || '—'}</td>
                     <td className="px-5 py-4 border-b border-slate-100 align-top text-right">
                       {isAdmin && <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <button

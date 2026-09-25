@@ -172,6 +172,30 @@ export interface ClarityUxSnapshotInput {
   payloadJson?: string;
 }
 
+export type OperationalPlanDomain = 'web' | 'rrss';
+
+export interface OperationalPlanRecord {
+  clientId: string;
+  domain: OperationalPlanDomain;
+  periodKey: string;
+  version: number;
+  rows: Array<Record<string, string>>;
+  updatedAt: string | null;
+}
+
+export interface ReportRunRecord {
+  id: string;
+  clientId: string;
+  from: string;
+  to: string;
+  generatedAt: string;
+  createdByUserId: string | null;
+  bytes: number;
+  lastSentAt: string | null;
+  lastSentTo: string | null;
+  lastSendError: string | null;
+}
+
 export interface MonthlyKpiRecord {
   id: string;
   clientId: string;
@@ -996,6 +1020,33 @@ function initializeSchema(db: AppDatabase) {
       updated_at TEXT NOT NULL,
       UNIQUE(client_id, snapshot_date)
     );
+
+    CREATE TABLE IF NOT EXISTS operational_plans (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      domain TEXT NOT NULL CHECK (domain IN ('web', 'rrss')),
+      period_key TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      rows_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(client_id, domain, period_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS report_runs (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      from_date TEXT NOT NULL,
+      to_date TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      pdf_base64 TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      last_sent_at TEXT,
+      last_sent_to TEXT,
+      last_send_error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_runs_client_generated ON report_runs(client_id, generated_at DESC);
 
     CREATE TABLE IF NOT EXISTS rrss_channels (
       id TEXT PRIMARY KEY,
@@ -2266,6 +2317,76 @@ export function getLatestUxSnapshot(clientId: string) {
     .prepare(`SELECT * FROM ux_snapshots WHERE client_id = ? ORDER BY snapshot_date DESC, updated_at DESC LIMIT 1`)
     .get(clientId) as any;
   return row ? rowToUxSnapshot(row) : null;
+}
+
+function rowToOperationalPlan(row: any): OperationalPlanRecord {
+  return {
+    clientId: row.client_id,
+    domain: row.domain,
+    periodKey: row.period_key,
+    version: Number(row.version),
+    rows: JSON.parse(row.rows_json),
+    updatedAt: row.updated_at,
+  };
+}
+
+export function getOperationalPlan(clientId: string, domain: OperationalPlanDomain, periodKey: string): OperationalPlanRecord {
+  const row = getDatabase().prepare(`SELECT * FROM operational_plans WHERE client_id = ? AND domain = ? AND period_key = ?`)
+    .get(clientId, domain, periodKey) as any;
+  return row ? rowToOperationalPlan(row) : { clientId, domain, periodKey, version: 0, rows: [], updatedAt: null };
+}
+
+export function saveOperationalPlan(input: Omit<OperationalPlanRecord, 'updatedAt'>): OperationalPlanRecord | null {
+  if (input.version > 0 && getOperationalPlan(input.clientId, input.domain, input.periodKey).version === 0) return null;
+  const timestamp = nowIso();
+  const result = getDatabase().prepare(`INSERT INTO operational_plans
+    (id, client_id, domain, period_key, version, rows_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+    ON CONFLICT (client_id, domain, period_key) DO UPDATE SET
+      version = operational_plans.version + 1,
+      rows_json = excluded.rows_json,
+      updated_at = excluded.updated_at
+    WHERE operational_plans.version = ?`).run(
+    crypto.randomUUID(), input.clientId, input.domain, input.periodKey,
+    JSON.stringify(input.rows), timestamp, timestamp, input.version,
+  );
+  return result.changes ? getOperationalPlan(input.clientId, input.domain, input.periodKey) : null;
+}
+
+function rowToReportRun(row: any): ReportRunRecord {
+  return { id: row.id, clientId: row.client_id, from: row.from_date, to: row.to_date,
+    generatedAt: row.generated_at, createdByUserId: row.created_by_user_id, bytes: Number(row.bytes),
+    lastSentAt: row.last_sent_at, lastSentTo: row.last_sent_to, lastSendError: row.last_send_error };
+}
+
+export function saveReportRun(input: { clientId: string; from: string; to: string; createdByUserId: string; pdf: Buffer }): ReportRunRecord {
+  const id = crypto.randomUUID();
+  const generatedAt = nowIso();
+  getDatabase().prepare(`INSERT INTO report_runs (id,client_id,from_date,to_date,generated_at,created_by_user_id,pdf_base64,bytes)
+    VALUES (?,?,?,?,?,?,?,?)`).run(id, input.clientId, input.from, input.to, generatedAt, input.createdByUserId, input.pdf.toString('base64'), input.pdf.length);
+  return getReportRun(input.clientId, id)!;
+}
+
+export function listReportRuns(clientId: string, limit = 50, before?: { at: string; id: string }): ReportRunRecord[] {
+  const rows = before
+    ? getDatabase().prepare(`SELECT * FROM report_runs WHERE client_id=? AND (generated_at,id)<(?,?) ORDER BY generated_at DESC,id DESC LIMIT ?`).all(clientId, before.at, before.id, limit)
+    : getDatabase().prepare(`SELECT * FROM report_runs WHERE client_id=? ORDER BY generated_at DESC,id DESC LIMIT ?`).all(clientId, limit);
+  return rows.map(rowToReportRun);
+}
+
+export function getReportRun(clientId: string, id: string): ReportRunRecord | null {
+  const row = getDatabase().prepare(`SELECT * FROM report_runs WHERE client_id=? AND id=?`).get(clientId, id);
+  return row ? rowToReportRun(row) : null;
+}
+
+export function getReportRunPdf(clientId: string, id: string): Buffer | null {
+  const row = getDatabase().prepare(`SELECT pdf_base64 FROM report_runs WHERE client_id=? AND id=?`).get(clientId, id) as any;
+  return row ? Buffer.from(row.pdf_base64, 'base64') : null;
+}
+
+export function recordReportSend(clientId: string, id: string, recipient: string, error: string | null) {
+  getDatabase().prepare(`UPDATE report_runs SET last_sent_at=?,last_sent_to=?,last_send_error=? WHERE client_id=? AND id=?`)
+    .run(nowIso(), recipient, error, clientId, id);
 }
 
 export function listIntegrationsByProvider(provider: IntegrationProvider) {

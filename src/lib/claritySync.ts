@@ -84,6 +84,10 @@ function pickValue(source: Record<string, unknown>, keys: string[]) {
 function parseSnapshotItem(item: unknown, fallbackDate: string): ParsedClaritySnapshot {
   const record = extractCandidateObject(item);
   const metrics = extractCandidateObject(pickValue(record, ['metrics', 'summary', 'data', 'values']));
+  const legacyFields = ['sessions', 'sessionCount', 'visitors', 'uniqueVisitors', 'pageViews', 'rageClicks', 'deadClicks', 'scrollDepthAvg'];
+  if (!legacyFields.some((field) => record[field] !== undefined || metrics[field] !== undefined)) {
+    throw new Error('La exportación de Clarity no contiene métricas reconocibles');
+  }
 
   const payload = Object.keys(record).length > 0 ? record : extractCandidateObject(metrics);
   const snapshotDate = toDateKey(pickValue(record, ['snapshotDate', 'date', 'statDate', 'day', 'createdAt', 'updatedAt', 'timestamp']) ?? pickValue(metrics, ['snapshotDate', 'date', 'statDate', 'day', 'createdAt', 'updatedAt', 'timestamp']), fallbackDate);
@@ -144,8 +148,80 @@ function buildNotes(input: ParsedClaritySnapshot, sourceCount: number) {
   return null;
 }
 
+function clarityMetricNumber(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function sumClarityMetric(rows: Record<string, unknown>[], field: string): number | null {
+  if (rows.length === 0) return null;
+  let total = 0;
+  for (const row of rows) {
+    const value = clarityMetricNumber(row[field]);
+    if (value === null) return null;
+    total += value;
+  }
+  return total;
+}
+
+function normalizeClarityExport(items: unknown[], clientId: string, snapshotDate: string): ClaritySnapshotInput {
+  const metrics = new Map<string, Record<string, unknown>[]>();
+  for (const item of items) {
+    const record = extractCandidateObject(item);
+    if (typeof record.metricName !== 'string' || !Array.isArray(record.information)) {
+      throw new Error('La exportación de Clarity tiene un formato de métricas desconocido');
+    }
+    const rows = record.information.map((row) => extractCandidateObject(row));
+    const name = record.metricName.toLowerCase();
+    metrics.set(name, [...(metrics.get(name) ?? []), ...rows]);
+  }
+
+  const sessions = sumClarityMetric(metrics.get('traffic') ?? [], 'totalSessionCount');
+  if (sessions === null) {
+    throw new Error('La exportación de Clarity no contiene sesiones de Traffic válidas');
+  }
+
+  const rageClicks = sumClarityMetric(metrics.get('rageclickcount') ?? [], 'subTotal');
+  const deadClicks = sumClarityMetric(metrics.get('deadclickcount') ?? [], 'subTotal');
+  const scrollRows = metrics.get('scrolldepth') ?? [];
+  let scrollDepthAvg: number | null = null;
+  if (scrollRows.length === 1) {
+    scrollDepthAvg = clarityMetricNumber(scrollRows[0].averageScrollDepth);
+  } else if (scrollRows.length > 1) {
+    const weights = scrollRows.map((row) => clarityMetricNumber(row.sessionsCount));
+    const depths = scrollRows.map((row) => clarityMetricNumber(row.averageScrollDepth));
+    if (weights.every((weight) => weight !== null) && depths.every((depth) => depth !== null)) {
+      const totalWeight = weights.reduce<number>((sum, weight) => sum + (weight ?? 0), 0);
+      if (totalWeight > 0) {
+        scrollDepthAvg = depths.reduce<number>((sum, depth, index) => sum + (depth ?? 0) * (weights[index] ?? 0), 0) / totalWeight;
+      }
+    }
+  }
+
+  return {
+    clientId,
+    snapshotDate,
+    sessions,
+    pageViews: 0,
+    rageClicks: rageClicks ?? 0,
+    deadClicks: deadClicks ?? 0,
+    scrollDepthAvg: scrollDepthAvg ?? 0,
+    engagedSessions: 0,
+    conversions: 0,
+    conversionRate: 0,
+    notes: 'Clarity exporta una ventana móvil; las métricas no incluidas en la respuesta se muestran como no disponibles.',
+    source: 'clarity',
+    payloadJson: JSON.stringify(items),
+  };
+}
+
 export function normalizeClaritySnapshots(payload: unknown, clientId: string, fallbackDate = nowIso().slice(0, 10)): ClaritySnapshotInput[] {
   const items = getPayloadItems(payload);
+  if (items.some((item) => typeof extractCandidateObject(item).metricName === 'string')) {
+    return [normalizeClarityExport(items, clientId, fallbackDate)];
+  }
   if (items.length === 0) {
     return [
       {
@@ -237,6 +313,10 @@ export async function fetchClaritySnapshots(
       } catch {
         payload = responseText;
       }
+    }
+
+    if (!getPayloadItems(payload).length) {
+      throw new Error('Clarity devolvió una exportación vacía; no se ha guardado un snapshot');
     }
 
     return normalizeClaritySnapshots(payload, context.clientId);

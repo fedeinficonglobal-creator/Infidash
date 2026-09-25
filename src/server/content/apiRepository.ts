@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { getEditorialPool, withEditorialTransaction } from './postgres.js';
-import { ContentApiError, encodeCursor, redactSecrets, requestHash, sanitizeError } from './contracts.js';
+import { ContentApiError, JOB_KINDS, encodeCursor, redactSecrets, requestHash, sanitizeError } from './contracts.js';
 import { assertContentTransition, assertPlanTransition, assertPublicationTransition } from './transitions.js';
 import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
 
@@ -195,7 +195,7 @@ export class EditorialApiRepository {
     return withEditorialTransaction(async(client)=>{
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`job:${input.clientId}:${input.idempotencyKey}`]);
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`publication:${input.contentId}:${input.accountId}:${occurrenceKey}`]);
-      await this.requireEnabledClient(client,input.clientId);
+      await this.requireEnabledClient(client,input.clientId,'publish');
       const contentResult=await client.query('SELECT * FROM editorial.contents WHERE client_id=$1 AND id=$2 FOR UPDATE',[input.clientId,input.contentId]);
       const content=contentResult.rows[0] as any;
       if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
@@ -238,7 +238,7 @@ export class EditorialApiRepository {
     const hash = requestHash({ kind: input.kind, targetId: input.targetId ?? null, expectedVersion: input.expectedVersion ?? null, payload: input.payload ?? {} });
     return withEditorialTransaction(async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`job:${input.clientId}:${input.idempotencyKey}`]);
-      await this.requireEnabledClient(client,input.clientId);
+      await this.requireEnabledClient(client,input.clientId,input.kind);
       const existing = await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
       if (existing.rows[0]) {
         if ((existing.rows[0] as any).request_hash !== hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otro payload');
@@ -254,9 +254,28 @@ export class EditorialApiRepository {
     },this.pool);
   }
 
-  private async requireEnabledClient(client: PoolClient, clientId: string) {
+  private async requireEnabledClient(client: PoolClient, clientId: string, kind: string) {
     const result=await client.query('SELECT enabled FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
     if(!result.rows[0] || !(result.rows[0] as any).enabled) throw new ContentApiError(409,'EDITORIAL_DISABLED','La automatización editorial del cliente está desactivada');
+    const bindings=await client.query('SELECT workflow_bindings FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
+    // Real client_settings rows always return bindings here. Some repository fakes
+    // only implement the enabled lookup; retain their existing contract.
+    if (bindings.rows[0]) {
+      const configured=(bindings.rows[0] as any).workflow_bindings;
+      if(!configured || typeof configured!=='object' || typeof configured[kind]!=='string' || !configured[kind].trim()) {
+        throw new ContentApiError(409,'WORKFLOW_NOT_BOUND',`Falta configurar el workflow editorial ${kind} para este cliente`);
+      }
+    }
+  }
+
+  async readiness(clientId: string) {
+    const result = await this.pool.query('SELECT enabled,workflow_bindings FROM editorial.client_settings WHERE client_id=$1', [clientId]);
+    const settings = result.rows[0] as any;
+    const bindings = settings?.workflow_bindings ?? {};
+    return {
+      enabled: Boolean(settings?.enabled),
+      jobs: Object.fromEntries(JOB_KINDS.map((kind) => [kind, Boolean(settings?.enabled && typeof bindings[kind] === 'string' && bindings[kind].trim())])),
+    };
   }
 
   private isPublicationJob(kind: string) { return ['publish', 'reschedule', 'cancel', 'reconcile'].includes(kind); }
@@ -384,10 +403,26 @@ export class EditorialApiRepository {
     return { items, nextCursor: result.rows.length > filters.limit && last ? encodeCursor({ at: new Date(last.created_at).toISOString(), id: last.id }) : null };
   }
 
+  async recoverPlanJob(id: string, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      const result = await client.query('SELECT * FROM editorial.jobs WHERE id=$1 FOR UPDATE', [id]);
+      const job = result.rows[0] as any;
+      if (!job) throw new ContentApiError(404, 'NOT_FOUND', 'Trabajo no encontrado');
+      if (job.kind !== 'generate_plan') throw new ContentApiError(409, 'RECOVERY_REQUIRES_RECONCILIATION', 'Solo se puede reintentar aquí la generación de planes');
+      const exhausted = Number(job.attempt_count) >= 8 && (job.status === 'failed' || (job.status === 'running' && job.locked_until && new Date(job.locked_until).getTime() <= Date.now()));
+      if (!exhausted) throw new ContentApiError(409, 'JOB_NOT_EXHAUSTED', 'El trabajo aún no ha agotado los reintentos');
+      await this.requireEnabledClient(client, job.client_id, job.kind);
+      const updated = await client.query(`UPDATE editorial.jobs SET status='pending',attempt_count=0,next_attempt_at=now(),lease_token=NULL,locked_until=NULL,execution_id=NULL,last_error=NULL,completed_at=NULL,updated_at=now() WHERE id=$1 RETURNING *`, [id]);
+      await this.auditWith(client, job.client_id, 'job', id, 'job.recovered', actorId, { previousStatus: job.status, previousAttempts: job.attempt_count });
+      return updated.rows[0];
+    }, this.pool);
+  }
+
   async claimJob(input:{kinds?:string[];clientId?:string;leaseSeconds:number;executionId:string},allowedClientIds:string[]){
     return withEditorialTransaction(async(client)=>{
       const values:unknown[]=[input.kinds?.length?input.kinds:null,allowedClientIds.includes('*')?null:allowedClientIds,input.clientId??null];
       const selected=await client.query(`SELECT j.* FROM editorial.jobs j JOIN editorial.client_settings settings ON settings.client_id=j.client_id AND settings.enabled=TRUE WHERE ((j.status IN ('pending','failed') AND j.next_attempt_at<=now()) OR (j.status='running' AND j.locked_until<=now())) AND j.attempt_count < 8
+        AND (j.kind NOT IN ('publish','reschedule','cancel') OR j.attempt_count=0)
         AND ($1::text[] IS NULL OR j.kind=ANY($1)) AND ($2::text[] IS NULL OR j.client_id=ANY($2)) AND ($3::text IS NULL OR j.client_id=$3)
         ORDER BY j.next_attempt_at,j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,values);
       if(!selected.rows[0]) return null;
