@@ -1,5 +1,5 @@
-export type IntegrationProvider = 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce';
-export type IntegrationCapability = 'analytics' | 'ads' | 'leads' | 'sales';
+export type IntegrationProvider = 'clarity' | 'meta_ads' | 'google_ads' | 'wordpress' | 'woocommerce' | 'ga4';
+export type IntegrationCapability = 'analytics' | 'ads' | 'leads' | 'sales' | 'traffic';
 export type IntegrationStatus = 'connected' | 'pending' | 'error' | 'disabled';
 export type IntegrationFieldType = 'text' | 'url' | 'password' | 'textarea' | 'select';
 
@@ -282,6 +282,23 @@ export const INTEGRATION_PROVIDERS: IntegrationProviderDefinition[] = [
       },
     ],
   },
+  {
+    provider: 'ga4',
+    label: 'Google Analytics 4',
+    description: 'Sesiones, conversiones, fuentes de tráfico y páginas de una propiedad GA4, mediante la cuenta de servicio compartida de Infidash.',
+    capabilities: ['traffic'],
+    configFields: [
+      {
+        key: 'propertyId',
+        label: 'Property ID (GA4)',
+        type: 'text',
+        required: true,
+        placeholder: '123456789',
+        help: 'ID numérico de la propiedad (Admin → Detalles de la propiedad en GA4). Debes otorgar acceso de Lector a la cuenta de servicio de Infidash sobre esta propiedad.',
+      },
+    ],
+    credentialFields: [],
+  },
 ] as const;
 
 const CAPABILITY_LABELS: Record<IntegrationCapability, string> = {
@@ -289,6 +306,7 @@ const CAPABILITY_LABELS: Record<IntegrationCapability, string> = {
   ads: 'Publicidad',
   leads: 'Leads',
   sales: 'Ventas',
+  traffic: 'Tráfico',
 };
 
 export function getIntegrationProviderDefinition(provider: IntegrationProvider) {
@@ -406,6 +424,13 @@ export function buildIntegrationDisplayName(
     const storeUrl = readableLabel(config.storeUrl ?? '');
     if (storeUrl) {
       return `${definition.label} · ${storeUrl}`;
+    }
+  }
+
+  if (definition.provider === 'ga4') {
+    const propertyId = config.propertyId?.trim();
+    if (propertyId) {
+      return `${definition.label} · ${propertyId}`;
     }
   }
 

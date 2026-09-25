@@ -25,6 +25,8 @@ import {
   getIntegrationByWebhookSecret,
   getIntegrationCredentialsById,
   getWooCommerceSalesSnapshot,
+  getGa4Snapshot,
+  saveGa4Snapshot,
   getLatestUxSnapshot,
   getMonthlyKpiById,
   getSessionByToken,
@@ -62,6 +64,8 @@ import { LoginThrottle } from './src/lib/loginThrottle.js';
 import { redactIntegrationSecrets } from './src/lib/integrationPresentation.js';
 import { fetchWooCommercePurchaseWindow, parseWooRefundPolicy, probeWooCommerceOrders, summarizeCompletedOrderSales } from './src/lib/woocommerce.js';
 import { validateWooCommerceSnapshot, wooCommerceSourceKey } from './src/lib/woocommerceSnapshot.js';
+import { createGa4AccessTokenProvider, fetchGa4TrafficReport, parseGa4ServiceAccount, probeGa4Property } from './src/lib/ga4.js';
+import { isValidInclusiveDateRange } from './src/lib/dateRange.js';
 import { sumRevenueWindow } from './src/lib/dashboardMetrics.js';
 import { parseLeadQuery } from './src/lib/leadQuery.js';
 import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
@@ -73,6 +77,21 @@ const app = fastify({
   logger: false,
   bodyLimit: 1_000_000,
 });
+
+// One shared GA4 service-account credential for every client (per-client config is only a Property ID).
+// A bad/missing credential breaks GA4 for all clients at once, so fail loudly here rather than on first sync.
+let ga4Service: { getAccessToken: () => Promise<string>; clientEmail: string } | null = null;
+if (process.env.GA4_SERVICE_ACCOUNT_JSON) {
+  try {
+    const account = parseGa4ServiceAccount(process.env.GA4_SERVICE_ACCOUNT_JSON);
+    ga4Service = { getAccessToken: createGa4AccessTokenProvider(account), clientEmail: account.clientEmail };
+    ga4Service.getAccessToken().catch((error) => {
+      console.error('[infidash] No se pudo obtener un token de GA4 al arrancar; revisa GA4_SERVICE_ACCOUNT_JSON:', error instanceof Error ? error.message : error);
+    });
+  } catch (error) {
+    console.error('[infidash] GA4_SERVICE_ACCOUNT_JSON inválido:', error instanceof Error ? error.message : error);
+  }
+}
 const loginThrottle = new LoginThrottle();
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
@@ -689,6 +708,28 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     };
   }
 
+  if (result.ready && result.integration.provider === 'ga4') {
+    if (!ga4Service) {
+      const updated = setClientIntegrationStatus(result.integration.id, 'error', 'GA4 no está configurado en el servidor');
+      result = { ...result, integration: updated ?? result.integration, ready: false, summary: 'GA4 no está configurado en el servidor' };
+    } else {
+      const propertyId = String(result.integration.config?.propertyId ?? '');
+      const probe = await probeGa4Property({ propertyId }, ga4Service.getAccessToken, ga4Service.clientEmail);
+      const updated = setClientIntegrationStatus(
+        result.integration.id,
+        probe.ok ? 'connected' : 'error',
+        probe.ok ? null : probe.error,
+        probe.ok ? new Date().toISOString() : undefined,
+      );
+      result = {
+        ...result,
+        integration: updated ?? result.integration,
+        ready: probe.ok,
+        summary: probe.ok ? 'Acceso a la propiedad GA4 verificado' : (probe.error ?? 'No se pudo conectar con GA4'),
+      };
+    }
+  }
+
   return reply.send(result);
 });
 
@@ -774,6 +815,83 @@ app.get('/api/integrations/:id/woocommerce/sales-snapshot', (req: AnyFastifyRequ
   } catch (error) {
     return sendError(reply, 400, error instanceof Error ? error.message : 'No se pudo leer el resumen guardado', 'SNAPSHOT_READ_FAILED');
   }
+});
+
+app.get('/api/integrations/ga4/service-account', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+  if (!ga4Service) return sendError(reply, 503, 'GA4 no está configurado en el servidor', 'GA4_NOT_CONFIGURED');
+  return reply.send({ email: ga4Service.clientEmail });
+});
+
+app.get('/api/integrations/:id/ga4/traffic-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  reply.header('Cache-Control', 'no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
+  if (!requireClientAccess(reply, session, integration.clientId)) return;
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  if (!ga4Service) return sendError(reply, 503, 'GA4 no está configurado en el servidor', 'GA4_NOT_CONFIGURED');
+  const query = req.query as Record<string, unknown>;
+  if (typeof query.from !== 'string' || typeof query.to !== 'string' || !isValidInclusiveDateRange(query.from, query.to, 31)) {
+    return sendError(reply, 400, 'Indica un rango de fechas válido de hasta 31 días', 'INVALID_RANGE');
+  }
+  const propertyId = String(integration.config?.propertyId ?? '');
+  try {
+    const report = await fetchGa4TrafficReport({ propertyId, from: query.from, to: query.to }, ga4Service.getAccessToken, ga4Service.clientEmail);
+    return reply.send({ source: 'ga4', from: query.from, to: query.to, propertyId, complete: true, persisted: false, ...report });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo leer GA4';
+    return sendError(reply, message.startsWith('Ventana de fechas GA4 inválida') ? 400 : 502, message, 'GA4_PREVIEW_FAILED');
+  }
+});
+
+app.post('/api/integrations/:id/ga4/traffic-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!requireSession(req, reply, ['admin'])) return;
+  reply.header('Cache-Control', 'no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  if (!ga4Service) return sendError(reply, 503, 'GA4 no está configurado en el servidor', 'GA4_NOT_CONFIGURED');
+  const body = req.body as Record<string, unknown> | null;
+  if (typeof body?.from !== 'string' || typeof body?.to !== 'string' || !isValidInclusiveDateRange(body.from, body.to, 31)) {
+    return sendError(reply, 400, 'Indica un rango de fechas válido de hasta 31 días', 'INVALID_RANGE');
+  }
+  const propertyId = String(integration.config?.propertyId ?? '');
+  try {
+    const report = await fetchGa4TrafficReport({ propertyId, from: body.from, to: body.to }, ga4Service.getAccessToken, ga4Service.clientEmail);
+    const snapshot = saveGa4Snapshot({
+      integrationId: integration.id, propertyId, from: body.from, to: body.to,
+      sessionsSeries: report.sessionsSeries, trafficSources: report.trafficSources, topPages: report.topPages, landingPages: report.landingPages,
+    });
+    return reply.send({ source: 'ga4', from: body.from, to: body.to, propertyId, complete: true, persisted: true, syncedAt: snapshot.syncedAt, ...report });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo sincronizar GA4';
+    return sendError(reply, message.startsWith('Ventana de fechas GA4 inválida') ? 400 : 502, message, 'GA4_SYNC_FAILED');
+  }
+});
+
+app.get('/api/integrations/:id/ga4/traffic-snapshot', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply, ['viewer', 'admin']);
+  if (!session) return;
+  reply.header('Cache-Control', 'private, no-store');
+  const integration = getIntegrationById((req.params as any).id);
+  if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
+  if (!requireClientAccess(reply, session, integration.clientId)) return;
+  if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  const { from, to } = req.query as Record<string, string>;
+  if (!from || !to) return sendError(reply, 400, 'Indica un rango de fechas', 'INVALID_RANGE');
+  const propertyId = String(integration.config?.propertyId ?? '');
+  const snapshot = getGa4Snapshot({ integrationId: integration.id, propertyId, from, to });
+  if (!snapshot) {
+    return reply.send({ source: 'ga4', from, to, propertyId, complete: false, persisted: false,
+      sessionsSeries: [], trafficSources: [], topPages: [], landingPages: [], samplingWarning: false, timeZone: null });
+  }
+  return reply.send({
+    source: 'ga4', from, to, propertyId, complete: true, persisted: true, syncedAt: snapshot.syncedAt,
+    sessionsSeries: snapshot.sessionsSeries, trafficSources: snapshot.trafficSources, topPages: snapshot.topPages, landingPages: snapshot.landingPages,
+    samplingWarning: false, timeZone: null,
+  });
 });
 
 app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {

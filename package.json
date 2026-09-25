@@ -29,6 +29,7 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
+    "google-auth-library": "^11.1.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pdfkit": "^0.20.2",

@@ -10,6 +10,7 @@ import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson,
 import { dueMonthlyKpiMonth, nextMonthKey } from './monthlyCloseClock.js';
 import { parseWooRefundPolicy } from './woocommerce.js';
 import type { WooCommerceOrderSummary } from './woocommerce.js';
+import type { Ga4LandingPage, Ga4SessionsPoint, Ga4TopPage, Ga4TrafficSource } from './ga4.js';
 import {
   buildIntegrationCapabilitySummary,
   buildIntegrationDisplayName,
@@ -931,6 +932,20 @@ function initializeSchema(db: AppDatabase) {
       CHECK (purchase_from <= purchase_to)
     );
 
+    CREATE TABLE IF NOT EXISTS ga4_snapshots (
+      integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+      property_id TEXT NOT NULL,
+      period_from TEXT NOT NULL,
+      period_to TEXT NOT NULL,
+      sessions_json JSONB NOT NULL,
+      traffic_sources_json JSONB NOT NULL,
+      top_pages_json JSONB NOT NULL,
+      landing_pages_json JSONB NOT NULL,
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (integration_id, property_id, period_from, period_to),
+      CHECK (period_from <= period_to)
+    );
+
     CREATE TABLE IF NOT EXISTS daily_stats (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1209,7 +1224,7 @@ function ensureIntegrationSchema(db: AppDatabase) {
 
   for (const row of rows) {
     const rawProvider = String(row.provider ?? row.type ?? '').trim().toLowerCase();
-    const provider = (['clarity', 'meta_ads', 'google_ads', 'wordpress', 'woocommerce'].includes(rawProvider) ? rawProvider : 'clarity') as IntegrationProvider;
+    const provider = (['clarity', 'meta_ads', 'google_ads', 'wordpress', 'woocommerce', 'ga4'].includes(rawProvider) ? rawProvider : 'clarity') as IntegrationProvider;
     const definition = getIntegrationProviderDefinition(provider);
     if (!definition) {
       continue;
@@ -1777,6 +1792,9 @@ export function saveClientIntegration(input: IntegrationInput) {
   const previousCredentials = existing ? normalizeIntegrationSection(definition.credentialFields, parseJsonRecord(existing.credentials_json ?? '{}')) : {};
   const config = normalizeIntegrationSection(definition.configFields, { ...previousConfig, ...(input.config ?? {}) });
   if (provider === 'woocommerce') parseWooRefundPolicy(config.refundPolicy);
+  if (provider === 'ga4' && config.propertyId && !/^\d+$/.test(config.propertyId)) {
+    throw new Error('El Property ID de GA4 debe ser numérico');
+  }
   const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...(input.credentials ?? {}) });
   const missingFields = listMissingIntegrationFields(definition, config, credentials);
   const configurationUnchanged = Boolean(existing)
@@ -1899,6 +1917,51 @@ export function getWooCommerceSalesSnapshot(input: Pick<WooCommerceSalesSnapshot
   if (!Array.isArray(orders)) throw new Error('El resumen WooCommerce guardado no es válido');
   return { integrationId: row.integration_id, sourceKey: row.source_key, from: row.purchase_from,
     to: row.purchase_to, orders, syncedAt: row.synced_at };
+}
+
+export interface Ga4TrafficSnapshot {
+  integrationId: string;
+  propertyId: string;
+  from: string;
+  to: string;
+  sessionsSeries: Ga4SessionsPoint[];
+  trafficSources: Ga4TrafficSource[];
+  topPages: Ga4TopPage[];
+  landingPages: Ga4LandingPage[];
+  syncedAt: string;
+}
+
+/** Replaces one fully-read GA4 report window atomically. Credentials are never stored per-client. */
+export function saveGa4Snapshot(input: Omit<Ga4TrafficSnapshot, 'syncedAt'>) {
+  const syncedAt = nowIso();
+  getDatabase().prepare(`INSERT INTO ga4_snapshots
+      (integration_id, property_id, period_from, period_to, sessions_json, traffic_sources_json, top_pages_json, landing_pages_json, synced_at)
+    VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?)
+    ON CONFLICT (integration_id, property_id, period_from, period_to)
+    DO UPDATE SET sessions_json = EXCLUDED.sessions_json, traffic_sources_json = EXCLUDED.traffic_sources_json,
+      top_pages_json = EXCLUDED.top_pages_json, landing_pages_json = EXCLUDED.landing_pages_json, synced_at = EXCLUDED.synced_at`)
+    .run(input.integrationId, input.propertyId, input.from, input.to,
+      JSON.stringify(input.sessionsSeries), JSON.stringify(input.trafficSources), JSON.stringify(input.topPages), JSON.stringify(input.landingPages), syncedAt);
+  return { ...input, syncedAt };
+}
+
+export function getGa4Snapshot(input: Pick<Ga4TrafficSnapshot, 'integrationId' | 'propertyId' | 'from' | 'to'>): Ga4TrafficSnapshot | null {
+  const row = getDatabase().prepare(`SELECT integration_id, property_id, period_from, period_to, sessions_json, traffic_sources_json, top_pages_json, landing_pages_json, synced_at
+    FROM ga4_snapshots WHERE integration_id = ? AND property_id = ? AND period_from = ? AND period_to = ?`)
+    .get(input.integrationId, input.propertyId, input.from, input.to) as any;
+  if (!row) return null;
+  const parseJson = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
+  const sessionsSeries = parseJson(row.sessions_json);
+  const trafficSources = parseJson(row.traffic_sources_json);
+  const topPages = parseJson(row.top_pages_json);
+  const landingPages = parseJson(row.landing_pages_json);
+  if (![sessionsSeries, trafficSources, topPages, landingPages].every(Array.isArray)) {
+    throw new Error('El resumen GA4 guardado no es válido');
+  }
+  return {
+    integrationId: row.integration_id, propertyId: row.property_id, from: row.period_from, to: row.period_to,
+    sessionsSeries, trafficSources, topPages, landingPages, syncedAt: row.synced_at,
+  };
 }
 
 export function setClientIntegrationActive(id: string, active: boolean) {

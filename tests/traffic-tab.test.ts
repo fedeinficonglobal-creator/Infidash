@@ -18,6 +18,6 @@ const client: Client = {
 
 test('Traffic does not invent ad spend, ROAS, sessions or campaigns from client revenue', () => {
   const html = renderToStaticMarkup(createElement(TrafficTab, { client }));
-  assert.match(html, /Sin datos reales de publicidad/);
+  assert.match(html, /Tráfico real de Google Analytics 4/);
   assert.doesNotMatch(html, /Gasto Ads Estimado|ROAS Combinado|Paid Search|Meta - Prospecting|1 May/);
 });
