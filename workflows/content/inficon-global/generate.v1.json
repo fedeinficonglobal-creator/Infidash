@@ -235,7 +235,7 @@
           "parameters": [
             {
               "name": "Content-Disposition",
-              "value": "=attachment; filename=\"cabecera-{{ $('Validar trabajo').first().json.job.id }}.jpg\""
+              "value": "=attachment; filename=\"{{ $('Preparar contenido aprobado').first().json.title.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80) }}.jpg\""
             },
             {
               "name": "Content-Type",
