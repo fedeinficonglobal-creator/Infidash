@@ -16,6 +16,38 @@ function page<T extends Record<string, any>>(rows: T[], limit: number, atField =
 
 function json(value: unknown) { return JSON.stringify(value ?? {}); }
 
+function revisionFromRow(row: any) {
+  return {
+    id: row.id,
+    revisionNumber: row.revision_number,
+    contentSnapshot: row.content_snapshot,
+    authorType: row.author_type,
+    authorId: row.author_id,
+    createdAt: row.created_at,
+  };
+}
+
+/** `revisions` omitted (not `[]`) when not fetched, so a caller that merges this onto existing frontend state doesn't wipe an already-loaded revisions list. */
+function contentFromRow(row: any, revisions?: any[]) {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    planItemId: row.plan_item_id,
+    title: row.title,
+    bodyHtml: row.body_html,
+    bodyText: row.body_text,
+    excerpt: row.excerpt,
+    seo: row.seo ?? {},
+    status: row.status,
+    currentRevision: row.current_revision,
+    approvedRevisionId: row.approved_revision_id,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(revisions ? { revisions: revisions.map(revisionFromRow) } : {}),
+  };
+}
+
 export class EditorialApiRepository {
   constructor(private readonly pool: Pool = getEditorialPool()) {}
 
@@ -130,7 +162,7 @@ export class EditorialApiRepository {
       this.pool.query('SELECT * FROM editorial.contents WHERE id=$1', [id]),
       this.pool.query('SELECT * FROM editorial.content_revisions WHERE content_id=$1 ORDER BY revision_number DESC LIMIT 50', [id]),
     ]);
-    return content.rows[0] ? { ...content.rows[0], revisions: revisions.rows } : null;
+    return content.rows[0] ? contentFromRow(content.rows[0], revisions.rows) : null;
   }
 
   async patchContent(id: string, input: any, actorId: string | null) {
@@ -154,7 +186,8 @@ export class EditorialApiRepository {
         [id,snapshot.title,snapshot.bodyHtml,snapshot.bodyText,snapshot.excerpt,json(snapshot.seo),nextStatus,revisionNumber],
       );
       await this.auditWith(client,row.client_id,'content',id,'content.revised',actorId,{ revisionId, revisionNumber });
-      return { ...result.rows[0], revisionId };
+      const revisions = await client.query('SELECT * FROM editorial.content_revisions WHERE content_id=$1 ORDER BY revision_number DESC LIMIT 50', [id]);
+      return contentFromRow(result.rows[0], revisions.rows);
     }, this.pool);
   }
 
@@ -169,7 +202,7 @@ export class EditorialApiRepository {
       assertContentTransition(row.status, 'approved');
       const result = await client.query(`UPDATE editorial.contents SET status='approved',approved_revision_id=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *`, [id,revisionId]);
       await this.auditWith(client,row.client_id,'content',id,'content.approved',actorId,{ revisionId });
-      return result.rows[0];
+      return contentFromRow(result.rows[0]);
     }, this.pool);
   }
 

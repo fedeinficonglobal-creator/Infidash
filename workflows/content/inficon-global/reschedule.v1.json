@@ -1,0 +1,423 @@
+{
+  "name": "Content v1 - Inficon Global - Reschedule with Postiz",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-reschedule-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-1200, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const job=input.job??input;if(job.kind!=='reschedule'||!job.id||!job.client_id||!job.target_id||!job.leaseToken)throw new Error('Contrato reschedule v1 invalido');const pub=job.payload?.publication;if(!pub?.desiredScheduledAt||Number.isNaN(Date.parse(pub.desiredScheduledAt)))throw new Error('desiredScheduledAt ISO-8601 es obligatorio');return [{json:{job}}];"
+      },
+      "id": "validate-reschedule-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1000, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:600}) }}",
+        "options": {}
+      },
+      "id": "hb-reschedule-start-v1",
+      "name": "Heartbeat antes de Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-800, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-reschedule-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-600, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "conditions": [
+            {
+              "id": "b1a2c3d4-1111-4a5e-9f0c-7b1d4e6a2c58",
+              "leftValue": "={{ $('Validar trabajo').first().json.job.payload.publication.media?.[0]?.url }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "reuse-image-check-reschedule-v1",
+      "name": "Ya hay imagen reutilizable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-520, -160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'gpt-image-1-mini', prompt: 'Imagen de cabecera fotorrealista y profesional, sin texto superpuesto, para una publicacion de marketing digital sobre: ' + $('Validar trabajo').first().json.job.payload.publication.copy.slice(0, 300), size: '1024x1024', quality: 'medium', output_format: 'jpeg', output_compression: 80 }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "generate-image-reschedule-v1",
+      "name": "Generar imagen IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-560, 200],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data[0].b64_json",
+        "options": { "fileName": "publicacion.jpg", "mimeType": "image/jpeg" }
+      },
+      "id": "convert-image-reschedule-v1",
+      "name": "Convertir imagen a binario",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [-520, 200],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": { "operation": "uploadFile", "binaryProperty": "data" },
+      "id": "upload-image-postiz-reschedule-v1",
+      "name": "Subir imagen a Postiz",
+      "type": "n8n-nodes-postiz.postiz",
+      "typeVersion": 1,
+      "position": [-480, 200],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=requested.media?.[0]?.url??generatedImagePath??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');const instanceKey=String(account.instance_key||'').toLowerCase();let postizSettings;if(instanceKey.includes('facebook')){postizSettings=[{key:'__type',stringValue:'facebook'}];}else if(instanceKey.includes('instagram')){postizSettings=[{key:'post_type',stringValue:'post'}];}else if(instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google')){postizSettings=[{key:'topicType',stringValue:'STANDARD'},{key:'callToActionType',stringValue:'LEARN_MORE'},{key:'callToActionUrl',stringValue:requested.externalUrl??''}];}else{postizSettings=[];}const oldPostizPostId=requested.postizPostId?String(requested.postizPostId):null;return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl:requested.externalUrl??'',imageUrl,postizInstance:account.instance_key,postizSettings,oldPostizPostId}}];"
+      },
+      "id": "prepare-reschedule-v1",
+      "name": "Preparar reprogramacion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-400, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "conditions": [
+            {
+              "id": "c2b3d4e5-2222-4a5e-9f0c-7b1d4e6a2c58",
+              "leftValue": "={{ $('Preparar reprogramacion').first().json.oldPostizPostId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "has-old-post-reschedule-v1",
+      "name": "Hay publicacion anterior en Postiz",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-260, 0]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $env.POSTIZ_INTERNAL_API_URL + '/public/v1/posts/' + $('Preparar reprogramacion').first().json.oldPostizPostId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $env.POSTIZ_API_KEY }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "delete-old-post-reschedule-v1",
+      "name": "Eliminar publicacion anterior en Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-120, -80],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "type": "schedule",
+        "date": "={{ $('Preparar reprogramacion').first().json.desiredScheduledAt }}",
+        "posts": {
+          "post": [
+            {
+              "integrationId": "={{ $('Preparar reprogramacion').first().json.integrationId }}",
+              "settings": { "setting": "={{ $('Preparar reprogramacion').first().json.postizSettings }}" },
+              "value": {
+                "contentItem": [
+                  {
+                    "content": "={{ $('Preparar reprogramacion').first().json.copy }}",
+                    "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
+                    "image": {
+                      "imageItem": [
+                        { "id": "img1", "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}" }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "postiz-create-reschedule-v1",
+      "name": "Postiz1",
+      "type": "n8n-nodes-postiz.postiz",
+      "typeVersion": 1,
+      "position": [80, 0],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-reschedule-success-v1",
+      "name": "Heartbeat despues de Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar reprogramacion').first().json;const response=$('Postiz1').first().json;const postId=response.postId??response.id;if(!postId)throw new Error('Postiz no devolvio postId');const publication={status:'scheduled',confirmedScheduledAt:req.desiredScheduledAt,postizPostId:String(postId),providerPostId:null,externalUrl:null,publishedAt:null,errorCode:null,errorMessage:null};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:'postiz.rescheduled',sourceEventId:`postiz:${req.postizInstance}:${postId}:rescheduled`,occurredAt:new Date().toISOString(),publicationStatus:'scheduled',payload:{accountId:req.accountId,postizPostId:String(postId),oldPostizPostId:req.oldPostizPostId,confirmedScheduledAt:req.desiredScheduledAt}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',publication,event,result:{workflowVersion:1,state:'scheduled'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "normalize-reschedule-v1",
+      "name": "Normalizar reprogramacion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({clientId:$('Validar trabajo').first().json.job.client_id,leaseToken:$('Validar trabajo').first().json.job.leaseToken,leaseSeconds:300}) }}",
+        "options": {}
+      },
+      "id": "hb-reschedule-error-v1",
+      "name": "Heartbeat despues de error Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar reprogramacion').first().json;const err=$('Postiz1').first().json;const raw=err.error??err;const statusCode=Number(raw.httpCode??raw.statusCode??raw.status??0);const confirmed=statusCode>=400&&statusCode<500&&statusCode!==408&&statusCode!==409&&statusCode!==429;const state=confirmed?'failed':'unknown';const message=String(raw.message??raw.description??'Resultado ambiguo de Postiz al reprogramar').slice(0,4000);const publication={status:state,confirmedScheduledAt:null,postizPostId:null,providerPostId:null,externalUrl:null,publishedAt:null,errorCode:statusCode?String(statusCode):(confirmed?'POSTIZ_REJECTED':'POSTIZ_AMBIGUOUS'),errorMessage:message};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:confirmed?'postiz.reschedule_rejected':'postiz.reschedule_ambiguous',sourceEventId:`postiz-reschedule-attempt:${req.postizInstance}:${job.id}`,occurredAt:new Date().toISOString(),publicationStatus:state,payload:{accountId:req.accountId,oldPostizPostId:req.oldPostizPostId,statusCode:statusCode||null,errorMessage:message,reconcileRequired:!confirmed}};return [{json:{schemaVersion:1,clientId:job.client_id,status:state,publication,event,result:{workflowVersion:1,reconcileRequired:!confirmed},error:message,leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "classify-error-reschedule-v1",
+      "name": "Clasificar error Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-reschedule-v1",
+      "name": "Registrar evento Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Normalizar reprogramacion').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Normalizar reprogramacion').first().json.clientId,status:$('Normalizar reprogramacion').first().json.status,publication:$('Normalizar reprogramacion').first().json.publication,result:$('Normalizar reprogramacion').first().json.result,leaseToken:$('Normalizar reprogramacion').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-reschedule-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "event-reschedule-error-v1",
+      "name": "Registrar evento ambiguo o fallo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Clasificar error Postiz').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Clasificar error Postiz').first().json.clientId,status:$('Clasificar error Postiz').first().json.status,publication:$('Clasificar error Postiz').first().json.publication,result:$('Clasificar error Postiz').first().json.result,error:$('Clasificar error Postiz').first().json.error,leaseToken:$('Clasificar error Postiz').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "result-reschedule-error-v1",
+      "name": "Guardar fallo o unknown",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 420]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo", "type": "main", "index": 0 }]] },
+    "Validar trabajo": { "main": [[{ "node": "Heartbeat antes de Postiz", "type": "main", "index": 0 }]] },
+    "Heartbeat antes de Postiz": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
+    "Cargar contexto Infidash": { "main": [[{ "node": "Ya hay imagen reutilizable", "type": "main", "index": 0 }]] },
+    "Ya hay imagen reutilizable": {
+      "main": [
+        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }],
+        [{ "node": "Generar imagen IA", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generar imagen IA": {
+      "main": [
+        [{ "node": "Convertir imagen a binario", "type": "main", "index": 0 }],
+        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }]
+      ]
+    },
+    "Convertir imagen a binario": {
+      "main": [
+        [{ "node": "Subir imagen a Postiz", "type": "main", "index": 0 }],
+        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }]
+      ]
+    },
+    "Subir imagen a Postiz": {
+      "main": [
+        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }],
+        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }]
+      ]
+    },
+    "Preparar reprogramacion": { "main": [[{ "node": "Hay publicacion anterior en Postiz", "type": "main", "index": 0 }]] },
+    "Hay publicacion anterior en Postiz": {
+      "main": [
+        [{ "node": "Eliminar publicacion anterior en Postiz", "type": "main", "index": 0 }],
+        [{ "node": "Postiz1", "type": "main", "index": 0 }]
+      ]
+    },
+    "Eliminar publicacion anterior en Postiz": {
+      "main": [
+        [{ "node": "Postiz1", "type": "main", "index": 0 }],
+        [{ "node": "Postiz1", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postiz1": {
+      "main": [
+        [{ "node": "Heartbeat despues de Postiz", "type": "main", "index": 0 }],
+        [{ "node": "Heartbeat despues de error Postiz", "type": "main", "index": 0 }]
+      ]
+    },
+    "Heartbeat despues de Postiz": { "main": [[{ "node": "Normalizar reprogramacion", "type": "main", "index": 0 }]] },
+    "Normalizar reprogramacion": { "main": [[{ "node": "Registrar evento Postiz", "type": "main", "index": 0 }]] },
+    "Registrar evento Postiz": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] },
+    "Heartbeat despues de error Postiz": { "main": [[{ "node": "Clasificar error Postiz", "type": "main", "index": 0 }]] },
+    "Clasificar error Postiz": { "main": [[{ "node": "Registrar evento ambiguo o fallo", "type": "main", "index": 0 }]] },
+    "Registrar evento ambiguo o fallo": { "main": [[{ "node": "Guardar fallo o unknown", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "active": false
+}

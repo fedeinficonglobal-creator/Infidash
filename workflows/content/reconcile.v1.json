@@ -111,7 +111,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.POSTIZ_API_KEY }}"
+              "value": "={{ $env.POSTIZ_API_KEY }}"
             }
           ]
         },
