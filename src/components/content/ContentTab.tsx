@@ -4,6 +4,7 @@ import { es } from 'date-fns/locale';
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Clock3, FilePlus2, LayoutList, LoaderCircle, Plus, RefreshCw, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { useClientStore } from '../../store/useClientStore.js';
 import { useContentStore } from '../../store/useContentStore.js';
+import { getClientIntegrations } from '../../services/infidashApi.js';
 import { canCancelPublication, canReschedulePublication, filterItems, formatEditorialDate, isOutsideMonth, itemsOnDay, jobsForTimeline, monthDays, monthLabel, plainTextPreview, statusLabel } from '../../lib/content.js';
 import type { PlanItem } from '../../services/contentApi.js';
 import { cn } from '../../lib/utils.js';
@@ -87,11 +88,22 @@ function DetailPanel() {
   useEffect(() => { if (item) setDraft({ title: item.title, theme: item.theme ?? '', rationale: item.rationale ?? '', format: item.format ?? '', keywordPrimary: item.keywordPrimary ?? '', keywords: item.keywords.join(', '), entities: item.entities.join(', '), cta: item.cta ?? '', plannedAt: item.plannedAt ? format(parseISO(item.plannedAt), "yyyy-MM-dd'T'HH:mm") : '' }); }, [item]);
   useEffect(() => { if (content) setContentDraft({ title: content.title, bodyHtml: content.bodyHtml ?? '', bodyText: content.bodyText ?? '', excerpt: content.excerpt ?? '' }); }, [content]);
   useEffect(() => { if (content) setScheduleDraft({ accountId: '', desiredScheduledAt: item?.plannedAt ? format(parseISO(item.plannedAt), "yyyy-MM-dd'T'HH:mm") : '', externalUrl: '', copy: content.excerpt ?? '' }); }, [content, item?.plannedAt]);
+  const selectedAccount = publishingAccounts.find((account) => account.id === scheduleDraft.accountId);
+  const requiresActionUrl = /business|gmb|google/i.test(selectedAccount?.instanceKey ?? '');
+  useEffect(() => {
+    if (!requiresActionUrl || !item || scheduleDraft.externalUrl.trim()) return;
+    let cancelled = false;
+    void getClientIntegrations(token, item.clientId).then(({ integrations }) => {
+      if (cancelled) return;
+      const siteUrl = integrations.find((integration) => integration.provider === 'wordpress' && integration.isActive)?.config.siteUrl;
+      if (siteUrl?.trim()) setScheduleDraft((current) => (current.externalUrl.trim() ? current : { ...current, externalUrl: siteUrl.trim() }));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requiresActionUrl, scheduleDraft.accountId, item?.clientId, token]);
   if (!item) return null;
   const admin = role === 'admin';
   const latestRevision = content?.revisions[0];
-  const selectedAccount = publishingAccounts.find((account) => account.id === scheduleDraft.accountId);
-  const requiresActionUrl = /business|gmb|google/i.test(selectedAccount?.instanceKey ?? '');
   const tabs = [['brief', 'Brief'], ['content', 'Contenido'], ['publications', 'Publicaciones'], ['history', 'Historial']] as const;
   return <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" role="dialog" aria-modal="true" aria-label={`Detalle de ${item.title}`} onMouseDown={(event) => { if (event.currentTarget === event.target) void select(token, null); }}><aside className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur"><div className="flex items-start justify-between gap-4"><div><ContentStatusBadge status={item.status} /><h2 className="mt-2 text-xl font-bold text-slate-900">{item.title}</h2><p className="mt-1 text-xs text-slate-500">{formatEditorialDate(item.plannedAt)}</p></div><Button onClick={() => void select(token, null)} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar detalle"><X className="size-4" /></Button></div><div className="mt-4 flex gap-1 overflow-x-auto" role="tablist">{tabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={cn('rounded-lg px-3 py-2 text-xs font-bold', tab === id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100')}>{label}</button>)}</div></div>
