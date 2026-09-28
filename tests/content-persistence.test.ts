@@ -130,6 +130,38 @@ test('job heartbeat is bound to the authorized client as well as the lease', asy
   assert.deepEqual(calls[0].values, ['40789475-9d0d-47ae-b8f4-44b6761a12fd', 'client-a', '43daf834-6356-4642-9478-b43988c72878', 120]);
 });
 
+test('getContent maps snake_case columns to the camelCase shape the frontend reads', async () => {
+  const fake: Queryable = {
+    async query<T extends QueryResultRow>(sql: string) {
+      if (sql.includes('FROM editorial.contents')) {
+        return {
+          command: 'SELECT', rowCount: 1, oid: 0, fields: [],
+          rows: [{
+            id: 'content-1', client_id: 'client-a', plan_item_id: 'plan-1', title: 'Título', body_html: '<p>hola</p>',
+            body_text: 'hola', excerpt: 'extracto', seo: {}, status: 'review', current_revision: 2,
+            approved_revision_id: null, version: 3, created_at: '2026-09-24T10:00:00.000Z', updated_at: '2026-09-24T11:00:00.000Z',
+          }] as T[],
+        } satisfies QueryResult<T>;
+      }
+      return {
+        command: 'SELECT', rowCount: 1, oid: 0, fields: [],
+        rows: [{
+          id: 'rev-2', revision_number: 2, content_snapshot: { title: 'Título' }, author_type: 'user', author_id: 'user-1',
+          created_at: '2026-09-24T11:00:00.000Z',
+        }] as T[],
+      } satisfies QueryResult<T>;
+    },
+  };
+  const repository = new EditorialApiRepository(fake as unknown as Pool);
+  const content = await repository.getContent('content-1');
+  assert.deepEqual(content, {
+    id: 'content-1', clientId: 'client-a', planItemId: 'plan-1', title: 'Título', bodyHtml: '<p>hola</p>', bodyText: 'hola',
+    excerpt: 'extracto', seo: {}, status: 'review', currentRevision: 2, approvedRevisionId: null, version: 3,
+    createdAt: '2026-09-24T10:00:00.000Z', updatedAt: '2026-09-24T11:00:00.000Z',
+    revisions: [{ id: 'rev-2', revisionNumber: 2, contentSnapshot: { title: 'Título' }, authorType: 'user', authorId: 'user-1', createdAt: '2026-09-24T11:00:00.000Z' }],
+  });
+});
+
 test('pool configuration is explicit and bounded', () => {
   const config = buildPostgresPoolConfig({
     DATABASE_URL: 'postgresql://user:pass@db/infidash',

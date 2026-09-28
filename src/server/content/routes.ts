@@ -159,7 +159,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   app.get('/api/content/items/:id', route(async (request, reply) => {
     const session=await requireHuman(request); const content=await repository.getContent(requireString(paramsOf(request).id,'id',100));
     if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
-    requireClientAccess(session,(content as any).client_id);
+    requireClientAccess(session,(content as any).clientId);
     return reply.send({content});
   }));
 
@@ -228,7 +228,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     const contentId=requireString(paramsOf(request).id,'id',100);
     const content=await repository.getContent(contentId);
     if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');
-    requireClientAccess(session,(content as any).client_id);
+    requireClientAccess(session,(content as any).clientId);
     return reply.send(await repository.listPublications(contentId,parseLimit(queryOf(request).limit),decodeCursor(queryOf(request).cursor)));
   }));
 

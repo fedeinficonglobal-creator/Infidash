@@ -17,7 +17,7 @@ function jsonFiles(dir: string): string[] {
 const workflowFiles = jsonFiles(workflowRoot).filter((path) => /\.v1\.json$/.test(path));
 
 test('exports n8n v1 are sanitized and all connection references resolve', () => {
-  assert.equal(workflowFiles.length, 5);
+  assert.equal(workflowFiles.length, 7);
   for (const path of workflowFiles) {
     const source = readFileSync(path, 'utf8');
     const workflow = JSON.parse(source);

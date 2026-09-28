@@ -206,7 +206,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   },
   saveContent: async (token, id, input) => {
     set({ isSaving: true, conflict: null });
-    try { const response = await updateContentItem(token, id, input); set({ content: response.content }); }
+    try { const response = await updateContentItem(token, id, input); set((state) => ({ content: state.content ? { ...state.content, ...response.content } : response.content })); }
     catch (error) { if (isConflict(error)) set({ conflict: 'El contenido cambió mientras lo editabas. Recarga para conservar la última versión.' }); else set({ detailError: message(error) }); throw error; }
     finally { set({ isSaving: false }); }
   },
