@@ -217,18 +217,21 @@ test('scheduling pins the approved revision and creates publication and job in o
   assert.ok(statements.includes('COMMIT'));
 });
 
-test('Google Business Profile scheduling refuses to enqueue without its required Learn More URL', async () => {
+test('Google Business Profile scheduling does not require a Learn More URL from the app (n8n falls back to editorial_config.site_url)', async () => {
   let inserted = false;
-  const pool = poolWithClient(async (sql) => {
+  const pool = poolWithClient(async (sql, values = []) => {
     if(sql.includes('SELECT enabled FROM editorial.client_settings')) return {rows:[{enabled:true}],rowCount:1};
     if(sql.includes('SELECT * FROM editorial.contents')) return {rows:[{id:'content-1',client_id:'client-a',version:3,status:'approved',approved_revision_id:'revision-2'}],rowCount:1};
     if(sql.includes('SELECT * FROM editorial.publishing_accounts')) return {rows:[{id:'account-1',client_id:'client-a',active:true,platform:'blog',instance_key:'inficonglobal-gmb'}],rowCount:1};
-    if(sql.includes('INSERT INTO editorial.publications')) inserted = true;
+    if(sql.includes('SELECT * FROM editorial.jobs')) return {rows:[],rowCount:0};
+    if(sql.includes('SELECT id FROM editorial.publications')) return {rows:[],rowCount:0};
+    if(sql.includes('INSERT INTO editorial.publications')) { inserted = true; return {rows:[{id:values[0],client_id:values[1],content_id:values[2],account_id:values[3],content_revision_id:values[5],external_url:values[9],status:'pending'}],rowCount:1}; }
+    if(sql.includes('INSERT INTO editorial.jobs')) return {rows:[{id:values[0],client_id:values[1],kind:'publish',target_id:values[2],status:'pending'}],rowCount:1};
     return {rows:[],rowCount:0};
   });
   const repository = new EditorialApiRepository(pool);
-  await assert.rejects(() => repository.schedulePublication({clientId:'client-a',contentId:'content-1',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',idempotencyKey:'schedule-gmb-missing-url'},'user-1'), (error:any) => error.code === 'CTA_URL_REQUIRED' && error.statusCode === 400);
-  assert.equal(inserted, false);
+  await repository.schedulePublication({clientId:'client-a',contentId:'content-1',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',idempotencyKey:'schedule-gmb-no-url'},'user-1');
+  assert.equal(inserted, true);
 });
 
 test('generate_plan creates a durable calendar and passes it as both job target and payload contract', async () => {

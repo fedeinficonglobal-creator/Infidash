@@ -236,8 +236,6 @@ export class EditorialApiRepository {
       if(content.status!=='approved' || !content.approved_revision_id) throw new ContentApiError(409,'REVISION_NOT_APPROVED','El contenido debe tener una revisión aprobada');
       const accountResult=await client.query("SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE AND provider='postiz' FOR SHARE",[input.clientId,input.accountId]);
       if(!accountResult.rows[0]) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','La cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
-      const instanceKey=String((accountResult.rows[0] as any).instance_key??'').toLowerCase();
-      if((instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google'))&&!input.externalUrl) throw new ContentApiError(400,'CTA_URL_REQUIRED','Google Business Profile requiere una URL de destino para el boton Learn More');
       const existingJob=await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
       if(existingJob.rows[0]){
         const job=existingJob.rows[0] as any;
