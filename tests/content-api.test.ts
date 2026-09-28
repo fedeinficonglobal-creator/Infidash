@@ -175,7 +175,15 @@ test('admin can list accounts and atomically request a publication while viewer 
   await app.close();
 });
 
-function poolWithClient(query: (sql: string, values?: unknown[]) => Promise<{ rows: any[]; rowCount?: number }>) {
+const ALL_BINDINGS = { generate_plan: 'wf-plan', generate_content: 'wf-generate', publish: 'wf-publish', reschedule: 'wf-reschedule', cancel: 'wf-cancel', reconcile: 'wf-reconcile' };
+
+/** Fake pool whose client answers the workflow-binding lookup with every kind bound unless the test overrides it. */
+function poolWithClient(handler: (sql: string, values?: unknown[]) => Promise<{ rows: any[]; rowCount?: number }>) {
+  const query = async (sql: string, values?: unknown[]) => {
+    const result = await handler(sql, values);
+    if (sql.includes('SELECT workflow_bindings FROM editorial.client_settings') && !result.rows.length) return { rows: [{ workflow_bindings: ALL_BINDINGS }], rowCount: 1 };
+    return result;
+  };
   const client={query,release(){}};
   return {connect:async()=>client,query} as unknown as Pool;
 }
@@ -314,4 +322,228 @@ test('summary and paginated search use editorial dates and SQL filters before LI
   assert.match(query.sql,/p\.title ILIKE \$4/);
   assert.ok(query.sql.indexOf('ILIKE')<query.sql.lastIndexOf('LIMIT'));
   assert.equal(query.values.at(-1),26);
+});
+
+test('publication state machine accepts external cancellation and reconcile discovering a post after a failure', () => {
+  for (const from of ['scheduled', 'sending', 'unknown', 'failed'] as const) assert.doesNotThrow(() => assertPublicationTransition(from, 'cancelled'), `${from} -> cancelled`);
+  assert.doesNotThrow(() => assertPublicationTransition('failed', 'scheduled'));
+  assert.doesNotThrow(() => assertPublicationTransition('failed', 'published'));
+  assert.throws(() => assertPublicationTransition('cancelled', 'scheduled'), (error: any) => error.code === 'INVALID_TRANSITION');
+  assert.throws(() => assertPublicationTransition('published', 'cancelled'), (error: any) => error.code === 'INVALID_TRANSITION');
+});
+
+const PLAN_ROW = { id: 'plan-1', client_id: 'client-a', calendar_id: 'calendar-1', title: 'Guía de bombas', theme: 'Industria', rationale: 'Demanda alta', format: 'blog', keyword_primary: 'bombas', keywords: ['bombas', 'caudal'], entities: ['ISO 9906'], cta: 'Pide presupuesto', priority: 'alta', planned_at: '2026-10-12T08:00:00.000Z', status: 'generating', version: 5 };
+
+test('release-generation is admin-only, client-scoped and passes the expected version', async () => {
+  const calls: any[] = [];
+  const app = Fastify({ logger: false });
+  await app.register(contentRoutes, {
+    repository: { ...fakeRepository(), async getPlanItem(id: string) { return id === 'plan-1' ? PLAN_ROW : null; }, async releaseGeneration(id: string, version: number, actorId: string) { calls.push({ id, version, actorId }); return { ...PLAN_ROW, status: 'generation_failed', version: version + 1 }; } } as any,
+    resolveHumanSession: (token: string) => token === 'admin' ? { user: { id: 'user-1', role: 'admin' as const, clientIds: null } } : token === 'viewer' ? { user: { id: 'user-2', role: 'viewer' as const, clientIds: ['client-a'] } } : null,
+  });
+  const forbidden = await app.inject({ method: 'POST', url: '/api/content/plan-items/plan-1/release-generation', headers: { authorization: 'Bearer viewer' }, payload: { version: 5 } });
+  assert.equal(forbidden.statusCode, 403);
+  const missing = await app.inject({ method: 'POST', url: '/api/content/plan-items/plan-x/release-generation', headers: { authorization: 'Bearer admin' }, payload: { version: 5 } });
+  assert.equal(missing.statusCode, 404);
+  const noVersion = await app.inject({ method: 'POST', url: '/api/content/plan-items/plan-1/release-generation', headers: { authorization: 'Bearer admin' }, payload: {} });
+  assert.equal(noVersion.statusCode, 400);
+  const released = await app.inject({ method: 'POST', url: '/api/content/plan-items/plan-1/release-generation', headers: { authorization: 'Bearer admin' }, payload: { version: 5 } });
+  assert.equal(released.statusCode, 200);
+  assert.equal(released.json().planItem.status, 'generation_failed');
+  assert.deepEqual(calls, [{ id: 'plan-1', version: 5, actorId: 'user-1' }]);
+  await app.close();
+});
+
+function releasePool(options: { plan?: any; activeJob?: boolean } = {}) {
+  const statements: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = poolWithClient(async (sql, values = []) => {
+    statements.push({ sql, values });
+    if (sql.includes('SELECT client_id FROM editorial.plan_items')) return { rows: options.plan === null ? [] : [{ client_id: (options.plan ?? PLAN_ROW).client_id }], rowCount: options.plan === null ? 0 : 1 };
+    if (sql.includes('FROM editorial.plan_items') && sql.includes('FOR UPDATE')) return { rows: options.plan === null ? [] : [options.plan ?? PLAN_ROW], rowCount: 1 };
+    if (sql.includes('FROM editorial.jobs') && sql.includes("status='running' AND locked_until>now()")) return { rows: options.activeJob ? [{ id: 'job-live' }] : [], rowCount: options.activeJob ? 1 : 0 };
+    if (sql.includes('UPDATE editorial.jobs')) return { rows: [{ id: 'job-old-1' }, { id: 'job-old-2' }], rowCount: 2 };
+    if (sql.includes('UPDATE editorial.plan_items')) return { rows: [{ ...PLAN_ROW, status: 'generation_failed', version: 6 }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  return { pool, statements };
+}
+
+test('releasing a stuck generation fails the plan item and neutralizes every stale generate_content job', async () => {
+  const { pool, statements } = releasePool();
+  const planItem = await new EditorialApiRepository(pool).releaseGeneration('plan-1', 5, 'user-1');
+  assert.equal((planItem as any).status, 'generation_failed');
+  const jobUpdate = statements.find(({ sql }) => sql.includes('UPDATE editorial.jobs'))!;
+  assert.match(jobUpdate.sql, /kind='generate_content'/);
+  assert.match(jobUpdate.sql, /attempt_count=GREATEST\(attempt_count,8\)/);
+  assert.match(jobUpdate.sql, /lease_token=NULL/);
+  assert.match(jobUpdate.sql, /locked_until=NULL/);
+  assert.match(jobUpdate.sql, /'pending','failed','unknown'/);
+  assert.match(jobUpdate.sql, /status='running' AND \(locked_until IS NULL OR locked_until<=now\(\)\)/);
+  assert.ok(jobUpdate.values.includes('Liberado manualmente por un administrador'));
+  const planUpdate = statements.find(({ sql }) => sql.includes('UPDATE editorial.plan_items'))!;
+  assert.match(planUpdate.sql, /status='generation_failed'/);
+  assert.match(planUpdate.sql, /version=version\+1/);
+  const audit = statements.find(({ sql, values }) => sql.includes('INSERT INTO editorial.events') && values.includes('plan_item.generation_released'));
+  assert.ok(audit, 'audit event recorded');
+  assert.ok(statements.some(({ sql }) => sql === 'BEGIN') && statements.some(({ sql }) => sql === 'COMMIT'));
+});
+
+test('releasing a generation refuses stale versions, non-generating items and live executions', async () => {
+  await assert.rejects(() => new EditorialApiRepository(releasePool({ plan: null }).pool).releaseGeneration('plan-1', 5, 'user-1'), (error: any) => error.statusCode === 404);
+  await assert.rejects(() => new EditorialApiRepository(releasePool().pool).releaseGeneration('plan-1', 4, 'user-1'), (error: any) => error.code === 'STALE_VERSION');
+  await assert.rejects(() => new EditorialApiRepository(releasePool({ plan: { ...PLAN_ROW, status: 'review' } }).pool).releaseGeneration('plan-1', 5, 'user-1'), (error: any) => error.statusCode === 409 && error.code === 'INVALID_TRANSITION');
+  const live = releasePool({ activeJob: true });
+  await assert.rejects(() => new EditorialApiRepository(live.pool).releaseGeneration('plan-1', 5, 'user-1'), (error: any) => error.statusCode === 409 && error.code === 'JOB_IN_PROGRESS' && /espera a que termine o caduque/.test(error.message));
+  assert.equal(live.statements.some(({ sql }) => sql.includes('UPDATE editorial.jobs')), false);
+});
+
+test('releasing a generation locks its jobs before the plan item, in the same order as claimJob, so the two cannot deadlock', async () => {
+  const { pool, statements } = releasePool();
+  await new EditorialApiRepository(pool).releaseGeneration('plan-1', 5, 'user-1');
+  const jobLock = statements.findIndex(({ sql }) => sql.includes('FROM editorial.jobs') && sql.includes('FOR UPDATE') && !sql.includes('locked_until>now()'));
+  const planLock = statements.findIndex(({ sql }) => sql.includes('FROM editorial.plan_items') && sql.includes('FOR UPDATE'));
+  assert.ok(jobLock >= 0, 'generate_content jobs are locked');
+  assert.ok(jobLock < planLock, 'jobs are locked before the plan item');
+});
+
+test('a generation still unconfirmed points the operator to the release action instead of a nonexistent WordPress reconcile', async () => {
+  const pool = poolWithClient(async (sql) => {
+    if (sql.includes('SELECT enabled FROM editorial.client_settings')) return { rows: [{ enabled: true }], rowCount: 1 };
+    if (sql.includes('SELECT * FROM editorial.plan_items')) return { rows: [PLAN_ROW], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  await assert.rejects(() => new EditorialApiRepository(pool).createJob({ clientId: 'client-a', kind: 'generate_content', targetId: 'plan-1', expectedVersion: 5, idempotencyKey: 'gen-1', payload: {} }, 'user-1'), (error: any) => error.code === 'GENERATION_RELEASE_REQUIRED' && /Marcar como fallida/.test(error.message) && !/reconcilia WordPress/.test(error.message));
+});
+
+test('generate_content jobs carry a server-built plan item snapshot and ignore browser-supplied payloads', async () => {
+  let inserted: any;
+  const pool = poolWithClient(async (sql, values = []) => {
+    if (sql.includes('SELECT enabled FROM editorial.client_settings')) return { rows: [{ enabled: true }], rowCount: 1 };
+    if (sql.includes('SELECT * FROM editorial.plan_items')) return { rows: [{ ...PLAN_ROW, status: 'approved' }], rowCount: 1 };
+    if (sql.includes('INSERT INTO editorial.jobs')) { inserted = { payload: JSON.parse(String(values[6])), hash: values[5] }; return { rows: [{ id: values[0], payload: inserted.payload }], rowCount: 1 }; }
+    return { rows: [], rowCount: 0 };
+  });
+  const input = { clientId: 'client-a', kind: 'generate_content', targetId: 'plan-1', expectedVersion: 5, idempotencyKey: 'gen-2', payload: { planItem: { title: 'Título inyectado', keywords: ['spam'] } } };
+  await new EditorialApiRepository(pool).createJob({ ...input }, 'user-1');
+  assert.deepEqual(inserted.payload, {
+    schemaVersion: 1,
+    planItem: { id: 'plan-1', calendarId: 'calendar-1', title: 'Guía de bombas', theme: 'Industria', rationale: 'Demanda alta', format: 'blog', keywordPrimary: 'bombas', keywords: ['bombas', 'caudal'], entities: ['ISO 9906'], cta: 'Pide presupuesto', priority: 'alta', plannedAt: '2026-10-12T08:00:00.000Z', version: 5 },
+  });
+  assert.equal(inserted.hash, requestHash({ kind: 'generate_content', targetId: 'plan-1', expectedVersion: 5, payload: input.payload }));
+});
+
+test('claim rebuilds the generate_content plan item payload on every attempt', async () => {
+  const writes: any[] = [];
+  const pool = poolWithClient(async (sql, values = []) => {
+    if (sql.includes('SELECT j.* FROM editorial.jobs')) return { rows: [{ id: 'job-1', client_id: 'client-a', kind: 'generate_content', target_id: 'plan-1', payload: {} }], rowCount: 1 };
+    if (sql.includes('SELECT status FROM editorial.plan_items')) return { rows: [{ status: 'generating' }], rowCount: 1 };
+    if (sql.includes('SELECT * FROM editorial.plan_items')) return { rows: [{ ...PLAN_ROW, title: 'Título actualizado' }], rowCount: 1 };
+    if (sql.includes('UPDATE editorial.jobs SET payload')) { writes.push(JSON.parse(String(values[1]))); return { rows: [], rowCount: 1 }; }
+    if (sql.includes("UPDATE editorial.jobs SET status='running'")) return { rows: [{ id: 'job-1', payload: writes[0] }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  const claimed: any = await new EditorialApiRepository(pool).claimJob({ leaseSeconds: 60, executionId: 'run-1' }, ['*']);
+  assert.equal(writes[0].planItem.title, 'Título actualizado');
+  assert.deepEqual(writes[0].planItem.keywords, ['bombas', 'caudal']);
+  assert.equal(claimed.payload.planItem.title, 'Título actualizado');
+});
+
+function guardPool(activeRows: any[] = []) {
+  const statements: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = poolWithClient(async (sql, values = []) => {
+    statements.push({ sql, values });
+    if (sql.includes('SELECT enabled FROM editorial.client_settings')) return { rows: [{ enabled: true }], rowCount: 1 };
+    if (sql.includes('AS active_job')) return { rows: activeRows, rowCount: activeRows.length };
+    if (sql.includes('SELECT * FROM editorial.plan_items')) return { rows: [{ ...PLAN_ROW, status: 'approved' }], rowCount: 1 };
+    if (sql.includes('INSERT INTO editorial.jobs')) return { rows: [{ id: values[0] }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  return { pool, statements };
+}
+
+test('createJob refuses a duplicate while an equivalent job is still active or auto-retrying', async () => {
+  const blocked = guardPool([{ id: 'job-running' }]);
+  await assert.rejects(() => new EditorialApiRepository(blocked.pool).createJob({ clientId: 'client-a', kind: 'generate_content', targetId: 'plan-1', expectedVersion: 5, idempotencyKey: 'gen-dup', payload: {} }, 'user-1'), (error: any) => error.statusCode === 409 && error.code === 'JOB_IN_PROGRESS' && error.message === 'Ya hay un trabajo igual en curso');
+  assert.equal(blocked.statements.some(({ sql }) => sql.includes('INSERT INTO editorial.jobs')), false);
+  const guard = blocked.statements.find(({ sql }) => sql.includes('AS active_job'))!;
+  assert.match(guard.sql, /status='pending'/);
+  assert.match(guard.sql, /status='running' AND \(locked_until>now\(\) OR \(\$4::boolean AND attempt_count<8\)\)/);
+  assert.match(guard.sql, /status='failed' AND \$4::boolean AND attempt_count<8/);
+  assert.deepEqual(guard.values, ['client-a', 'generate_content', 'plan-1', true]);
+
+  const plan = guardPool();
+  await new EditorialApiRepository(plan.pool).createJob({ clientId: 'client-a', kind: 'generate_plan', idempotencyKey: 'plan-new', payload: {} }, 'user-1');
+  assert.deepEqual(plan.statements.find(({ sql }) => sql.includes('AS active_job'))!.values, ['client-a', 'generate_plan', null, true]);
+});
+
+test('publication retries do not count an old failed publish attempt as active, and replays still win', async () => {
+  const publish = guardPool();
+  await new EditorialApiRepository(publish.pool).createJob({ clientId: 'client-a', kind: 'publish', targetId: 'publication-1', expectedVersion: 2, idempotencyKey: 'publish-retry', payload: {} }, 'user-1').catch(() => undefined);
+  const guard = publish.statements.find(({ sql }) => sql.includes('AS active_job'))!;
+  assert.deepEqual(guard.values, ['client-a', 'publish', 'publication-1', false]);
+
+  const hash = requestHash({ kind: 'generate_plan', targetId: null, expectedVersion: null, payload: {} });
+  const replayPool = poolWithClient(async (sql) => {
+    if (sql.includes('SELECT enabled FROM editorial.client_settings')) return { rows: [{ enabled: true }], rowCount: 1 };
+    if (sql.includes('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2')) return { rows: [{ id: 'job-old', request_hash: hash }], rowCount: 1 };
+    if (sql.includes('AS active_job')) return { rows: [{ id: 'job-old' }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  const replay = await new EditorialApiRepository(replayPool).createJob({ clientId: 'client-a', kind: 'generate_plan', idempotencyKey: 'plan-replay', payload: {} }, 'user-1');
+  assert.equal(replay.replayed, true);
+});
+
+function planJobPool(options: { editorialConfig?: any; calendarStart?: any } = {}) {
+  const inserted: { calendar?: unknown[]; job?: any } = {};
+  const pool = poolWithClient(async (sql, values = []) => {
+    if (sql.includes('SELECT enabled FROM editorial.client_settings')) return { rows: [{ enabled: true }], rowCount: 1 };
+    if (sql.includes('SELECT editorial_config FROM editorial.client_settings')) return { rows: options.editorialConfig === undefined ? [] : [{ editorial_config: options.editorialConfig }], rowCount: 1 };
+    if (sql.includes('FROM editorial.calendars')) return { rows: [{ id: values[1], start_date: options.calendarStart ?? null }], rowCount: 1 };
+    if (sql.includes('INSERT INTO editorial.calendars')) { inserted.calendar = values; return { rows: [], rowCount: 1 }; }
+    if (sql.includes('INSERT INTO editorial.jobs')) { inserted.job = JSON.parse(String(values[6])); return { rows: [{ id: values[0] }], rowCount: 1 }; }
+    return { rows: [], rowCount: 0 };
+  });
+  return { pool, inserted };
+}
+
+test('generate_plan anchors a new calendar on the next Monday and the client weeks horizon', async (context) => {
+  context.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-30T15:00:00.000Z') });
+  const { pool, inserted } = planJobPool({ editorialConfig: { weeksHorizon: 2 } });
+  await new EditorialApiRepository(pool).createJob({ clientId: 'client-a', kind: 'generate_plan', idempotencyKey: 'plan-dates', payload: {} }, 'user-1');
+  assert.equal(inserted.calendar?.[3], '2026-10-05');
+  assert.equal(inserted.calendar?.[4], '2026-10-18');
+  assert.equal(inserted.job.periodStart, '2026-10-05');
+
+  const monday = planJobPool();
+  context.mock.timers.setTime(new Date('2026-10-05T08:00:00.000Z').getTime());
+  await new EditorialApiRepository(monday.pool).createJob({ clientId: 'client-a', kind: 'generate_plan', idempotencyKey: 'plan-monday', payload: {} }, 'user-1');
+  assert.equal(monday.inserted.calendar?.[3], '2026-10-12');
+  assert.equal(monday.inserted.calendar?.[4], '2026-11-08');
+});
+
+test('generate_plan honours a supplied start date and an existing calendar start date', async () => {
+  const supplied = planJobPool({ editorialConfig: { weeks_horizon: 3 } });
+  await new EditorialApiRepository(supplied.pool).createJob({ clientId: 'client-a', kind: 'generate_plan', idempotencyKey: 'plan-supplied', payload: { calendar: { startDate: '2026-11-02' } } }, 'user-1');
+  assert.equal(supplied.inserted.calendar?.[3], '2026-11-02');
+  assert.equal(supplied.inserted.calendar?.[4], '2026-11-22');
+  assert.equal(supplied.inserted.job.periodStart, '2026-11-02');
+
+  const existing = planJobPool({ calendarStart: '2026-12-07' });
+  await new EditorialApiRepository(existing.pool).createJob({ clientId: 'client-a', kind: 'generate_plan', targetId: '11111111-1111-4111-8111-111111111111', idempotencyKey: 'plan-existing', payload: {} }, 'user-1');
+  assert.equal(existing.inserted.calendar, undefined);
+  assert.equal(existing.inserted.job.periodStart, '2026-12-07');
+});
+
+test('a failed reconcile report leaves the publication status untouched so it can be retried', async () => {
+  const statements: string[] = [];
+  const pool = poolWithClient(async (sql) => {
+    statements.push(sql);
+    if (sql.includes('SELECT * FROM editorial.jobs WHERE id=$1 FOR UPDATE')) return { rows: [{ id: 'job-1', client_id: 'client-a', kind: 'reconcile', target_id: 'publication-1', status: 'running', lease_token: 'lease-1', locked_until: new Date(Date.now() + 60_000).toISOString() }], rowCount: 1 };
+    if (sql.includes('SELECT status FROM editorial.publications')) return { rows: [{ status: 'scheduled' }], rowCount: 1 };
+    if (sql.includes('UPDATE editorial.jobs SET status')) return { rows: [{ id: 'job-1', status: 'failed' }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  const finished = await new EditorialApiRepository(pool).finishJob('job-1', 'lease-1', { schemaVersion: 1, clientId: 'client-a', status: 'failed', error: 'Heartbeat 503', result: { workflowVersion: 1, stage: 'reconcile' } }, 'service-1');
+  assert.equal((finished.job as any).status, 'failed');
+  assert.equal(statements.some((sql) => sql.includes('UPDATE editorial.publications')), false);
 });

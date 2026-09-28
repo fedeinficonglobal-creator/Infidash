@@ -6,20 +6,22 @@ Los exports de `workflows/content` son la base versionada y sanitizada del pilot
 
 | Export | Responsabilidad |
 |---|---|
-| `dispatcher.v1.json` | Reserva un trabajo con lease, obtiene el binding autorizado, renueva el lease y espera a que termine el workflow hijo. |
-| `inficon-global/plan.v1.json` | Ejecuta las fuentes y agentes del export original (Trends, GA4, Search Console, Apify, rankings e IA), normaliza el plan y entrega `planItems`. |
-| `inficon-global/generate.v1.json` | Ejecuta investigador, redactor, humanizador y WordPress; crea un borrador, registra `draft` y entrega una revisión. |
-| `inficon-global/publish.v1.json` | Exige una fecha ISO-8601, ejecuta el nodo Postiz real y registra `scheduled`; clasifica rechazos y resultados ambiguos. |
-| `reconcile.v1.json` | Consulta la API real de Postiz por intervalo, contrasta el ID y registra `scheduled`, `published`, `failed`, `cancelled` o `unknown`. |
+| `dispatcher.v1.json` | Reserva un trabajo con lease, obtiene el binding autorizado, renueva el lease (1800 s) y espera a que termine el workflow hijo. Solo un 204 significa "sin trabajo": cualquier otra respuesta de la reserva distinta de 200 con `job` hace fallar la ejecución de forma visible. Si falla el binding, el contexto, la renovación o el hijo, informa el trabajo como `failed` (`stage: dispatcher`) en lugar de esperar a que venza el lease. |
+| `inficon-global/plan.v1.json` | Ejecuta las fuentes y agentes del export original (Trends, GA4, Search Console, JINA, rankings e IA), normaliza el plan y entrega `planItems`. Las fuentes son opcionales: el error de una fuente, su procesado o su agente produce un análisis `unavailable` (nodos `Sin datos: …`) en la misma entrada del merge. Solo el núcleo secuencial (contexto, heartbeats, síntesis final y normalización) informa `failed`. |
+| `inficon-global/generate.v1.json` | Ejecuta investigador, redactor, humanizador y WordPress; crea un borrador, registra `draft` (evento sobre el `plan_item`) y entrega una revisión. Los fallos antes de WordPress son `failed`; un error del propio nodo WordPress se clasifica como ambiguo (`unknown`) o rechazo; cualquier fallo posterior es `unknown` e incluye `wordpressPostId`. |
+| `inficon-global/publish.v1.json` | Exige una fecha ISO-8601, valida cuenta, copy y URL de GMB (`Validar publicacion`) antes de generar la imagen, ejecuta el nodo Postiz de la red correspondiente y registra `scheduled`; clasifica rechazos y resultados ambiguos. Los fallos antes de Postiz son `failed`; cualquier fallo posterior es `unknown` (`POST_WRITE_FAILURE`) con el `postizPostId` si se conoce. |
+| `inficon-global/reschedule.v1.json` | Borra la publicación anterior en Postiz y crea otra en la nueva fecha (Postiz no tiene endpoint de actualización). Mismo enrutado de fallos que `publish`: `failed` antes de escribir en Postiz y `unknown` después. |
+| `inficon-global/cancel.v1.json` | Borra la publicación en Postiz (un 404 cuenta como ya cancelada). Los fallos son `failed` salvo que el DELETE ya se haya ejecutado; entonces son `unknown` con el `postizPostId`. |
+| `reconcile.v1.json` | Consulta la API real de Postiz por intervalo, contrasta el ID y registra `scheduled`, `published`, `failed`, `cancelled` o `unknown`. Sin `postizPostId` no consulta Postiz: cierra la publicación como `failed` (`POSTIZ_ID_MISSING`) para comprobarla y reenviarla. Sus fallos se informan como `failed` y se reintentan sin tocar el estado de la publicación. |
 
-Los tres exports de cliente contienen los nodos externos reales de los exports fuente. Se han retirado triggers antiguos, SQL directo, Sheets, backfill, credenciales e IDs de instalación. Las referencias rotas `calendario editorial2` y `Webhook inficon1` ya no existen. Los workflows toman el trabajo reservado y el contexto de Infidash, y escriben exclusivamente mediante `result` y `events`.
+Los exports de cliente contienen los nodos externos reales de los exports fuente. Se han retirado triggers antiguos, SQL directo, Sheets, backfill, credenciales e IDs de instalación. Las referencias rotas `calendario editorial2` y `Webhook inficon1` ya no existen. Los workflows toman el trabajo reservado y el contexto de Infidash, y escriben exclusivamente mediante `result` y `events`.
 
 ## Configurar los nodos existentes de Inficon
 
 Conservar una copia inactiva de cada export original durante el montaje. Los nodos ya están conectados, pero sus credenciales se eliminan deliberadamente del JSON:
 
 1. En `plan.v1`, enlazar credenciales de OpenAI, GA4, Search Console y Apify. La configuración editorial procede de `editorial.client_settings`; SerpAPI, Serprobot y GA4 usan variables de entorno. Revisar los actores Apify disponibles en la instancia antes de activar.
-2. En `generate.v1`, enlazar OpenAI, SerpAPI y WordPress. El artículo se toma del `planItem` del trabajo/contexto y WordPress queda fijado a `draft`.
+2. En `generate.v1`, enlazar OpenAI, SerpAPI y WordPress. El artículo se toma de `job.payload.planItem` (construido por Infidash) y, solo si falta, del contexto; WordPress queda fijado a `draft`.
 3. En `publish.v1`, enlazar la credencial Postiz del nodo comunitario. La cuenta, copy, medio y fecha proceden del trabajo y del contexto; no existe `now + 5 minutos`.
 4. En `reconcile.v1`, configurar la URL y token de la API de Postiz. El normalizador admite las colecciones `posts`, `data`, `items` o un array, pero debe contrastarse con la versión instalada.
 
@@ -29,7 +31,11 @@ Cada operación externa larga renueva el lease antes y después. Las ramas de er
 
 - `generate_plan` siempre recibe un `target_id` que identifica un calendario existente. Si quien llama no aporta uno, la API crea el calendario dentro de la misma transacción y añade `payload.calendarId` y `payload.calendar_id`; el child workflow exige que los tres valores coincidan.
 - `publish`, `reschedule`, `cancel` y `reconcile` no confían en un payload del navegador. Al crear y al reclamar un trabajo, Infidash vuelve a leer `publications` y `publishing_accounts` y escribe `payload.publication` completo. Incluye las variantes camelCase y snake_case de cuenta, fecha deseada, copy, media, IDs de Postiz/proveedor y datos de cuenta. Esto hace que un reintento use los datos persistidos y sanee los trabajos heredados incompletos.
-- Una ambigüedad de WordPress (timeout, red o 5xx) termina como `unknown` con `reconcileRequired`. La propuesta permanece en `generating`, por lo que no se puede abrir otro trabajo de generación y duplicar el borrador hasta revisar/reconciliar el resultado. Los fallos confirmados sí permanecen reintentables.
+- `generate_plan` también recibe `payload.periodStart` (YYYY-MM-DD): la fecha indicada, el inicio del calendario existente o el próximo lunes. Un calendario nuevo se crea con ese inicio y un fin de `editorial_config.weeksHorizon` semanas (4 por defecto).
+- `generate_content` recibe `payload.planItem` completo (título, tema, justificación, formato, keywords, entidades, CTA, prioridad, fecha y versión) leído de la base de datos al crear y al reclamar el trabajo; el payload del navegador se ignora.
+- Mientras exista un trabajo equivalente activo (pendiente, con lease vigente o fallido que aún se reintenta solo), crear otro devuelve `409 JOB_IN_PROGRESS`. Para `publish`, `reschedule` y `cancel` un intento fallido no cuenta como activo porque nunca se reintenta automáticamente.
+- Una ambigüedad de WordPress (timeout, red o 5xx) termina como `unknown` con `reconcileRequired`. La propuesta permanece en `generating`, por lo que no se puede abrir otro trabajo de generación y duplicar el borrador. Tras revisar WordPress, un administrador usa «Marcar como fallida» (`POST /api/content/plan-items/:id/release-generation`): la propuesta pasa a `generation_failed` y los trabajos `generate_content` pendientes, fallidos, caducados o `unknown` quedan congelados para que no se reclamen ni apliquen. Los fallos confirmados sí permanecen reintentables.
+- `cancel.v1.json` y `reschedule.v1.json` (inficon-global) tienen el mismo enrutado de errores que el resto de workflows. La interfaz solo muestra cada acción cuando `editorial-readiness` indica un binding para ese tipo.
 
 ## Configuración de staging
 
@@ -40,7 +46,7 @@ Cada operación externa larga renueva el lease antes y después. Las ramas de er
 5. Ejecutar manualmente cada child workflow con un trabajo de prueba y una base de staging. Verificar evento, resultado, expiración de lease y repetición idempotente.
 6. Activar primero los children, luego el dispatcher. Desactivar triggers antiguos antes de habilitar el nuevo dispatcher. Mantener una sola ruta de escritura.
 
-Las fuentes y proveedores principales tienen salida de error conectada. Antes del piloto también se debe enlazar un Error Workflow global de n8n para fallos del propio motor, de un heartbeat o de la API de Infidash. Un fallo de infraestructura puede impedir registrar el resultado; en ese caso el lease vence y otro worker recupera el trabajo.
+Todos los nodos que pueden fallar tienen salida de error conectada a una rama que informa a Infidash (o, en el plan, a un análisis de sustitución). Si el propio informe de fallo no llega (por ejemplo `LEASE_LOST`), la ejecución termina en error de forma deliberada. Antes del piloto también se debe enlazar un Error Workflow global de n8n para fallos del propio motor. Los tests de `tests/content-workflows.test.ts` ejecutan el `jsCode` de estos nodos con datos simulados, pero no sustituyen una prueba en n8n.
 
 ## Datos pendientes para completar el piloto
 

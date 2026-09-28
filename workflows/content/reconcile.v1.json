@@ -23,7 +23,8 @@
       "position": [
         -1000,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -51,7 +52,8 @@
       "position": [
         -800,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -75,7 +77,8 @@
       "position": [
         -600,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -88,7 +91,8 @@
       "position": [
         -400,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -155,7 +159,8 @@
       "position": [
         40,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -168,7 +173,8 @@
       "position": [
         260,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -196,7 +202,8 @@
       "position": [
         480,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -224,7 +231,8 @@
       "position": [
         700,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -252,7 +260,8 @@
       "position": [
         40,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -265,7 +274,8 @@
       "position": [
         260,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -293,7 +303,8 @@
       "position": [
         480,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -322,6 +333,153 @@
         700,
         420
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b7e1296e-d80c-4904-8571-3034575f9d41",
+              "leftValue": "={{ String($('Validar trabajo').first().json.job.payload?.publication?.postizPostId ?? '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "31eb374f-6c1e-4787-9b78-c258b70a58aa",
+      "name": "Tiene postizPostId",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -500,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const p=job.payload?.publication??{};const errorMessage='Postiz no devolvió un identificador. Comprueba en Postiz si la publicación existe antes de reenviarla.';const publication={status:'failed',postizPostId:null,errorCode:'POSTIZ_ID_MISSING',errorMessage};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:'postiz.reconcile_missing_id',sourceEventId:`postiz-reconcile-missing:${job.id}`,occurredAt:new Date().toISOString(),publicationStatus:'failed',payload:{accountId:p.accountId??null,errorCode:'POSTIZ_ID_MISSING',errorMessage}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',publication,event,result:{workflowVersion:1,reconciled:true,postizPostIdMissing:true},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "a717027b-3e8f-4918-afbe-a0a2b58f4b21",
+      "name": "Marcar sin id Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        -420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "3466f4e5-f338-4313-a6c3-1623a2d6a68c",
+      "name": "Registrar evento sin id Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        -420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Marcar sin id Postiz').first().json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({schemaVersion:1,clientId:$('Marcar sin id Postiz').first().json.clientId,status:'succeeded',publication:$('Marcar sin id Postiz').first().json.publication,result:$('Marcar sin id Postiz').first().json.result,leaseToken:$('Marcar sin id Postiz').first().json.leaseToken}) }}",
+        "options": {}
+      },
+      "id": "51b2823a-6e7e-4c49-96b3-ab7d016b0e1b",
+      "name": "Guardar resultado sin id Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        -420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo reconciliando con Postiz').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'reconcile'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "9ae05f6d-8126-4fab-a5e2-aef5b658465d",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "df70b341-d5fa-4ae6-ab80-3b122ba26616",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        800
+      ]
     }
   ],
   "connections": {
@@ -344,6 +502,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -355,6 +520,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -362,7 +534,14 @@
       "main": [
         [
           {
-            "node": "Preparar consulta Postiz",
+            "node": "Tiene postizPostId",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -374,6 +553,13 @@
         [
           {
             "node": "Consultar publicaciones Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -406,6 +592,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -414,6 +607,13 @@
         [
           {
             "node": "Registrar evento reconciliado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -428,6 +628,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -436,6 +643,13 @@
         [
           {
             "node": "Marcar reconciliacion unknown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -450,6 +664,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -458,6 +679,102 @@
         [
           {
             "node": "Guardar unknown Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tiene postizPostId": {
+      "main": [
+        [
+          {
+            "node": "Preparar consulta Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar sin id Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar sin id Postiz": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento sin id Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento sin id Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado sin id Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado sin id Postiz": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }

@@ -30,7 +30,8 @@
       "position": [
         656,
         2032
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -51,8 +52,7 @@
       "position": [
         912,
         2928
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -83,7 +83,8 @@
       "position": [
         800,
         2832
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -104,8 +105,7 @@
       "position": [
         912,
         3216
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -136,7 +136,8 @@
       "position": [
         864,
         3072
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -157,8 +158,7 @@
       "position": [
         928,
         3392
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -189,7 +189,8 @@
       "position": [
         704,
         3280
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -210,8 +211,7 @@
       "position": [
         944,
         3616
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -242,7 +242,8 @@
       "position": [
         704,
         3504
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -263,8 +264,7 @@
       "position": [
         400,
         3904
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -295,7 +295,8 @@
       "position": [
         672,
         3744
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -308,7 +309,8 @@
       "position": [
         -656,
         2592
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -363,7 +365,8 @@
       "position": [
         128,
         2032
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -385,8 +388,7 @@
       "position": [
         912,
         2704
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -481,7 +483,8 @@
       "position": [
         112,
         2832
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -540,7 +543,8 @@
       "position": [
         176,
         3744
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -591,7 +595,8 @@
         3280
       ],
       "id": "ddb475ec-c4b1-4742-bc61-3193f1f7754c",
-      "name": "Code querys1"
+      "name": "Code querys1",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -604,7 +609,8 @@
         3072
       ],
       "id": "0e5690ae-0d6e-4499-a2ec-6b29813cf344",
-      "name": "search console pages1"
+      "name": "search console pages1",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {},
@@ -628,7 +634,8 @@
         1808
       ],
       "id": "c3313fab-4c5a-466a-acae-02ce2b4407d1",
-      "name": "Code in JavaScript4"
+      "name": "Code in JavaScript4",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -661,7 +668,8 @@
         2272
       ],
       "id": "56cae06d-f3ca-47fe-80d3-546ac4e9e478",
-      "name": "Code in JavaScript5"
+      "name": "Code in JavaScript5",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -694,7 +702,8 @@
         2480
       ],
       "id": "4aa5cb28-d260-4305-88f1-8dec498aeffa",
-      "name": "Code in JavaScript6"
+      "name": "Code in JavaScript6",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -707,7 +716,8 @@
         3504
       ],
       "id": "dcf91dd5-c854-4648-bbc6-aedad6d1a693",
-      "name": "Code in JavaScript7"
+      "name": "Code in JavaScript7",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -799,7 +809,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst find = type => items.find(i => i.json.analysis_type === type)?.json || {};\n\n// ── Helpers de formateo ──────────────────────────────────────────────────\nconst NA = '(sin datos)';\nconst list = (arr, mapper) => {\n  if (!Array.isArray(arr) || arr.length === 0) return '  ' + NA;\n  return arr.map(x => '  - ' + (mapper ? mapper(x) : x)).join('\\n');\n};\n// Si el parser detectó un error de JSON, devolvemos el fallback en vez de romper el prompt\nconst errBlock = b => b && b.error\n  ? `⚠️ No se pudo parsear el análisis de este bloque (${b.error}).\\nResumen crudo: ${b.insights || b.raw || NA}`\n  : null;\n\n// ── TENDENCIAS ────────────────────────────────────────────────────────────\nconst trends = find('trends');\nconst trends_data = errBlock(trends) || [\n  `Resumen: ${trends.resumen || NA}`,\n  `Tendencias relevantes:`,\n  list(trends.tendencias_relevantes, t => `${t.query} (urgencia ${t.urgencia}): ${t.motivo}`),\n  `Ángulos de contenido sugeridos:`,\n  list(trends.angulos_de_contenido)\n].join('\\n');\n\n// ── HISTÓRICO GA4 ─────────────────────────────────────────────────────────\nconst hist = find('historical');\nconst historical_data = errBlock(hist) || [\n  `Resumen: ${hist.resumen || NA}`,\n  `Patrones ganadores:`,\n  list(hist.patrones_ganadores),\n  `Contenido a actualizar:`,\n  list(hist.contenido_a_actualizar),\n  `Contenido a replicar en el nuevo calendario:`,\n  list(hist.contenido_a_replicar)\n].join('\\n');\n\n// ── ESTACIONALIDAD ────────────────────────────────────────────────────────\nconst seasonal = find('seasonal');\nconst seasonal_data = errBlock(seasonal) || [\n  `Resumen: ${seasonal.resumen || NA}`,\n  `Alerta estacional: ${seasonal.alerta_estacional || 'sin alertas próximas'}`,\n  `Temas a anticipar:`,\n  list(seasonal.temas_a_anticipar),\n  `Recomendación de timing: ${seasonal.recomendacion_timing || NA}`\n].join('\\n');\n\n// ── RANKINGS SERPLAB ──────────────────────────────────────────────────────\nconst serplab = find('serplab_rankings');\nconst serplab_data = errBlock(serplab) || [\n  `Resumen: ${serplab.resumen || NA}`,\n  `Keywords a rescatar (perdieron posición):`,\n  list(serplab.keywords_a_rescatar, k => `${k.keyword} (actual ${k.posicion_actual}, mejor ${k.mejor_posicion}): ${k.accion}`),\n  `Keywords cerca de página 1:`,\n  list(serplab.keywords_cerca_de_pagina_1, k => `${k.keyword} (pos ${k.posicion_actual}): ${k.accion}`),\n  `Oportunidades de alto valor sin explotar:`,\n  list(serplab.oportunidades_alto_valor_sin_explotar, k => `${k.keyword} (CPC €${k.cpc}): ${k.accion}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — PÁGINAS ──────────────────────────────────────────────\nconst sc = find('search_console');\nconst search_console_data = errBlock(sc) || [\n  `Resumen: ${sc.resumen || NA}`,\n  `Páginas a proteger (van bien, no tocar):`,\n  list(sc.paginas_proteger),\n  `Páginas a optimizar para mejorar CTR:`,\n  list(sc.paginas_optimizar_ctr, p => `${p.pagina} (pos ${p.posicion}): ${p.accion_sugerida}`),\n  `Páginas a reforzar con contenido nuevo (pillar/cluster):`,\n  list(sc.paginas_reforzar_con_contenido_nuevo, p => `${p.pagina}: ${p.tema_sugerido_para_pillar_o_cluster}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — QUERIES ──────────────────────────────────────────────\nconst queries = find('queries_analytics');\nconst queries_data = errBlock(queries) || [\n  `Resumen: ${queries.resumen || NA}`,\n  `Clusters de intención de búsqueda:`,\n  list(queries.clusters_de_intencion, c => `${c.tema} [prioridad ${c.prioridad}] (${(c.queries || []).join(', ')}): ${c.justificacion}`),\n  `Keywords con impresiones altas y pocos clicks (oportunidad):`,\n  list(queries.keywords_alta_impresion_bajo_click)\n].join('\\n');\n\n// ── COMPETIDORES Y PUBLICADOS (sin agente intermedio, se mantienen igual) ──\nconst comp = items.find(i => i.json.analysis_type === 'competitors')?.json || {};\nconst published = find('published_articles');\n\n// ── Datos DIRECTOS del nodo ⚙️ Configuración (incluye keywords) ────────────\nconst cfg = $('⚙️ Configuración1').item.json;\nconst keywordsRaw  = cfg.keywords || '';\nconst keywordsList = String(keywordsRaw).split(',').map(k => k.trim()).filter(Boolean);\n\n// Datos editoriales canónicos desde Infidash\nconst calendario = $('Cargar contexto Infidash').first().json.planItems || [];\n\nreturn [{ json: {\n  trends_data,\n  historical_data,\n  seasonal_data,\n  serplab_data,\n  search_console_data,\n  queries_data,\n  competitor_data:           JSON.stringify(comp,       null, 2),\n  published_data:            JSON.stringify(published,  null, 2),\n  calendario_editorial_data: JSON.stringify(calendario, null, 2),\n  config: {\n    topic:         cfg.topic,\n    weeks:         cfg.weeks_horizon,\n    country:       cfg.country,\n    keywords:      keywordsRaw,\n    keywords_list: keywordsList\n  }\n}}];\n"
+        "jsCode": "const items = $input.all();\nconst find = type => items.find(i => i.json.analysis_type === type)?.json || {};\n\n// ── Helpers de formateo ──────────────────────────────────────────────────\nconst NA = '(sin datos)';\nconst list = (arr, mapper) => {\n  if (!Array.isArray(arr) || arr.length === 0) return '  ' + NA;\n  return arr.map(x => '  - ' + (mapper ? mapper(x) : x)).join('\\n');\n};\n// Si el parser detectó un error de JSON, devolvemos el fallback en vez de romper el prompt\nconst errBlock = b => b && b.unavailable\n  ? `⚠️ Fuente no disponible (${b.error}). ${b.insights || NA}`\n  : b && b.error\n  ? `⚠️ No se pudo parsear el análisis de este bloque (${b.error}).\\nResumen crudo: ${b.insights || b.raw || NA}`\n  : null;\n\n// ── TENDENCIAS ────────────────────────────────────────────────────────────\nconst trends = find('trends');\nconst trends_data = errBlock(trends) || [\n  `Resumen: ${trends.resumen || NA}`,\n  `Tendencias relevantes:`,\n  list(trends.tendencias_relevantes, t => `${t.query} (urgencia ${t.urgencia}): ${t.motivo}`),\n  `Ángulos de contenido sugeridos:`,\n  list(trends.angulos_de_contenido)\n].join('\\n');\n\n// ── HISTÓRICO GA4 ─────────────────────────────────────────────────────────\nconst hist = find('historical');\nconst historical_data = errBlock(hist) || [\n  `Resumen: ${hist.resumen || NA}`,\n  `Patrones ganadores:`,\n  list(hist.patrones_ganadores),\n  `Contenido a actualizar:`,\n  list(hist.contenido_a_actualizar),\n  `Contenido a replicar en el nuevo calendario:`,\n  list(hist.contenido_a_replicar)\n].join('\\n');\n\n// ── ESTACIONALIDAD ────────────────────────────────────────────────────────\nconst seasonal = find('seasonal');\nconst seasonal_data = errBlock(seasonal) || [\n  `Resumen: ${seasonal.resumen || NA}`,\n  `Alerta estacional: ${seasonal.alerta_estacional || 'sin alertas próximas'}`,\n  `Temas a anticipar:`,\n  list(seasonal.temas_a_anticipar),\n  `Recomendación de timing: ${seasonal.recomendacion_timing || NA}`\n].join('\\n');\n\n// ── RANKINGS SERPLAB ──────────────────────────────────────────────────────\nconst serplab = find('serplab_rankings');\nconst serplab_data = errBlock(serplab) || [\n  `Resumen: ${serplab.resumen || NA}`,\n  `Keywords a rescatar (perdieron posición):`,\n  list(serplab.keywords_a_rescatar, k => `${k.keyword} (actual ${k.posicion_actual}, mejor ${k.mejor_posicion}): ${k.accion}`),\n  `Keywords cerca de página 1:`,\n  list(serplab.keywords_cerca_de_pagina_1, k => `${k.keyword} (pos ${k.posicion_actual}): ${k.accion}`),\n  `Oportunidades de alto valor sin explotar:`,\n  list(serplab.oportunidades_alto_valor_sin_explotar, k => `${k.keyword} (CPC €${k.cpc}): ${k.accion}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — PÁGINAS ──────────────────────────────────────────────\nconst sc = find('search_console');\nconst search_console_data = errBlock(sc) || [\n  `Resumen: ${sc.resumen || NA}`,\n  `Páginas a proteger (van bien, no tocar):`,\n  list(sc.paginas_proteger),\n  `Páginas a optimizar para mejorar CTR:`,\n  list(sc.paginas_optimizar_ctr, p => `${p.pagina} (pos ${p.posicion}): ${p.accion_sugerida}`),\n  `Páginas a reforzar con contenido nuevo (pillar/cluster):`,\n  list(sc.paginas_reforzar_con_contenido_nuevo, p => `${p.pagina}: ${p.tema_sugerido_para_pillar_o_cluster}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — QUERIES ──────────────────────────────────────────────\nconst queries = find('queries_analytics');\nconst queries_data = errBlock(queries) || [\n  `Resumen: ${queries.resumen || NA}`,\n  `Clusters de intención de búsqueda:`,\n  list(queries.clusters_de_intencion, c => `${c.tema} [prioridad ${c.prioridad}] (${(c.queries || []).join(', ')}): ${c.justificacion}`),\n  `Keywords con impresiones altas y pocos clicks (oportunidad):`,\n  list(queries.keywords_alta_impresion_bajo_click)\n].join('\\n');\n\n// ── COMPETIDORES Y PUBLICADOS (sin agente intermedio, se mantienen igual) ──\nconst comp = items.find(i => i.json.analysis_type === 'competitors')?.json || {};\nconst published = find('published_articles');\n\n// ── Datos DIRECTOS del nodo ⚙️ Configuración (incluye keywords) ────────────\nconst cfg = $('⚙️ Configuración1').first().json;\nconst keywordsRaw  = cfg.keywords || '';\nconst keywordsList = String(keywordsRaw).split(',').map(k => k.trim()).filter(Boolean);\n\n// Datos editoriales canónicos desde Infidash\nconst calendario = $('Cargar contexto Infidash').first().json.planItems || [];\n\nreturn [{ json: {\n  trends_data,\n  historical_data,\n  seasonal_data,\n  serplab_data,\n  search_console_data,\n  queries_data,\n  competitor_data:           JSON.stringify(comp,       null, 2),\n  published_data:            JSON.stringify(published,  null, 2),\n  calendario_editorial_data: JSON.stringify(calendario, null, 2),\n  config: {\n    topic:         cfg.topic,\n    weeks:         cfg.weeks_horizon,\n    country:       cfg.country,\n    keywords:      keywordsRaw,\n    keywords_list: keywordsList\n  }\n}}];\n"
       },
       "id": "f012d6fe-1cff-4aaf-a91d-40608e9e79e3",
       "name": "🧩 Preparar Contexto IA2",
@@ -808,7 +818,8 @@
       "position": [
         2256,
         2448
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -849,8 +860,7 @@
       "position": [
         2336,
         2736
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -863,7 +873,8 @@
       "position": [
         2800,
         2448
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {},
@@ -911,7 +922,8 @@
       "position": [
         -2260,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -964,7 +976,8 @@
       "position": [
         -1780,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -1006,7 +1019,8 @@
       "position": [
         2740,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -1034,11 +1048,12 @@
       "position": [
         2980,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const error=$json.error?.message??$json.message??'Fallo confirmado en fuente o IA';return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:String(error).slice(0,4000),result:{workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo confirmado en fuente o IA').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "fail-plan-v1",
       "name": "Preparar fallo confirmado",
@@ -1076,6 +1091,123 @@
         2740,
         500
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'published_articles',unavailable:true,source:'Infidash (contenidos existentes)',error,resumen:'Sin datos disponibles de Infidash (contenidos existentes)',insights:'Sin datos disponibles de Infidash (contenidos existentes)'}}];"
+      },
+      "id": "7d153638-c1a8-445d-b841-d94b071f3ab0",
+      "name": "Sin datos: Publicados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        1928
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'trends',unavailable:true,source:'Google Trends',error,resumen:'Sin datos disponibles de Google Trends',insights:'Sin datos disponibles de Google Trends'}}];"
+      },
+      "id": "34083696-27b0-49b0-96ec-132396f8759b",
+      "name": "Sin datos: Tendencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        2152
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'historical',unavailable:true,source:'GA4',error,resumen:'Sin datos disponibles de GA4',insights:'Sin datos disponibles de GA4'}}];"
+      },
+      "id": "948c69e5-4669-4308-9256-96f3fc83e311",
+      "name": "Sin datos: Histórico",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        2952
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'search_console',unavailable:true,source:'Search Console (páginas)',error,resumen:'Sin datos disponibles de Search Console (páginas)',insights:'Sin datos disponibles de Search Console (páginas)'}}];"
+      },
+      "id": "5556a914-c394-4fb9-b3b2-06d8dda15d3d",
+      "name": "Sin datos: SC Páginas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        3192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'queries_analytics',unavailable:true,source:'Search Console (consultas)',error,resumen:'Sin datos disponibles de Search Console (consultas)',insights:'Sin datos disponibles de Search Console (consultas)'}}];"
+      },
+      "id": "ac3086c9-101f-4e6c-acdf-0b99a8bc5ad6",
+      "name": "Sin datos: Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        3400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'serplab_rankings',unavailable:true,source:'SerpRobot',error,resumen:'Sin datos disponibles de SerpRobot',insights:'Sin datos disponibles de SerpRobot'}}];"
+      },
+      "id": "a7bd506c-e5ab-4087-ab57-ccc321bc1afb",
+      "name": "Sin datos: Rankings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        3624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'seasonal',unavailable:true,source:'SerpAPI (estacionalidad)',error,resumen:'Sin datos disponibles de SerpAPI (estacionalidad)',insights:'Sin datos disponibles de SerpAPI (estacionalidad)'}}];"
+      },
+      "id": "1747397f-4e50-46a5-b813-dd3767a6c71d",
+      "name": "Sin datos: Estacionalidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        3864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{articulos:[{id:1,header:'Sin datos disponibles de competidor 1',resumen:''}],total:0,unavailable:true,source:'competidor 1',error}}];"
+      },
+      "id": "62b56fdb-4b65-40e0-818d-dfe830c247ee",
+      "name": "Sin datos: Competidor 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1016,
+        2372
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{articulos:[{id:1,header:'Sin datos disponibles de competidor 2',resumen:''}],total:0,unavailable:true,source:'competidor 2',error}}];"
+      },
+      "id": "e7f62e8e-2662-4376-a210-0d013f230561",
+      "name": "Sin datos: Competidor 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1032,
+        2580
+      ]
     }
   ],
   "connections": {
@@ -1090,7 +1222,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Tendencias",
             "type": "main",
             "index": 0
           }
@@ -1105,6 +1237,13 @@
             "type": "main",
             "index": 1
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Tendencias",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1114,16 +1253,6 @@
           {
             "node": "🤖 Agente IA: Histórico",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1140,7 +1269,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Histórico",
             "type": "main",
             "index": 0
           }
@@ -1155,6 +1284,13 @@
             "type": "main",
             "index": 3
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Histórico",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1164,16 +1300,6 @@
           {
             "node": "🤖 Agente IA: SC Páginas",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1190,7 +1316,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: SC Páginas",
             "type": "main",
             "index": 0
           }
@@ -1205,6 +1331,13 @@
             "type": "main",
             "index": 4
           }
+        ],
+        [
+          {
+            "node": "Sin datos: SC Páginas",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1214,16 +1347,6 @@
           {
             "node": "🤖 Agente IA: Queries",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1240,7 +1363,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Queries",
             "type": "main",
             "index": 0
           }
@@ -1255,6 +1378,13 @@
             "type": "main",
             "index": 5
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Queries",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1264,16 +1394,6 @@
           {
             "node": "🤖 Agente IA: Rankings",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1290,7 +1410,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Rankings",
             "type": "main",
             "index": 0
           }
@@ -1305,6 +1425,13 @@
             "type": "main",
             "index": 6
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Rankings",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1314,16 +1441,6 @@
           {
             "node": "🤖 Agente IA: Estacionalidad",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1340,7 +1457,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Estacionalidad",
             "type": "main",
             "index": 0
           }
@@ -1354,6 +1471,13 @@
             "node": "🔗 Merge 4 Análisis2",
             "type": "main",
             "index": 7
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Estacionalidad",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1406,6 +1530,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1420,7 +1551,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Tendencias",
             "type": "main",
             "index": 0
           }
@@ -1432,6 +1563,13 @@
         [
           {
             "node": "🤖 Agente IA: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Tendencias",
             "type": "main",
             "index": 0
           }
@@ -1454,16 +1592,6 @@
           {
             "node": "🤖 Agente IA: Tendencias",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1502,7 +1630,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Histórico",
             "type": "main",
             "index": 0
           }
@@ -1514,6 +1642,13 @@
         [
           {
             "node": "🤖 Agente IA: Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Histórico",
             "type": "main",
             "index": 0
           }
@@ -1531,7 +1666,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Estacionalidad",
             "type": "main",
             "index": 0
           }
@@ -1543,6 +1678,13 @@
         [
           {
             "node": "🤖 Agente IA: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Estacionalidad",
             "type": "main",
             "index": 0
           }
@@ -1560,7 +1702,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Queries",
             "type": "main",
             "index": 0
           }
@@ -1578,7 +1720,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: SC Páginas",
             "type": "main",
             "index": 0
           }
@@ -1593,6 +1735,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Queries",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1601,6 +1750,13 @@
         [
           {
             "node": "🤖 Agente IA: SC Páginas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: SC Páginas",
             "type": "main",
             "index": 0
           }
@@ -1629,7 +1785,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Competidor 1",
             "type": "main",
             "index": 0
           }
@@ -1641,6 +1797,13 @@
         [
           {
             "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Competidor 1",
             "type": "main",
             "index": 0
           }
@@ -1658,7 +1821,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Competidor 2",
             "type": "main",
             "index": 0
           }
@@ -1673,6 +1836,13 @@
             "type": "main",
             "index": 1
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Competidor 2",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1681,6 +1851,13 @@
         [
           {
             "node": "🤖 Agente IA: Rankings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Rankings",
             "type": "main",
             "index": 0
           }
@@ -1698,7 +1875,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Rankings",
             "type": "main",
             "index": 0
           }
@@ -1716,7 +1893,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Competidor 1",
             "type": "main",
             "index": 0
           }
@@ -1734,7 +1911,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Sin datos: Competidor 2",
             "type": "main",
             "index": 0
           }
@@ -1757,6 +1934,13 @@
         [
           {
             "node": "🤖 IA: Plan de Contenidos2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -1787,16 +1971,6 @@
           {
             "node": "🤖 IA: Plan de Contenidos2",
             "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -1843,6 +2017,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1872,6 +2053,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1883,6 +2071,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Sin datos: Publicados",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1891,6 +2086,13 @@
         [
           {
             "node": "Heartbeat tras IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -1923,6 +2125,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1931,6 +2140,117 @@
         [
           {
             "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Publicados": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Tendencias": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Sin datos: Histórico": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Sin datos: SC Páginas": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Sin datos: Queries": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Sin datos: Rankings": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "Sin datos: Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis2",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "Sin datos: Competidor 1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Competidor 2": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }

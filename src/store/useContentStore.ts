@@ -10,9 +10,11 @@ import {
   getContentJobs,
   getContentSummary,
   getEditorialCalendars,
+  getEditorialReadiness,
   getPlanItems,
   getPublications,
   getPublishingAccounts,
+  releasePlanGeneration as releasePlanGenerationRequest,
   schedulePublication as schedulePublicationRequest,
   updateContentItem,
   updatePlanItem,
@@ -21,6 +23,7 @@ import {
   type ContentJob,
   type ContentSummary,
   type EditorialCalendar,
+  type EditorialReadiness,
   type JobKind,
   type PlanItem,
   type Publication,
@@ -41,6 +44,8 @@ interface ContentState {
   publishingAccounts: PublishingAccount[];
   calendars: EditorialCalendar[];
   jobs: ContentJob[];
+  /** Workflow readiness per client; missing means unknown, and job-creating actions stay hidden. */
+  readinessByClient: Record<string, EditorialReadiness>;
   isLoading: boolean;
   isLoadingMore: boolean;
   isRefreshing: boolean;
@@ -62,6 +67,8 @@ interface ContentState {
   select: (token: string, item: PlanItem | null) => Promise<void>;
   createPlanItem: (token: string, input: Record<string, unknown>) => Promise<PlanItem>;
   savePlanItem: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
+  releasePlanGeneration: (token: string, id: string, expectedVersion: number) => Promise<void>;
+  loadReadiness: (token: string, clientId: string) => Promise<void>;
   saveContent: (token: string, id: string, input: Record<string, unknown>) => Promise<void>;
   approveContent: (token: string, id: string, revisionId: string, version: number) => Promise<void>;
   schedulePublication: (token: string, input: { contentId: string; clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; externalUrl?: string; copy?: string }) => Promise<void>;
@@ -96,6 +103,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   publishingAccounts: [],
   calendars: [],
   jobs: [],
+  readinessByClient: {},
   isLoading: false,
   isLoadingMore: false,
   isRefreshing: false,
@@ -110,7 +118,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   setFilters: (partial) => set((state) => ({ filters: { ...state.filters, ...partial } })),
   reset: (clientId = '') => {
     listController?.abort(); detailController?.abort();
-    set({ filters: { ...EMPTY_FILTERS, clientId }, items: [], summary: null, nextCursor: null, selectedId: null, content: null, publications: [], publishingAccounts: [], calendars: [], jobs: [], error: null, detailError: null, conflict: null });
+    set({ filters: { ...EMPTY_FILTERS, clientId }, items: [], summary: null, nextCursor: null, selectedId: null, content: null, publications: [], publishingAccounts: [], calendars: [], jobs: [], readinessByClient: {}, error: null, detailError: null, conflict: null });
   },
   load: async (token) => {
     listController?.abort();
@@ -203,6 +211,20 @@ export const useContentStore = create<ContentState>((set, get) => ({
       else set({ detailError: message(error) });
       throw error;
     } finally { set({ isSaving: false }); }
+  },
+  releasePlanGeneration: async (token, id, expectedVersion) => {
+    set({ isSaving: true, conflict: null, detailError: null });
+    try {
+      const response = await releasePlanGenerationRequest(token, id, expectedVersion);
+      set((state) => ({ items: state.items.map((item) => item.id === id ? { ...item, ...response.planItem } : item) }));
+    } catch (error) {
+      if (isConflict(error)) set({ conflict: message(error) }); else set({ detailError: message(error) });
+      throw error;
+    } finally { set({ isSaving: false }); }
+  },
+  loadReadiness: async (token, clientId) => {
+    try { const readiness = await getEditorialReadiness(token, clientId); set((state) => ({ readinessByClient: { ...state.readinessByClient, [clientId]: readiness } })); }
+    catch { /* Unknown readiness keeps job actions hidden; EditorialJobsPanel reports the load error. */ }
   },
   saveContent: async (token, id, input) => {
     set({ isSaving: true, conflict: null });

@@ -54,6 +54,7 @@
         "options": {
           "response": {
             "response": {
+              "fullResponse": true,
               "neverError": true
             }
           }
@@ -119,11 +120,12 @@
       "position": [
         240,
         -80
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const job = $('Reservar siguiente trabajo').first().json.job;\nconst context = $input.first().json;\nconst workflowId = context.settings?.workflow_bindings?.[job.kind];\nif (!workflowId || typeof workflowId !== 'string') throw new Error(`No hay workflow binding para ${job.kind} y ${job.client_id}`);\nreturn [{ json: { job, workflowId } }];"
+        "jsCode": "const job = $('Interpretar reserva').first().json.job;\nconst context = $input.first().json;\nconst workflowId = context.settings?.workflow_bindings?.[job.kind];\nif (!workflowId || typeof workflowId !== 'string') throw new Error(`No hay workflow binding para ${job.kind} y ${job.client_id}`);\nreturn [{ json: { job, workflowId } }];"
       },
       "id": "binding-dispatcher-v1",
       "name": "Resolver workflow autorizado",
@@ -132,7 +134,8 @@
       "position": [
         480,
         -80
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -154,7 +157,8 @@
       "position": [
         1040,
         -80
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -172,7 +176,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({clientId:$json.job.client_id,leaseToken:$json.job.leaseToken,leaseSeconds:1200}) }}",
+        "body": "={{ JSON.stringify({clientId:$json.job.client_id,leaseToken:$json.job.leaseToken,leaseSeconds:1800}) }}",
         "options": {}
       },
       "id": "heartbeat-dispatcher-v1",
@@ -182,7 +186,8 @@
       "position": [
         700,
         -80
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -195,6 +200,60 @@
       "position": [
         820,
         -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response=$input.first()?.json??{};const status=Number(response.statusCode??0);if(status===204)return [];let body=response.body;if(typeof body==='string'&&body.trim()){try{body=JSON.parse(body);}catch(e){}}if(status===200&&body&&typeof body==='object'&&body.job)return [{json:{job:body.job}}];const detail=typeof body==='string'?body:JSON.stringify(body??response.error??null);throw new Error(`Reserva de trabajo fallida (HTTP ${status||'sin respuesta'}): ${String(detail).slice(0,500)}`);"
+      },
+      "id": "a2b56a4e-70c4-4230-86f3-3b79d36a8f8d",
+      "name": "Interpretar reserva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Interpretar reserva').first().json.job;const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fallo en el dispatcher').slice(0,4000);return [{json:{jobId:job.id,body:{schemaVersion:1,clientId:job.client_id,status:'failed',error,result:{workflowVersion:1,stage:'dispatcher'},leaseToken:job.leaseToken}}}];"
+      },
+      "id": "dda59d98-6e69-4b95-ba84-faf8fff8fcd3",
+      "name": "Preparar fallo dispatcher",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "9a5cb60e-9e84-41d9-9c68-4dfdd55a3841",
+      "name": "Guardar fallo dispatcher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        240
       ]
     }
   ],
@@ -225,7 +284,7 @@
       "main": [
         [
           {
-            "node": "Hay trabajo",
+            "node": "Interpretar reserva",
             "type": "main",
             "index": 0
           }
@@ -252,6 +311,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo dispatcher",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -260,6 +326,13 @@
         [
           {
             "node": "Renovar lease antes de ejecutar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo dispatcher",
             "type": "main",
             "index": 0
           }
@@ -274,6 +347,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo dispatcher",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -282,6 +362,40 @@
         [
           {
             "node": "Ejecutar workflow del cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar reserva": {
+      "main": [
+        [
+          {
+            "node": "Hay trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo dispatcher": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo dispatcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar workflow del cliente": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo dispatcher",
             "type": "main",
             "index": 0
           }

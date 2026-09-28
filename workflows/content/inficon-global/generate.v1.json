@@ -15,8 +15,7 @@
       "position": [
         -4576,
         2736
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -31,8 +30,7 @@
       "position": [
         -4384,
         2736
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -133,7 +131,8 @@
       "position": [
         -3456,
         2512
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -271,7 +270,8 @@
       "position": [
         -3304,
         2680
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {},
@@ -295,7 +295,8 @@
       "position": [
         -1200,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -323,7 +324,8 @@
       "position": [
         -1000,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -347,11 +349,12 @@
       "position": [
         -800,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const supplied=job.payload?.planItem??{};const base=(ctx.planItems??[]).find(x=>x.id===job.target_id)??{};const p={...base,...supplied};const wpAccount=(ctx.accounts??[]).find(x=>x.provider==='wordpress'&&x.active!==false);if(!wpAccount)throw new Error('Cuenta WordPress no autorizada para el cliente');if(!p.title)throw new Error('No existe el plan item objetivo');return [{json:{title:p.title,keywords:Array.isArray(p.keywords)?p.keywords.join(', '):(p.keywords??''),Entidades:Array.isArray(p.entities)?p.entities.join(', '):(p.entities??''),Justificacion:p.rationale??'',Formato:p.format??'blog',siteKey:wpAccount.instance_key,jobId:job.id}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const server=job.payload?.planItem;const p=server?.title?server:((ctx.planItems??[]).find(x=>x.id===job.target_id)??{});const wpAccount=(ctx.accounts??[]).find(x=>x.provider==='wordpress'&&x.active!==false);if(!wpAccount)throw new Error('Cuenta WordPress no autorizada para el cliente');if(!p.title)throw new Error('No existe el plan item objetivo');const list=v=>Array.isArray(v)?v.join(', '):(v??'');return [{json:{title:p.title,keywords:list(p.keywords),Entidades:list(p.entities),keywordPrimary:p.keywordPrimary??'',Tema:p.theme??'',Justificacion:p.rationale??'',Formato:p.format??'blog',CTA:p.cta??'',siteKey:wpAccount.instance_key,jobId:job.id}}];"
       },
       "id": "prepare-generate-v1",
       "name": "Preparar contenido aprobado",
@@ -360,7 +363,8 @@
       "position": [
         -600,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -388,7 +392,8 @@
       "position": [
         800,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -416,11 +421,12 @@
       "position": [
         1240,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const prepared=$('Preparar contenido aprobado').first().json;const cleaned=$('Limpia HTML2').first().json;const wp=$('WP INF Global').first().json;let headerImageUrl=null;try{headerImageUrl=$('Preparar imagen para WordPress').first().json.headerImageUrl??null;}catch(e){}const bodyHtml=cleaned.message?.content;if(!bodyHtml)throw new Error('El humanizador no devolvio HTML');if(!wp.id)throw new Error('WordPress no devolvio post id');const bodyText=bodyHtml.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/\\s+/g,' ').trim();const excerptLimit=200;const excerpt=bodyText.length<=excerptLimit?bodyText:bodyText.slice(0,excerptLimit).replace(/\\s+\\S*$/,'')+'…';const content={contentId:job.id,title:prepared.title,bodyHtml,bodyText,excerpt,seo:{keywords:prepared.keywords,entities:prepared.Entidades,headerImageUrl},promptVersion:'inficon-generate-v1',sourceReferences:[]};const event={schemaVersion:1,clientId:job.client_id,entityType:'content',entityId:content.contentId,eventType:'wordpress.draft_created',sourceEventId:`wordpress:${prepared.siteKey}:${wp.id}:draft`,occurredAt:new Date().toISOString(),payload:{siteKey:prepared.siteKey,postId:String(wp.id),editUrl:wp.link??null,status:'draft'}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',content,event,result:{workflowVersion:1,wordpressStatus:'draft',wordpressPostId:String(wp.id)},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const prepared=$('Preparar contenido aprobado').first().json;const cleaned=$('Limpia HTML2').first().json;const wp=$('WP INF Global').first().json;let headerImageUrl=null;try{headerImageUrl=$('Preparar imagen para WordPress').first().json.headerImageUrl??null;}catch(e){}const bodyHtml=cleaned.message?.content;if(!bodyHtml)throw new Error('El humanizador no devolvio HTML');if(!wp.id)throw new Error('WordPress no devolvio post id');const bodyText=bodyHtml.replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&#39;/g,\"'\").replace(/\\s+/g,' ').trim();const excerptLimit=200;const excerpt=bodyText.length<=excerptLimit?bodyText:bodyText.slice(0,excerptLimit).replace(/\\s+\\S*$/,'')+'…';const content={contentId:job.id,title:prepared.title,bodyHtml,bodyText,excerpt,seo:{keywords:prepared.keywords,entities:prepared.Entidades,headerImageUrl},promptVersion:'inficon-generate-v1',sourceReferences:[]};const event={schemaVersion:1,clientId:job.client_id,entityType:'plan_item',entityId:job.target_id,eventType:'wordpress.draft_created',sourceEventId:`wordpress:${prepared.siteKey}:${wp.id}:draft`,occurredAt:new Date().toISOString(),payload:{siteKey:prepared.siteKey,postId:String(wp.id),editUrl:wp.link??null,status:'draft'}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',content,event,result:{workflowVersion:1,wordpressStatus:'draft',wordpressPostId:String(wp.id)},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "normalize-generate-v1",
       "name": "Normalizar borrador y contenido",
@@ -429,7 +435,8 @@
       "position": [
         1460,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -457,7 +464,8 @@
       "position": [
         1680,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -485,11 +493,12 @@
       "position": [
         1900,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const raw=$json.error??$json;const error=raw?.message??$json.message??'Fallo generando contenido';const code=Number(raw?.httpCode??raw?.statusCode??raw?.status??0);const text=String(error).toLowerCase();const ambiguous=code===0||[408,409,429,500,502,503,504].includes(code)||/(timeout|timed out|network|socket|connection reset|econnreset)/.test(text);return [{json:{schemaVersion:1,clientId:job.client_id,status:ambiguous?'unknown':'failed',error:String(error).slice(0,4000),result:{workflowVersion:1,reconcileRequired:ambiguous,provider:'wordpress',idempotencyKey:`wordpress-draft:${job.id}`},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo generando contenido').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'before_wordpress',provider:'wordpress'},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "fail-generate-v1",
       "name": "Preparar fallo confirmado",
@@ -527,6 +536,32 @@
         1460,
         500
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo creando el borrador en WordPress').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);const code=Number(raw?.httpCode??raw?.statusCode??raw?.status??0);const text=message.toLowerCase();const ambiguous=code===0||[408,409,429,500,502,503,504].includes(code)||/(timeout|timed out|network|socket|connection reset|econnreset)/.test(text);return [{json:{schemaVersion:1,clientId:job.client_id,status:ambiguous?'unknown':'failed',error:message,result:{workflowVersion:1,reconcileRequired:ambiguous,provider:'wordpress',stage:'wordpress',idempotencyKey:`wordpress-draft:${job.id}`},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "8a1aa50a-f32b-4bbb-b7e1-fa2ad0f66620",
+      "name": "Preparar fallo WordPress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo tras crear el borrador en WordPress').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);let wordpressPostId=null;try{const wp=$('WP INF Global').first().json;wordpressPostId=wp?.id!=null?String(wp.id):null;}catch(e){}const error=`Borrador WordPress ${wordpressPostId??'(id desconocido)'} creado, pero no se pudo confirmar en Infidash: ${message}`.slice(0,4000);return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',error,result:{workflowVersion:1,reconcileRequired:true,provider:'wordpress',stage:'after_wordpress',wordpressPostId},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "aa676f86-0846-4c98-b924-2ea40dd37bd0",
+      "name": "Preparar fallo tras WordPress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        900
+      ]
     }
   ],
   "connections": {
@@ -549,6 +584,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -560,6 +602,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -568,6 +617,13 @@
         [
           {
             "node": "Preparar contenido aprobado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -587,6 +643,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -599,16 +662,6 @@
             "index": 0
           }
         ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
-            "index": 0
-          }
-        ]
       ]
     },
     "SerpAPI - Search Google2": {
@@ -617,16 +670,6 @@
           {
             "node": "AI company researcher2",
             "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ],
-      "main": [
-        [],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
             "index": 0
           }
         ]
@@ -705,6 +748,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -713,6 +763,13 @@
         [
           {
             "node": "Generar imagen cabecera IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -781,6 +838,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -795,7 +859,7 @@
         ],
         [
           {
-            "node": "Preparar fallo confirmado",
+            "node": "Preparar fallo WordPress",
             "type": "main",
             "index": 0
           }
@@ -828,6 +892,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras WordPress",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -836,6 +907,13 @@
         [
           {
             "node": "Registrar evento WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras WordPress",
             "type": "main",
             "index": 0
           }
@@ -850,6 +928,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras WordPress",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -858,6 +943,40 @@
         [
           {
             "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo WordPress": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo tras WordPress": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo tras WordPress",
             "type": "main",
             "index": 0
           }

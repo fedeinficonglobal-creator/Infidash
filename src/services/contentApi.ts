@@ -179,6 +179,10 @@ export function updatePlanItem(token: string, id: string, input: Record<string, 
   return request<{ planItem: PlanItem }>(`/api/content/plan-items/${encodeURIComponent(id)}`, token, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
+export function releasePlanGeneration(token: string, id: string, expectedVersion: number) {
+  return request<{ planItem: PlanItem }>(`/api/content/plan-items/${encodeURIComponent(id)}/release-generation`, token, { method: 'POST', body: JSON.stringify({ version: expectedVersion }) });
+}
+
 export function updateContentItem(token: string, id: string, input: Record<string, unknown>) {
   return request<{ content: ContentItem }>(`/api/content/items/${encodeURIComponent(id)}`, token, { method: 'PATCH', body: JSON.stringify(input) });
 }
