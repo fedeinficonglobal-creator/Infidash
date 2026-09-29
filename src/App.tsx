@@ -16,16 +16,16 @@ import { LoginScreen } from './components/LoginScreen';
 import { UsersAdminTab } from './components/UsersAdminTab';
 import { ContentTab } from './components/content/ContentTab';
 import { useClientStore } from './store/useClientStore';
+import type { SessionUser } from './services/infidashApi.js';
 import { getAvatarInitials } from './lib/avatarInitials.js';
+import { DASHBOARD_PATH, clientPath } from './lib/routes.js';
+import { useRouteSync } from './hooks/useRouteSync.js';
+import { useAppNavigation } from './hooks/useAppNavigation.js';
+import { Link, Navigate } from 'react-router';
 import { ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
 
 export default function App() {
   const {
-    activeClientId,
-    activeTabId,
-    clients,
-    setActiveTab,
-    setActiveClient,
     bootstrapSession,
     isBootstrapping,
     sessionToken,
@@ -54,14 +54,31 @@ export default function App() {
     return <LoginScreen isLoading={isAuthenticating} error={authError} onLogin={signIn} />;
   }
 
+  return <AuthenticatedApp currentUser={currentUser} />;
+}
+
+function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
+  const clients = useClientStore((state) => state.clients);
+  const route = useRouteSync();
+  const { goToUsersAdmin, goToProfile } = useAppNavigation();
+
+  if (route.type === 'redirect') {
+    return <Navigate to={route.to} replace />;
+  }
+
+  const activeClientId = route.type === 'view' ? route.clientId : null;
+  const activeTabId = route.type === 'view' ? route.tabId : 'overview';
   const activeClient = clients.find((c) => c.id === activeClientId) || null;
 
-  const openUsersAdmin = () => {
-    setActiveClient(null);
-    setActiveTab('users-admin');
-  };
-
   const renderTab = () => {
+    if (route.type === 'pending') {
+      return (
+        <div className="flex items-center justify-center py-24">
+          <LoaderCircle className="size-6 animate-spin text-brand-primary" />
+        </div>
+      );
+    }
+
     if (activeTabId === 'users-admin') {
       return <UsersAdminTab />;
     }
@@ -102,16 +119,21 @@ export default function App() {
         <header className="h-20 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
           <div className="flex items-center gap-4">
              <div className="flex items-center gap-2 text-slate-400">
-                <button 
-                  onClick={() => useClientStore.getState().setActiveClient(null)} 
+                <Link
+                  to={DASHBOARD_PATH}
                   className="text-sm font-medium hover:text-slate-900 transition-colors"
                 >
                   Dashboard
-                </button>
+                </Link>
                 {activeClient && (
                   <>
                     <span className="text-slate-300">/</span>
-                    <span className={activeTabId === 'content' ? 'text-sm font-medium' : 'text-sm font-bold text-slate-900'}>{activeClient.name}</span>
+                    <Link
+                      to={clientPath(activeClient.slug)}
+                      className={activeTabId === 'content' ? 'text-sm font-medium hover:text-slate-900 transition-colors' : 'text-sm font-bold text-slate-900'}
+                    >
+                      {activeClient.name}
+                    </Link>
                   </>
                 )}
                 {activeTabId === 'content' && (
@@ -128,7 +150,7 @@ export default function App() {
                 {currentUser.role === 'admin' && (
                   <button
                     type="button"
-                    onClick={openUsersAdmin}
+                    onClick={goToUsersAdmin}
                     className="p-2 text-slate-400 hover:text-slate-700 transition-colors relative group rounded-xl hover:bg-slate-50"
                     aria-label="Administración de usuarios"
                     title="Administración de usuarios"
@@ -138,10 +160,7 @@ export default function App() {
                 )}
                 <button
                    type="button"
-                   onClick={() => {
-                     setActiveClient(null);
-                     setActiveTab('profile');
-                   }}
+                   onClick={goToProfile}
                    className="flex items-center gap-3 pl-3 active:scale-95 transition-transform cursor-pointer group"
                 >
                    <div className="size-10 bg-slate-100 rounded-full flex items-center justify-center border-2 border-white overflow-hidden shadow-sm">

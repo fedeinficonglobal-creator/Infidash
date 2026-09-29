@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { TrafficTab } from '../src/components/TrafficTab.js';
 import type { Client } from '../src/store/useClientStore.js';
 
@@ -17,7 +18,7 @@ const client: Client = {
 };
 
 test('Traffic does not invent ad spend, ROAS, sessions or campaigns from client revenue', () => {
-  const html = renderToStaticMarkup(createElement(TrafficTab, { client }));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(TrafficTab, { client })));
   assert.match(html, /Tráfico real de Google Analytics 4/);
   assert.doesNotMatch(html, /Gasto Ads Estimado|ROAS Combinado|Paid Search|Meta - Prospecting|1 May/);
 });

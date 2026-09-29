@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowUpRight, AlertTriangle, LoaderCircle, RefreshCw, S
 import { type Client } from '../store/useClientStore';
 import { getClientDashboard, getClientIntegrations, getGa4TrafficSnapshot, getGoogleAdsCampaignsSnapshot, type DailyStat, type Ga4TrafficReport, type GoogleAdsCampaignReport, type UxSnapshot } from '../services/infidashApi.js';
 import { useClientStore } from '../store/useClientStore.js';
+import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { buildComparisonPeriod, type ComparisonMetric } from '../lib/overviewComparison.js';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
 import { hasClarityMetric } from '../lib/clarityAvailability.js';
@@ -100,7 +101,7 @@ return (
 
 export function OverviewTab({ client }: { client: Client }) {
 const sessionToken = useClientStore((state) => state.sessionToken);
-const setActiveTab = useClientStore((state) => state.setActiveTab);
+const { goToTab } = useAppNavigation();
 const signals = useMemo(() => buildClientSignals(client), [client]);
 const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
 const [uxSnapshots, setUxSnapshots] = useState<UxSnapshot[]>([]);
@@ -336,7 +337,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
   ) : !ga4Report?.complete ? (
     <div>
       <p className="text-sm text-amber-800">Sin datos de Google Analytics 4 sincronizados todavía.</p>
-      <button type="button" onClick={() => setActiveTab('traffic')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Tráfico</button>
+      <button type="button" onClick={() => goToTab('traffic')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Tráfico</button>
     </div>
   ) : (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -380,7 +381,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
   ) : !googleAdsReport?.complete ? (
     <div>
       <p className="text-sm text-amber-800">Sin datos de Google Ads sincronizados todavía.</p>
-      <button type="button" onClick={() => setActiveTab('traffic')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Tráfico</button>
+      <button type="button" onClick={() => goToTab('traffic')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Tráfico</button>
     </div>
   ) : (
     (() => {
@@ -531,7 +532,7 @@ ROAS último dato: {formatPercent(latestStat.roas)}x
 <p className="text-xs text-slate-300 leading-relaxed mb-6">
 Recomendación: {signals.actionMessage}
 </p>
-<button type="button" onClick={() => setActiveTab('ai')} className="w-full bg-white text-slate-900 py-2 rounded-lg text-xs font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2">
+<button type="button" onClick={() => goToTab('ai')} className="w-full bg-white text-slate-900 py-2 rounded-lg text-xs font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2">
 Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 </button>
 </div>

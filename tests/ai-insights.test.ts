@@ -4,6 +4,7 @@ import type { Client } from '../src/store/useClientStore.js';
 import { buildAiInsightPlan } from '../src/lib/aiInsights.js';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { AiInsightsTab } from '../src/components/AiInsightsTab.js';
 
 const baseClient = {
@@ -33,7 +34,7 @@ test('buildAiInsightPlan builds an actionable plan for the active client', () =>
 });
 
 test('insights disclose that recommendations are deterministic, not generative AI', () => {
-  const html = renderToStaticMarkup(createElement(AiInsightsTab, { client: baseClient }));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(AiInsightsTab, { client: baseClient })));
   assert.match(html, /Resumen basado en reglas/);
   assert.match(html, /no se usa un modelo generativo/);
   assert.doesNotMatch(html, /Resumen Ejecutivo IA/);

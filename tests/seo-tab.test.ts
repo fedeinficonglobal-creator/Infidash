@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { SeoTab } from '../src/components/SeoTab.js';
 import type { Client } from '../src/store/useClientStore.js';
 
@@ -16,7 +17,7 @@ test('SEO does not show mock search queries, positions or unsupported recommenda
     },
     kpiThresholds: {} as Client['kpiThresholds'],
   };
-  const html = renderToStaticMarkup(createElement(SeoTab, { client }));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(SeoTab, { client })));
   assert.match(html, /SEO aún no está disponible/);
   assert.doesNotMatch(html, /Clicks Totales|vestidos de fiesta mujer|Posición Media|Canibalización Detectada/);
 });

@@ -97,7 +97,7 @@ function isConflict(error: unknown) { return error instanceof ContentApiRequestE
 
 export const useContentStore = create<ContentState>((set, get) => ({
   month: startOfMonth(new Date()),
-  view: 'calendar',
+  view: 'list',
   filters: EMPTY_FILTERS,
   items: [],
   summary: null,

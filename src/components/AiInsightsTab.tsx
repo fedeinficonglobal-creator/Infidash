@@ -1,12 +1,12 @@
 import { Sparkles, AlertCircle, TrendingUp, Lightbulb, MessageSquare, ArrowRight, Target, BarChart3 } from 'lucide-react';
 import { type Client } from '../store/useClientStore.js';
-import { useClientStore } from '../store/useClientStore.js';
+import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { buildAiInsightPlan } from '../lib/aiInsights.js';
 import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
 import { cn } from '../lib/utils';
 
 export function AiInsightsTab({ client }: { client: Client }) {
-  const setActiveTab = useClientStore((state) => state.setActiveTab);
+  const { goToTab } = useAppNavigation();
   const signals = buildClientSignals(client);
   const plan = buildAiInsightPlan(client);
 
@@ -28,7 +28,7 @@ export function AiInsightsTab({ client }: { client: Client }) {
         </div>
         <button
           type="button"
-          onClick={() => setActiveTab('overview')}
+          onClick={() => goToTab('overview')}
           className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl shadow-slate-200"
         >
           Volver al Overview <ArrowRight className="size-4 text-amber-400" />
