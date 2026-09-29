@@ -245,6 +245,16 @@ export class EditorialApiRepository {
       assertContentTransition(row.status, 'approved');
       const result = await client.query(`UPDATE editorial.contents SET status='approved',approved_revision_id=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *`, [id,revisionId]);
       await this.auditWith(client,row.client_id,'content',id,'content.approved',actorId,{ revisionId });
+      // An approved article is ready to schedule; a plan item in any other state (e.g. regenerating) is left alone.
+      if (row.plan_item_id) {
+        const planItem = await client.query('SELECT id,status,version FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE', [row.client_id,row.plan_item_id]);
+        const plan = planItem.rows[0] as any;
+        if (plan?.status === 'review') {
+          assertPlanTransition(plan.status, 'ready');
+          await client.query(`UPDATE editorial.plan_items SET status='ready',version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`, [row.client_id,plan.id]);
+          await this.auditWith(client,row.client_id,'plan_item',plan.id,'plan_item.ready',actorId,{ contentId: id, revisionId, previousVersion: plan.version });
+        }
+      }
       return contentFromRow(result.rows[0]);
     }, this.pool);
   }
