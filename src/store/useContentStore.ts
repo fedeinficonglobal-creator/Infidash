@@ -264,6 +264,14 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const updates = new Map<string, ContentJob>();
     settled.forEach((result, index) => { if (result.status === 'fulfilled') updates.set(pending[index].id, result.value.job); });
     set((state) => ({ jobs: state.jobs.map((job) => updates.get(job.id) ?? job) }));
+    // Publication statuses only change once n8n reports back, so reload the open popup's
+    // publications when a job targeting one of them changes status (e.g. cancel -> cancelled).
+    const { content, publications } = get();
+    const shown = new Set(publications.map((publication) => publication.id));
+    const changed = pending.some((job) => { const next = updates.get(job.id); return next && next.status !== job.status && job.targetId !== null && shown.has(job.targetId); });
+    if (!content || !changed) return;
+    try { const page = await getPublications(token, content.id); if (get().content?.id === content.id) set({ publications: page.items }); }
+    catch { /* The next tick or reopening the popup retries; job statuses are already updated. */ }
   },
   clearConflict: () => set({ conflict: null }),
 }));

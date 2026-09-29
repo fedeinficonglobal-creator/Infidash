@@ -221,3 +221,27 @@ test('content auto-refresh polls fast only while a job is in flight', () => {
   assert.ok(tab.includes('contentRefreshDelayMs('), 'ContentTab schedules its refresh with the adaptive delay');
   assert.ok(!tab.includes('setInterval(() => void tick(), 30_000)'), 'the fixed 30s interval is gone');
 });
+
+test('an open publication refreshes once its cancel/publish job settles, without closing the popup', async () => {
+  const requested: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    requested.push(url);
+    if (url === '/api/content/jobs/job-cancel') return new Response(JSON.stringify({ job: { id: 'job-cancel', kind: 'cancel', status: 'succeeded', target_id: 'publication-1' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (url.startsWith('/api/content/items/content-1/publications')) return new Response(JSON.stringify({ items: [{ id: 'publication-1', status: 'cancelled' }], next_cursor: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+    throw new Error(`unexpected request ${url}`);
+  };
+  useContentStore.setState({
+    content: { id: 'content-1' } as any,
+    publications: [{ id: 'publication-1', status: 'scheduled' }] as any,
+    jobs: [{ id: 'job-cancel', kind: 'cancel', status: 'running', targetId: 'publication-1' }] as any,
+  });
+  await useContentStore.getState().pollJobs('token');
+  assert.equal(useContentStore.getState().jobs[0].status, 'succeeded');
+  assert.equal(useContentStore.getState().publications[0].status, 'cancelled', 'the popup shows the settled publication status');
+
+  requested.length = 0;
+  useContentStore.setState({ jobs: [{ id: 'job-cancel', kind: 'cancel', status: 'running', targetId: 'publication-other' }] as any });
+  await useContentStore.getState().pollJobs('token');
+  assert.ok(!requested.some((url) => url.includes('/publications')), 'jobs for publications outside the popup do not refetch it');
+});
