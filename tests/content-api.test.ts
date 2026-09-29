@@ -242,6 +242,45 @@ test('Google Business Profile scheduling does not require a Learn More URL from 
   assert.equal(inserted, true);
 });
 
+function schedulingPoolWithPublications(existing: Array<{ occurrence_key: string; status: string }>, onInsert: (values: unknown[]) => void) {
+  return poolWithClient(async (sql, values = []) => {
+    if(sql.includes('SELECT enabled FROM editorial.client_settings')) return {rows:[{enabled:true}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.contents')) return {rows:[{id:'content-1',client_id:'client-a',version:3,status:'approved',approved_revision_id:'revision-2'}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.publishing_accounts')) return {rows:[{id:'account-1',client_id:'client-a',active:true,platform:'blog',instance_key:'inficonglobal-gmb'}],rowCount:1};
+    if(sql.includes('SELECT * FROM editorial.jobs')) return {rows:[],rowCount:0};
+    if(sql.includes('FROM editorial.publications WHERE content_id')) return {rows:existing.map((row,index)=>({id:`publication-${index}`,...row})),rowCount:existing.length};
+    if(sql.includes('INSERT INTO editorial.publications')) { onInsert(values); return {rows:[{id:values[0],client_id:values[1],content_id:values[2],account_id:values[3],occurrence_key:values[4],status:'pending'}],rowCount:1}; }
+    if(sql.includes('INSERT INTO editorial.jobs')) return {rows:[{id:values[0],client_id:values[1],kind:'publish',target_id:values[2],status:'pending'}],rowCount:1};
+    return {rows:[],rowCount:0};
+  });
+}
+
+const scheduleInput = (idempotencyKey: string) => ({clientId:'client-a',contentId:'content-1',expectedVersion:3,accountId:'account-1',desiredScheduledAt:'2026-10-01T09:00:00.000Z',idempotencyKey});
+
+test('a cancelled publication frees its account slot: rescheduling uses the next occurrence key', async () => {
+  let occurrenceKey: unknown;
+  const repository = new EditorialApiRepository(schedulingPoolWithPublications([{occurrence_key:'primary',status:'cancelled'}],(values)=>{ occurrenceKey=values[4]; }));
+  await repository.schedulePublication(scheduleInput('after-cancel-1'),'user-1');
+  assert.equal(occurrenceKey,'primary-2');
+
+  const repeated = new EditorialApiRepository(schedulingPoolWithPublications([{occurrence_key:'primary',status:'cancelled'},{occurrence_key:'primary-2',status:'cancelled'}],(values)=>{ occurrenceKey=values[4]; }));
+  await repeated.schedulePublication(scheduleInput('after-cancel-2'),'user-1');
+  assert.equal(occurrenceKey,'primary-3');
+});
+
+test('an active publication on the same account still blocks a duplicate schedule', async () => {
+  for (const existing of [
+    [{occurrence_key:'primary',status:'scheduled'}],
+    [{occurrence_key:'primary',status:'failed'}],
+    [{occurrence_key:'primary',status:'cancelled'},{occurrence_key:'primary-2',status:'published'}],
+  ]) {
+    let inserted = false;
+    const repository = new EditorialApiRepository(schedulingPoolWithPublications(existing,()=>{ inserted=true; }));
+    await assert.rejects(()=>repository.schedulePublication(scheduleInput(`blocked-${existing.length}`),'user-1'),(error:any)=>error.code==='PUBLICATION_EXISTS'&&error.statusCode===409);
+    assert.equal(inserted,false,`${JSON.stringify(existing)} must not insert`);
+  }
+});
+
 test('generate_plan creates a durable calendar and passes it as both job target and payload contract', async () => {
   let insertedJob: any;
   const pool=poolWithClient(async(sql,values=[])=>{

@@ -286,15 +286,22 @@ export class EditorialApiRepository {
         const publication=await client.query(`SELECT p.*,a.provider,a.platform,a.label account_label FROM editorial.publications p JOIN editorial.publishing_accounts a ON a.client_id=p.client_id AND a.id=p.account_id WHERE p.client_id=$1 AND p.id=$2`,[input.clientId,job.target_id]);
         return {publication:publication.rows[0],job,replayed:true};
       }
-      const duplicate=await client.query('SELECT id FROM editorial.publications WHERE content_id=$1 AND account_id=$2 AND occurrence_key=$3 FOR UPDATE',[input.contentId,input.accountId,occurrenceKey]);
-      if(duplicate.rows[0]) throw new ContentApiError(409,'PUBLICATION_EXISTS','Ya existe una publicación para esa cuenta y ocurrencia');
+      // A cancelled publication keeps its row (and its UNIQUE occurrence_key) for history, so
+      // rescheduling after a cancel moves to the next free "<key>-<n>" occurrence. Any other
+      // status in the chain (scheduled, failed, published...) still blocks the duplicate.
+      const occupied=await client.query('SELECT id,occurrence_key,status FROM editorial.publications WHERE content_id=$1 AND account_id=$2 FOR UPDATE',[input.contentId,input.accountId]);
+      const chain=(occupied.rows as any[]).filter((row)=>row.occurrence_key===occurrenceKey||new RegExp(`^${occurrenceKey.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}-\\d+$`).test(row.occurrence_key));
+      if(chain.some((row)=>row.status!=='cancelled')) throw new ContentApiError(409,'PUBLICATION_EXISTS','Ya existe una publicación para esa cuenta y ocurrencia');
+      const usedKeys=new Set(chain.map((row)=>row.occurrence_key));
+      let slotKey=occurrenceKey;
+      for(let n=2;usedKeys.has(slotKey);n++) slotKey=`${occurrenceKey}-${n}`;
       const headerImageUrl=(content.seo && typeof content.seo==='object')?(content.seo as any).headerImageUrl??null:null;
       const media=(Array.isArray(input.media)&&input.media.length)?input.media:(headerImageUrl?[{url:headerImageUrl}]:[]);
       const publicationId=randomUUID();
       const publicationResult=await client.query(
         `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at,external_url)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9,$10) RETURNING *`,
-        [publicationId,input.clientId,input.contentId,input.accountId,occurrenceKey,content.approved_revision_id,input.copy??null,json(media),input.desiredScheduledAt,input.externalUrl??null],
+        [publicationId,input.clientId,input.contentId,input.accountId,slotKey,content.approved_revision_id,input.copy??null,json(media),input.desiredScheduledAt,input.externalUrl??null],
       );
       const jobId=randomUUID();
       const jobResult=await client.query(
