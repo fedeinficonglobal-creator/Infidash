@@ -245,3 +245,21 @@ test('an open publication refreshes once its cancel/publish job settles, without
   await useContentStore.getState().pollJobs('token');
   assert.ok(!requested.some((url) => url.includes('/publications')), 'jobs for publications outside the popup do not refetch it');
 });
+
+test('the list view loads every article regardless of date; the calendar view stays scoped to its month', async () => {
+  const planItemUrls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('/api/content/plan-items')) planItemUrls.push(url);
+    const body = url.startsWith('/api/content/summary') ? { summary: null } : { items: [], next_cursor: null };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  useContentStore.setState({ view: 'calendar' });
+  await useContentStore.getState().load('token');
+  assert.match(planItemUrls[0], /from=.*to=/, 'calendar requests its month range');
+  useContentStore.getState().setView('list');
+  await useContentStore.getState().load('token');
+  assert.doesNotMatch(planItemUrls[1], /[?&](from|to)=/, 'list requests all dates');
+  const tab = readFileSync('src/components/content/ContentTab.tsx', 'utf8');
+  assert.ok(tab.includes("view === 'calendar' && <div className=\"inline-flex items-center gap-1"), 'the month selector only shows in calendar view');
+});

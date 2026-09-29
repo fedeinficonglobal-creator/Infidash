@@ -87,6 +87,11 @@ function range(month: Date) {
   return { from: startOfMonth(month).toISOString(), to: new Date(endOfMonth(month).getTime() + 1).toISOString() };
 }
 
+/** The calendar is scoped to its month; the list shows every article regardless of date. */
+function rangeFor(state: { view: 'calendar' | 'list'; month: Date }) {
+  return state.view === 'list' ? {} : range(state.month);
+}
+
 function message(error: unknown) { return error instanceof Error ? error.message : 'No se pudo completar la operación'; }
 function isConflict(error: unknown) { return error instanceof ContentApiRequestError ? error.status === 409 : error instanceof Error && error.message.toLowerCase().includes('conflict'); }
 
@@ -126,7 +131,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const serial = ++requestSerial;
     set({ isLoading: true, isLoadingMore: false, error: null });
     const state = get();
-    const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
+    const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state) };
     try {
       const [page, summary, jobs] = await Promise.all([
         getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }, listController.signal),
@@ -147,7 +152,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     listController?.abort();
     set({ isRefreshing: true, isLoadingMore: false });
     const state = get();
-    const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month) };
+    const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state) };
     try {
       const [page, summary, jobs] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }), getContentSummary(token, filters), getContentJobs(token, { clientId: filters.clientId, limit: 100 })]);
       if (serial === requestSerial) set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, jobs: jobs.items, lastUpdatedAt: new Date().toISOString(), error: null });
@@ -160,7 +165,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const serial = requestSerial;
     set({ isLoadingMore: true });
     try {
-      const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...range(state.month), includeUndated: true, cursor: state.nextCursor, limit: 100 });
+      const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state), includeUndated: true, cursor: state.nextCursor, limit: 100 });
       if (serial === requestSerial) set((current) => ({ items: [...current.items, ...page.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: page.nextCursor }));
     } catch (error) { if (serial === requestSerial) set({ error: message(error) }); }
     finally { if (serial === requestSerial) set({ isLoadingMore: false }); }
