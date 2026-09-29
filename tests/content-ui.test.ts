@@ -22,7 +22,7 @@ function item(input: Partial<PlanItem> = {}): PlanItem {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   useContentStore.getState().reset();
-  useContentStore.setState({ isLoading: false, isRefreshing: false });
+  useContentStore.setState({ view: 'list', isLoading: false, isRefreshing: false });
 });
 
 test('content helpers filter by client, status, format and normalized search', () => {
@@ -119,7 +119,7 @@ test('content store sends status, format and search before server pagination', a
   assert.match(listUrl,/status=review/);
   assert.match(listUrl,/format=blog/);
   assert.match(listUrl,/search=bombas/);
-  assert.match(listUrl,/limit=100/);
+  assert.match(listUrl,/limit=20/);
 });
 
 test('late load-more response cannot append rows from a previous client filter', async () => {
@@ -131,7 +131,7 @@ test('late load-more response cannot append rows from a previous client filter',
     const clientId = new URL(url, 'http://localhost').searchParams.get('clientId');
     return new Response(JSON.stringify({ items: [{ ...item({ id: `item-${clientId}`, clientId }), client_id: clientId, calendar_id: 'calendar-a', calendar_title: 'Octubre', planned_at: null, created_at: item().createdAt, updated_at: item().updatedAt }], next_cursor: clientId === 'client-a' ? 'old-page' : null }), { status: 200 });
   };
-  useContentStore.setState({ filters: { clientId: 'client-a', status: '', format: '', search: '' } });
+  useContentStore.setState({ view: 'calendar', filters: { clientId: 'client-a', status: '', format: '', search: '' } });
   await useContentStore.getState().load('token');
   const oldPage = useContentStore.getState().loadMore('token');
   useContentStore.getState().setFilters({ clientId: 'client-b' });
@@ -262,4 +262,92 @@ test('the list view loads every article regardless of date; the calendar view st
   assert.doesNotMatch(planItemUrls[1], /[?&](from|to)=/, 'list requests all dates');
   const tab = readFileSync('src/components/content/ContentTab.tsx', 'utf8');
   assert.ok(tab.includes("view === 'calendar' && <div className=\"inline-flex items-center gap-1"), 'the month selector only shows in calendar view');
+});
+
+function pagedFetch(planItemUrls: URL[]) {
+  const nextByCursor: Record<string, string | null> = { '': 'cursor-2', 'cursor-2': 'cursor-3', 'cursor-3': null };
+  return async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/content/summary') return new Response(JSON.stringify({ summary: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (url.pathname !== '/api/content/plan-items') return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    planItemUrls.push(url);
+    const cursor = url.searchParams.get('cursor') ?? '';
+    const row = { ...item({ id: `item-${cursor || 'first'}` }), client_id: 'client-a', calendar_id: 'calendar-a', calendar_title: 'Octubre', planned_at: null, created_at: item().createdAt, updated_at: item().updatedAt };
+    return new Response(JSON.stringify({ items: [row], next_cursor: nextByCursor[cursor] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+test('the list view pages 20 articles at a time and «Anterior» returns to the exact previous page', async () => {
+  const planItemUrls: URL[] = [];
+  globalThis.fetch = pagedFetch(planItemUrls);
+  const store = useContentStore.getState();
+  await store.load('token');
+  assert.equal(planItemUrls[0].searchParams.get('limit'), '20');
+  assert.equal(planItemUrls[0].searchParams.get('cursor'), null);
+  assert.equal(useContentStore.getState().page, 1);
+  await useContentStore.getState().nextPage('token');
+  assert.equal(planItemUrls[1].searchParams.get('cursor'), 'cursor-2');
+  assert.equal(planItemUrls[1].searchParams.get('limit'), '20');
+  assert.equal(useContentStore.getState().page, 2);
+  await useContentStore.getState().nextPage('token');
+  assert.equal(planItemUrls[2].searchParams.get('cursor'), 'cursor-3');
+  assert.equal(useContentStore.getState().page, 3);
+  assert.equal(useContentStore.getState().nextCursor, null);
+  await useContentStore.getState().nextPage('token');
+  assert.equal(planItemUrls.length, 3, 'no request past the last page');
+  await useContentStore.getState().previousPage('token');
+  assert.equal(planItemUrls[3].searchParams.get('cursor'), 'cursor-2');
+  assert.equal(useContentStore.getState().page, 2);
+  assert.deepEqual(useContentStore.getState().items.map(({ id }) => id), ['item-cursor-2'], 'the page replaces the rows instead of appending');
+  await useContentStore.getState().previousPage('token');
+  assert.equal(planItemUrls[4].searchParams.get('cursor'), null);
+  assert.equal(useContentStore.getState().page, 1);
+  await useContentStore.getState().previousPage('token');
+  assert.equal(planItemUrls.length, 5, 'no request before the first page');
+});
+
+test('the background refresh reloads the current page instead of jumping back to page 1', async () => {
+  const planItemUrls: URL[] = [];
+  globalThis.fetch = pagedFetch(planItemUrls);
+  await useContentStore.getState().load('token');
+  await useContentStore.getState().nextPage('token');
+  await useContentStore.getState().refresh('token');
+  const refreshed = planItemUrls.at(-1)!;
+  assert.equal(refreshed.searchParams.get('cursor'), 'cursor-2');
+  assert.equal(refreshed.searchParams.get('limit'), '20');
+  assert.equal(useContentStore.getState().page, 2);
+  assert.equal(useContentStore.getState().nextCursor, 'cursor-3');
+});
+
+test('changing filters, view or client resets the list to page 1', async () => {
+  const planItemUrls: URL[] = [];
+  globalThis.fetch = pagedFetch(planItemUrls);
+  await useContentStore.getState().load('token');
+  await useContentStore.getState().nextPage('token');
+  useContentStore.getState().setFilters({ status: 'review' });
+  assert.equal(useContentStore.getState().page, 1);
+  await useContentStore.getState().load('token');
+  assert.equal(planItemUrls.at(-1)!.searchParams.get('cursor'), null);
+  assert.equal(planItemUrls.at(-1)!.searchParams.get('status'), 'review');
+  await useContentStore.getState().nextPage('token');
+  useContentStore.getState().setView('calendar');
+  assert.equal(useContentStore.getState().page, 1);
+  useContentStore.getState().setView('list');
+  await useContentStore.getState().nextPage('token');
+  useContentStore.getState().reset('client-b');
+  assert.equal(useContentStore.getState().page, 1);
+});
+
+test('the calendar view keeps loading its month 100 at a time without list pagination', async () => {
+  const planItemUrls: URL[] = [];
+  globalThis.fetch = pagedFetch(planItemUrls);
+  useContentStore.setState({ view: 'calendar' });
+  await useContentStore.getState().load('token');
+  assert.equal(planItemUrls[0].searchParams.get('limit'), '100');
+  assert.equal(planItemUrls[0].searchParams.get('cursor'), null);
+  const tab = readFileSync('src/components/content/ContentTab.tsx', 'utf8');
+  assert.ok(tab.includes('Cargar más contenidos del calendario'));
+  assert.doesNotMatch(tab, /Cargar más contenidos</, 'the list view has no load-more button');
+  assert.doesNotMatch(tab, /Cargar más</);
+  assert.ok(tab.includes('Anterior') && tab.includes('Siguiente') && tab.includes('Página '), 'the list view has page controls');
 });

@@ -21,3 +21,10 @@ test('components navigate through the router, never by writing the active client
 test('the Contenidos page opens on the article list first', () => {
   assert.equal(useContentStore.getInitialState().view, 'list');
 });
+
+test('the sidebar no longer links to the global Contenidos page; each client menu has its own', () => {
+  const sidebar = readFileSync('src/components/Sidebar.tsx', 'utf8');
+  assert.doesNotMatch(sidebar, /GLOBAL_CONTENT_PATH/);
+  assert.doesNotMatch(sidebar, /Contenidos globales/);
+  assert.match(sidebar, /label: 'Contenidos'/);
+});

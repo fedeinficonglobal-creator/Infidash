@@ -8,7 +8,7 @@ import { Link } from 'react-router';
 import { useClientStore } from '../store/useClientStore';
 import { cn } from '../lib/utils.js';
 import { buildClientSignals } from '../lib/clientSignals.js';
-import { DASHBOARD_PATH, GLOBAL_CONTENT_PATH, clientPath } from '../lib/routes.js';
+import { DASHBOARD_PATH, clientPath } from '../lib/routes.js';
 
 export function Sidebar() {
   const { clients, activeClientId, activeTabId } = useClientStore();
@@ -45,18 +45,6 @@ export function Sidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mb-5">
-          <Link
-            to={GLOBAL_CONTENT_PATH}
-            className={cn(
-              'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold rounded-lg transition-colors',
-              !activeClientId && activeTabId === 'content' ? 'bg-brand-primary/10 text-brand-primary' : 'text-slate-600 hover:bg-slate-50',
-            )}
-          >
-            <CalendarDays className="size-4" />
-            Contenidos globales
-          </Link>
-        </div>
         {activeClient && (
           <div className="mb-6">
             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Menú de cliente</h2>

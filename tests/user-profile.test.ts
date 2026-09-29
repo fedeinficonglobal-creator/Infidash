@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { UserProfile } from '../src/components/UserProfile.js';
 import { getAvatarInitials } from '../src/lib/avatarInitials.js';
 
 test('profile uses local initials instead of a fake remote avatar upload', () => {
-  const html = renderToStaticMarkup(createElement(UserProfile));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(UserProfile)));
   assert.match(html, /Iniciales de Usuario de Infidash/);
   assert.doesNotMatch(html, /ui-avatars\.com|images\.unsplash\.com|Cambiar avatar/);
 });

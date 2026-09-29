@@ -3,10 +3,13 @@ import { User, Mail, Shield, Bell, Key, LogOut, Globe, ChevronRight, BadgeCheck,
 import { cn } from '../lib/utils';
 import { useClientStore } from '../store/useClientStore';
 import { getAvatarInitials } from '../lib/avatarInitials.js';
+import { signOutToDashboard } from '../lib/authNavigation.js';
+import { useNavigate } from 'react-router';
 
 export function UserProfile() {
   const [activeSubTab, setActiveSubTab] = useState<'profile' | 'security' | 'notifications'>('profile');
   const { currentUser, signOut } = useClientStore();
+  const navigate = useNavigate();
 
   const displayName = currentUser?.name ?? 'Usuario de Infidash';
   const displayEmail = currentUser?.email ?? 'sesion@infidash.local';
@@ -46,7 +49,7 @@ export function UserProfile() {
           ))}
           <div className="pt-4 mt-4 border-t border-slate-200">
             <button
-              onClick={() => void signOut()}
+              onClick={() => void signOutToDashboard(signOut, navigate)}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-rose-500 hover:bg-rose-50 transition-all"
             >
               <LogOut className="size-4" />

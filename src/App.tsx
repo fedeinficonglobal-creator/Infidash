@@ -21,7 +21,8 @@ import { getAvatarInitials } from './lib/avatarInitials.js';
 import { DASHBOARD_PATH, clientPath } from './lib/routes.js';
 import { useRouteSync } from './hooks/useRouteSync.js';
 import { useAppNavigation } from './hooks/useAppNavigation.js';
-import { Link, Navigate } from 'react-router';
+import { signInToDashboard } from './lib/authNavigation.js';
+import { Link, Navigate, useNavigate } from 'react-router';
 import { ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
     authError,
     isAuthenticating,
   } = useClientStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     void bootstrapSession();
@@ -51,7 +53,7 @@ export default function App() {
   }
 
   if (!sessionToken || !currentUser) {
-    return <LoginScreen isLoading={isAuthenticating} error={authError} onLogin={signIn} />;
+    return <LoginScreen isLoading={isAuthenticating} error={authError} onLogin={(email, password) => signInToDashboard(signIn, navigate, email, password)} />;
   }
 
   return <AuthenticatedApp currentUser={currentUser} />;

@@ -38,6 +38,10 @@ interface ContentState {
   items: PlanItem[];
   summary: ContentSummary | null;
   nextCursor: string | null;
+  /** List view only: the start cursor of every page visited so far; the last one is the current page. */
+  pageCursors: (string | null)[];
+  /** 1-based current page of the list view. */
+  page: number;
   selectedId: string | null;
   content: ContentItem | null;
   publications: Publication[];
@@ -62,6 +66,8 @@ interface ContentState {
   load: (token: string) => Promise<void>;
   refresh: (token: string) => Promise<void>;
   loadMore: (token: string) => Promise<void>;
+  nextPage: (token: string) => Promise<void>;
+  previousPage: (token: string) => Promise<void>;
   loadCalendars: (token: string, clientId: string) => Promise<void>;
   createCalendar: (token: string, clientId: string, input: { title: string; startDate?: string; endDate?: string }) => Promise<EditorialCalendar>;
   select: (token: string, item: PlanItem | null) => Promise<void>;
@@ -82,6 +88,9 @@ let detailController: AbortController | null = null;
 let requestSerial = 0;
 
 const EMPTY_FILTERS: ContentFilters = { clientId: '', status: '', format: '', search: '' };
+const LIST_PAGE_SIZE = 20;
+const CALENDAR_PAGE_SIZE = 100;
+const FIRST_PAGE = { pageCursors: [null], page: 1 };
 
 function range(month: Date) {
   return { from: startOfMonth(month).toISOString(), to: new Date(endOfMonth(month).getTime() + 1).toISOString() };
@@ -90,6 +99,13 @@ function range(month: Date) {
 /** The calendar is scoped to its month; the list shows every article regardless of date. */
 function rangeFor(state: { view: 'calendar' | 'list'; month: Date }) {
   return state.view === 'list' ? {} : range(state.month);
+}
+
+/** The list view pages 20 at a time from the current page's start cursor; the calendar loads its month 100 at a time. */
+function pageFor(state: { view: 'calendar' | 'list'; pageCursors: (string | null)[] }) {
+  if (state.view === 'calendar') return { limit: CALENDAR_PAGE_SIZE };
+  const cursor = state.pageCursors[state.pageCursors.length - 1];
+  return cursor ? { cursor, limit: LIST_PAGE_SIZE } : { limit: LIST_PAGE_SIZE };
 }
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'No se pudo completar la operación'; }
@@ -102,6 +118,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
   items: [],
   summary: null,
   nextCursor: null,
+  ...FIRST_PAGE,
   selectedId: null,
   content: null,
   publications: [],
@@ -119,11 +136,11 @@ export const useContentStore = create<ContentState>((set, get) => ({
   conflict: null,
   lastUpdatedAt: null,
   setMonth: (month) => set({ month: startOfMonth(month) }),
-  setView: (view) => set({ view }),
-  setFilters: (partial) => set((state) => ({ filters: { ...state.filters, ...partial } })),
+  setView: (view) => set({ view, ...FIRST_PAGE }),
+  setFilters: (partial) => set((state) => ({ filters: { ...state.filters, ...partial }, ...FIRST_PAGE })),
   reset: (clientId = '') => {
     listController?.abort(); detailController?.abort();
-    set({ filters: { ...EMPTY_FILTERS, clientId }, items: [], summary: null, nextCursor: null, selectedId: null, content: null, publications: [], publishingAccounts: [], calendars: [], jobs: [], readinessByClient: {}, error: null, detailError: null, conflict: null });
+    set({ filters: { ...EMPTY_FILTERS, clientId }, items: [], summary: null, nextCursor: null, ...FIRST_PAGE, selectedId: null, content: null, publications: [], publishingAccounts: [], calendars: [], jobs: [], readinessByClient: {}, error: null, detailError: null, conflict: null });
   },
   load: async (token) => {
     listController?.abort();
@@ -134,7 +151,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state) };
     try {
       const [page, summary, jobs] = await Promise.all([
-        getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }, listController.signal),
+        getPlanItems(token, { ...filters, includeUndated: true, ...pageFor(state) }, listController.signal),
         getContentSummary(token, filters, listController.signal),
         getContentJobs(token, { clientId: filters.clientId, limit: 100 }, listController.signal),
       ]);
@@ -154,7 +171,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const state = get();
     const filters = { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state) };
     try {
-      const [page, summary, jobs] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, limit: 100 }), getContentSummary(token, filters), getContentJobs(token, { clientId: filters.clientId, limit: 100 })]);
+      const [page, summary, jobs] = await Promise.all([getPlanItems(token, { ...filters, includeUndated: true, ...pageFor(state) }), getContentSummary(token, filters), getContentJobs(token, { clientId: filters.clientId, limit: 100 })]);
       if (serial === requestSerial) set({ items: page.items, nextCursor: page.nextCursor, summary: summary.summary, jobs: jobs.items, lastUpdatedAt: new Date().toISOString(), error: null });
     } catch (error) { if (serial === requestSerial) set({ error: message(error) }); }
     finally { if (serial === requestSerial) set({ isRefreshing: false }); }
@@ -165,10 +182,24 @@ export const useContentStore = create<ContentState>((set, get) => ({
     const serial = requestSerial;
     set({ isLoadingMore: true });
     try {
-      const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state), includeUndated: true, cursor: state.nextCursor, limit: 100 });
+      const page = await getPlanItems(token, { clientId: state.filters.clientId || undefined, status: state.filters.status || undefined, format: state.filters.format || undefined, search: state.filters.search.trim() || undefined, ...rangeFor(state), includeUndated: true, cursor: state.nextCursor, limit: CALENDAR_PAGE_SIZE });
       if (serial === requestSerial) set((current) => ({ items: [...current.items, ...page.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: page.nextCursor }));
     } catch (error) { if (serial === requestSerial) set({ error: message(error) }); }
     finally { if (serial === requestSerial) set({ isLoadingMore: false }); }
+  },
+  nextPage: async (token) => {
+    const { nextCursor, pageCursors } = get();
+    if (!nextCursor) return;
+    const next = [...pageCursors, nextCursor];
+    set({ pageCursors: next, page: next.length });
+    await get().load(token);
+  },
+  previousPage: async (token) => {
+    const { pageCursors } = get();
+    if (pageCursors.length <= 1) return;
+    const previous = pageCursors.slice(0, -1);
+    set({ pageCursors: previous, page: previous.length });
+    await get().load(token);
   },
   loadCalendars: async (token, clientId) => {
     try { const page = await getEditorialCalendars(token, clientId); set({ calendars: page.items }); }
