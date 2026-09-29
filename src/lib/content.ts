@@ -1,6 +1,6 @@
 import { endOfMonth, endOfWeek, format, isSameDay, isSameMonth, parseISO, startOfMonth, startOfWeek, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
-import type { ContentJob, EditorialReadiness, JobKind, PlanItem } from '../services/contentApi.js';
+import type { ContentJob, EditorialReadiness, JobKind, PlanItem, PlanStatus } from '../services/contentApi.js';
 
 export interface ContentFilters { clientId: string; status: string; format: string; search: string; }
 
@@ -44,6 +44,18 @@ export function planItemActions(item: Pick<PlanItem, 'status'>, { admin, readine
 
 /** Manual retries need a fresh key; the server's JOB_IN_PROGRESS guard is what prevents duplicates. */
 export function timestampedIdempotencyKey(prefix: string, now = Date.now()) { return `${prefix}:${now}`; }
+
+/** Status shown for a plan item: a published or scheduled publication outranks the item's own editorial status. Cancelled, failed or pending publications do not. */
+export function displayStatus(itemStatus: PlanStatus, publications: ReadonlyArray<{ status: string }>): PlanStatus | 'published' | 'scheduled' {
+  if (publications.some((publication) => publication.status === 'published')) return 'published';
+  if (publications.some((publication) => publication.status === 'scheduled')) return 'scheduled';
+  return itemStatus;
+}
+
+/** Publications behind the popup badge: the loaded detail list (fresh after scheduling/cancelling) when it belongs to this item, else the list summary. */
+export function displayPublications(item: Pick<PlanItem, 'contentId' | 'publications'>, content: { id: string } | null | undefined, detail: ReadonlyArray<{ status: string }>): ReadonlyArray<{ status: string }> {
+  return item.contentId && content?.id === item.contentId ? detail : item.publications;
+}
 
 export function canCancelPublication(status: string) { return ['pending', 'scheduled', 'failed', 'unknown'].includes(status); }
 export function canReschedulePublication(status: string) { return status === 'scheduled'; }

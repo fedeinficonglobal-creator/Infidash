@@ -270,7 +270,14 @@ export const useContentStore = create<ContentState>((set, get) => ({
   },
   approveContent: async (token, id, revisionId, version) => {
     set({ isSaving: true, conflict: null });
-    try { const response = await approveContentItem(token, id, revisionId, version); set((state) => ({ content: state.content ? { ...state.content, ...response.content } : response.content })); }
+    try {
+      const response = await approveContentItem(token, id, revisionId, version);
+      // Mirror the server: approving moves the linked plan item review → ready and bumps its version, so later brief edits don't hit STALE_VERSION.
+      set((state) => ({
+        content: state.content ? { ...state.content, ...response.content } : response.content,
+        items: state.items.map((item) => item.contentId === id && item.status === 'review' ? { ...item, status: 'ready', version: item.version + 1 } : item),
+      }));
+    }
     catch (error) { if (isConflict(error)) set({ conflict: 'La revisión cambió antes de aprobarse. Recarga y comprueba la versión activa.' }); else set({ detailError: message(error) }); throw error; }
     finally { set({ isSaving: false }); }
   },

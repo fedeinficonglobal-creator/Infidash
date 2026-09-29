@@ -3,7 +3,7 @@ import test, { afterEach } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ContentStatusBadge } from '../src/components/content/ContentStatusBadge.tsx';
 import { readFileSync } from 'node:fs';
-import { canCancelPublication, canReschedulePublication, canRunJob, contentRefreshDelayMs, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, timestampedIdempotencyKey } from '../src/lib/content.ts';
+import { canCancelPublication, canReschedulePublication, canRunJob, displayPublications, displayStatus, contentRefreshDelayMs, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, timestampedIdempotencyKey } from '../src/lib/content.ts';
 import { camelize } from '../src/services/contentApi.ts';
 import { useContentStore } from '../src/store/useContentStore.ts';
 import type { PlanItem } from '../src/services/contentApi.ts';
@@ -350,4 +350,42 @@ test('the calendar view keeps loading its month 100 at a time without list pagin
   assert.doesNotMatch(tab, /Cargar más contenidos</, 'the list view has no load-more button');
   assert.doesNotMatch(tab, /Cargar más</);
   assert.ok(tab.includes('Anterior') && tab.includes('Siguiente') && tab.includes('Página '), 'the list view has page controls');
+});
+
+test('display status reflects published and scheduled publications over the plan item status', () => {
+  const pub = (status: string) => ({ status }) as PlanItem['publications'][number];
+  assert.equal(displayStatus('ready', []), 'ready');
+  assert.equal(displayStatus('review', [pub('scheduled')]), 'scheduled');
+  assert.equal(displayStatus('ready', [pub('scheduled'), pub('published')]), 'published');
+  assert.equal(displayStatus('ready', [pub('published'), pub('scheduled')]), 'published');
+  for (const status of ['cancelled', 'failed', 'pending', 'sending', 'unknown', 'cancel_requested', 'draft']) assert.equal(displayStatus('ready', [pub(status)]), 'ready', `${status} does not override`);
+  assert.equal(displayStatus('review', [pub('cancelled'), pub('scheduled')]), 'scheduled');
+});
+
+test('the popup header prefers the loaded detail publications for its own item and falls back to the list summary', () => {
+  const summary = [{ id: 'publication-1', status: 'scheduled', desiredScheduledAt: null, confirmedScheduledAt: null }] as PlanItem['publications'];
+  const listed = item({ contentId: 'content-1', status: 'ready', publications: summary });
+  const detail = [{ status: 'cancelled' }];
+  assert.equal(displayPublications(listed, { id: 'content-1' }, detail), detail);
+  assert.equal(displayPublications(listed, { id: 'content-other' }, detail), summary);
+  assert.equal(displayPublications(listed, null, detail), summary);
+  assert.equal(displayPublications(item({ contentId: null, publications: summary }), null, detail), summary);
+});
+
+test('list, calendar and popup badges show the display status, while filters keep the real plan item status', () => {
+  const tab = readFileSync('src/components/content/ContentTab.tsx', 'utf8');
+  assert.equal(/<ContentStatusBadge status=\{item\.status\} \/>/.test(tab), false, 'no plan item badge shows the raw status');
+  assert.ok((tab.match(/<ContentStatusBadge status=\{displayStatus\(item\.status, item\.publications\)\} \/>/g) ?? []).length >= 2, 'list row and calendar card use the display status');
+  assert.match(tab, /<ContentStatusBadge status=\{displayStatus\(item\.status, displayPublications\(item, content, publications\)\)\} \/>/);
+  assert.match(tab, /<ContentStatusBadge status=\{publication\.status\} \/>/, 'per-publication badges are unchanged');
+});
+
+test('approving content mirrors the server by moving its plan item from review to ready', async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ content: { id: 'content-1', client_id: 'client-a', plan_item_id: 'item-1', status: 'approved', approved_revision_id: 'revision-3', version: 5 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  useContentStore.setState({ items: [item({ contentId: 'content-1', status: 'review', version: 7 }), item({ id: 'item-2', contentId: 'content-2', status: 'review', version: 2 }), item({ id: 'item-3', contentId: 'content-1', status: 'generating', version: 4 })] });
+  await useContentStore.getState().approveContent('token', 'content-1', 'revision-3', 4);
+  const [approved, other, busy] = useContentStore.getState().items;
+  assert.deepEqual([approved.status, approved.version], ['ready', 8]);
+  assert.deepEqual([other.status, other.version], ['review', 2]);
+  assert.deepEqual([busy.status, busy.version], ['generating', 4]);
 });

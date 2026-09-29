@@ -586,3 +586,50 @@ test('a failed reconcile report leaves the publication status untouched so it ca
   assert.equal((finished.job as any).status, 'failed');
   assert.equal(statements.some((sql) => sql.includes('UPDATE editorial.publications')), false);
 });
+
+function approvalPool(planItem: { status: string } | null, contentPlanItemId: string | null = 'plan-1') {
+  const statements: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = poolWithClient(async (sql, values = []) => {
+    statements.push({ sql, values });
+    if (sql.includes('SELECT * FROM editorial.contents')) return { rows: [{ id: 'content-1', client_id: 'client-a', plan_item_id: contentPlanItemId, status: 'review', version: 4 }], rowCount: 1 };
+    if (sql.includes('FROM editorial.content_revisions')) return { rows: [{ id: 'revision-3', revision_number: 3 }], rowCount: 1 };
+    if (sql.includes('UPDATE editorial.contents')) return { rows: [{ id: 'content-1', client_id: 'client-a', plan_item_id: contentPlanItemId, status: 'approved', approved_revision_id: 'revision-3', version: 5 }], rowCount: 1 };
+    if (sql.includes('FROM editorial.plan_items') && sql.includes('FOR UPDATE')) return planItem ? { rows: [{ id: 'plan-1', client_id: 'client-a', version: 7, ...planItem }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    if (sql.includes('UPDATE editorial.plan_items')) return { rows: [{ id: 'plan-1', client_id: 'client-a', status: 'ready', version: 8 }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  return { pool, statements };
+}
+
+test('approving content marks its plan item ready in the same transaction', async () => {
+  const { pool, statements } = approvalPool({ status: 'review' });
+  const content = await new EditorialApiRepository(pool).approveContent('content-1', 'revision-3', 4, 'user-1');
+  assert.equal((content as any).status, 'approved');
+  const sqls = statements.map(({ sql }) => sql);
+  const planUpdateIndex = sqls.findIndex((sql) => sql.includes('UPDATE editorial.plan_items'));
+  assert.ok(planUpdateIndex > sqls.findIndex((sql) => sql.includes('UPDATE editorial.contents')), 'plan item updated after the content');
+  assert.ok(planUpdateIndex > sqls.indexOf('BEGIN') && planUpdateIndex < sqls.indexOf('COMMIT'), 'plan item updated inside the transaction');
+  const planUpdate = statements[planUpdateIndex];
+  assert.match(planUpdate.sql, /status='ready'/);
+  assert.match(planUpdate.sql, /version=version\+1/);
+  assert.match(planUpdate.sql, /updated_at=now\(\)/);
+  assert.ok(planUpdate.values.includes('client-a') && planUpdate.values.includes('plan-1'));
+  const lock = statements.find(({ sql }) => sql.includes('FROM editorial.plan_items') && sql.includes('FOR UPDATE'))!;
+  assert.ok(lock.values.includes('client-a') && lock.values.includes('plan-1'), 'plan item looked up within the content client');
+  assert.ok(statements.some(({ sql, values }) => sql.includes('INSERT INTO editorial.events') && values.includes('plan_item.ready')), 'audit event recorded');
+});
+
+test('approving content leaves a plan item that is not in review untouched', async () => {
+  for (const status of ['generating', 'ready', 'archived', 'approved']) {
+    const { pool, statements } = approvalPool({ status });
+    await new EditorialApiRepository(pool).approveContent('content-1', 'revision-3', 4, 'user-1');
+    assert.equal(statements.some(({ sql }) => sql.includes('UPDATE editorial.plan_items')), false, `no update from ${status}`);
+    assert.equal(statements.some(({ values }) => values.includes('plan_item.ready')), false);
+  }
+});
+
+test('approving content without a linked plan item skips the plan item update', async () => {
+  const { pool, statements } = approvalPool({ status: 'review' }, null);
+  await new EditorialApiRepository(pool).approveContent('content-1', 'revision-3', 4, 'user-1');
+  assert.equal(statements.some(({ sql }) => sql.includes('editorial.plan_items')), false);
+});
