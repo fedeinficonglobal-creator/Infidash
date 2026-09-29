@@ -1,8 +1,9 @@
 import { SearchCode } from 'lucide-react';
-import { type Client, useClientStore } from '../store/useClientStore.js';
+import { type Client } from '../store/useClientStore.js';
+import { useAppNavigation } from '../hooks/useAppNavigation.js';
 
 export function SeoTab({ client }: { client: Client }) {
-  const setActiveTab = useClientStore((state) => state.setActiveTab);
+  const { goToTab } = useAppNavigation();
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -16,7 +17,7 @@ export function SeoTab({ client }: { client: Client }) {
         <p className="mt-3 max-w-2xl text-sm leading-relaxed">
           Search Console no tiene un adaptador real configurado. No se muestran consultas, clics, impresiones, posiciones ni recomendaciones estimadas.
         </p>
-        <button type="button" onClick={() => setActiveTab('integrations')} className="mt-6 rounded-xl bg-amber-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-amber-800">
+        <button type="button" onClick={() => goToTab('integrations')} className="mt-6 rounded-xl bg-amber-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-amber-800">
           Ir a Integraciones
         </button>
       </section>

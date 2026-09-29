@@ -4,12 +4,14 @@
  */
 
 import { LayoutDashboard, ShoppingBag, BarChart3, SearchCode, Megaphone, Zap, FileText, ChevronRight, AlertCircle, Users, Hash, CalendarDays } from 'lucide-react';
+import { Link } from 'react-router';
 import { useClientStore } from '../store/useClientStore';
 import { cn } from '../lib/utils.js';
 import { buildClientSignals } from '../lib/clientSignals.js';
+import { DASHBOARD_PATH, GLOBAL_CONTENT_PATH, clientPath } from '../lib/routes.js';
 
 export function Sidebar() {
-  const { clients, activeClientId, activeTabId, setActiveClient, setActiveTab } = useClientStore();
+  const { clients, activeClientId, activeTabId } = useClientStore();
 
   const activeClient = clients.find((c) => c.id === activeClientId);
   const signals = activeClient ? buildClientSignals(activeClient) : null;
@@ -30,7 +32,7 @@ export function Sidebar() {
   return (
     <aside className="w-72 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0">
       <div className="p-6 border-b border-slate-100">
-        <button className="flex items-center gap-3 mb-6 w-full text-left cursor-pointer group" onClick={() => setActiveClient(null)}>
+        <Link to={DASHBOARD_PATH} className="flex items-center gap-3 mb-6 w-full text-left cursor-pointer group">
           <div className="size-10 bg-brand-primary rounded-xl flex items-center justify-center group-hover:bg-brand-primary/90 transition-colors">
             <Zap className="text-white size-6" />
           </div>
@@ -38,15 +40,14 @@ export function Sidebar() {
             <h1 className="text-lg font-bold leading-none group-hover:text-brand-primary transition-colors">Infidash</h1>
             <span className="text-xs text-slate-400 font-medium tracking-wide">PANEL OPERATIVO</span>
           </div>
-        </button>
+        </Link>
 
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mb-5">
-          <button
-            type="button"
-            onClick={() => { setActiveClient(null); setActiveTab('content'); }}
+          <Link
+            to={GLOBAL_CONTENT_PATH}
             className={cn(
               'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold rounded-lg transition-colors',
               !activeClientId && activeTabId === 'content' ? 'bg-brand-primary/10 text-brand-primary' : 'text-slate-600 hover:bg-slate-50',
@@ -54,16 +55,16 @@ export function Sidebar() {
           >
             <CalendarDays className="size-4" />
             Contenidos globales
-          </button>
+          </Link>
         </div>
-        {activeClientId && (
+        {activeClient && (
           <div className="mb-6">
             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Menú de cliente</h2>
             <nav className="space-y-1">
               {navItems.map((item) => (
-                <button
+                <Link
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  to={clientPath(activeClient.slug, item.id)}
                   className={cn(
                     'w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors group',
                     activeTabId === item.id ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'
@@ -76,7 +77,7 @@ export function Sidebar() {
                     )}
                   />
                   {item.label}
-                </button>
+                </Link>
               ))}
             </nav>
           </div>
@@ -97,9 +98,9 @@ export function Sidebar() {
                     : `Health ${client.health}% · foco en optimización`;
 
               return (
-                <button
+                <Link
                   key={client.id}
-                  onClick={() => setActiveClient(client.id)}
+                  to={clientPath(client.slug)}
                   className={cn(
                     'w-full flex items-center gap-3 p-2 rounded-lg transition-all group text-left',
                     isActive ? 'bg-brand-primary/5 text-brand-primary shadow-sm' : 'text-slate-600 hover:bg-slate-50'
@@ -119,7 +120,7 @@ export function Sidebar() {
                     </div>
                   </div>
                   {isActive && <ChevronRight className="size-4 opacity-50" />}
-                </button>
+                </Link>
               );
             })}
           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ShoppingBag } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
+import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { getClientIntegrations, getWooCommerceSalesPreview, getWooCommerceSalesSnapshot, syncWooCommerceSales, type ApiIntegration, type WooCommerceSalesPreview } from '../services/infidashApi.js';
 import { isValidInclusiveDateRange } from '../lib/dateRange.js';
 
@@ -14,7 +15,7 @@ function defaultWindow() {
 export function SalesTab({ client }: { client: Client }) {
   const sessionToken = useClientStore((state) => state.sessionToken);
   const isAdmin = useClientStore((state) => state.currentUser?.role === 'admin');
-  const setActiveTab = useClientStore((state) => state.setActiveTab);
+  const { goToTab } = useAppNavigation();
   const [integrations, setIntegrations] = useState<ApiIntegration[]>([]);
   const [integrationLoading, setIntegrationLoading] = useState(true);
   const [range, setRange] = useState(defaultWindow);
@@ -88,7 +89,7 @@ export function SalesTab({ client }: { client: Client }) {
             {integrationLoading ? <p className="mt-4 text-sm text-slate-500" role="status">Cargando integración…</p> : !activeIntegration ? (
               <div className="mt-4">
                 <p className="text-sm text-amber-800">No hay una integración WooCommerce activa para este cliente.</p>
-                <button type="button" onClick={() => setActiveTab('integrations')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Integraciones</button>
+                <button type="button" onClick={() => goToTab('integrations')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Integraciones</button>
               </div>
             ) : (
               <form className="mt-5 space-y-4" onSubmit={(event) => void handlePreview(event)}>

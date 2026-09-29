@@ -2,12 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { DEFAULT_KPI_THRESHOLDS } from '../lib/kpiThresholds.js';
 import { formatDailyStatsSummary, getHealthLabel } from '../lib/dashboardMetrics.js';
 import { useClientStore, type Client } from '../store/useClientStore';
+import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
 import { LayoutGrid, List, Plus, Search, TrendingUp, TrendingDown, ArrowRight, X, PencilLine, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function AgencyDashboard() {
-  const { clients, sessionToken, currentUser, setActiveClient, addClient, updateClient, deleteClient } = useClientStore();
+  const { clients, sessionToken, currentUser, addClient, updateClient, deleteClient } = useClientStore();
+  const { goToClient } = useAppNavigation();
   const isAdmin = currentUser?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -278,7 +280,7 @@ export function AgencyDashboard() {
                return (
                   <div 
                      key={client.id} 
-                     onClick={() => setActiveClient(client.id)}
+                     onClick={() => goToClient(client.id)}
                      className={cn(
                         "bg-white rounded-2xl border-2 transition-all cursor-pointer hover:-translate-y-1 hover:shadow-xl group flex flex-col",
                         status.border
@@ -377,7 +379,7 @@ export function AgencyDashboard() {
                         <tr 
                            key={client.id} 
                            className="hover:bg-slate-50 transition-colors cursor-pointer group"
-                           onClick={() => setActiveClient(client.id)}
+                           onClick={() => goToClient(client.id)}
                         >
                            <td className="px-6 py-4">
                               <div className="flex items-center gap-3">

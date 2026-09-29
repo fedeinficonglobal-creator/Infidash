@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { SalesTab } from '../src/components/SalesTab.js';
 import type { Client } from '../src/store/useClientStore.js';
 
@@ -17,7 +18,7 @@ test('Sales does not present manual metrics or fabricated charts as WooCommerce 
     kpiThresholds: {} as Client['kpiThresholds'],
     revenue30d: { total: 1000, count: 1, startDate: '2026-09-01', endDate: '2026-09-30' },
   };
-  const html = renderToStaticMarkup(createElement(SalesTab, { client }));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(SalesTab, { client })));
   assert.match(html, /sincronizacion completa se guarda por tienda y periodo/);
   assert.doesNotMatch(html, /Categorías Top|Potencial recuperable|Ventas por Día|Pedidos.*12|Ingresos Totales/);
 });
