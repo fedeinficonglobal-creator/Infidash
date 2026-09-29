@@ -111,7 +111,13 @@ export default function App() {
                 {activeClient && (
                   <>
                     <span className="text-slate-300">/</span>
-                    <span className="text-sm font-bold text-slate-900">{activeClient.name}</span>
+                    <span className={activeTabId === 'content' ? 'text-sm font-medium' : 'text-sm font-bold text-slate-900'}>{activeClient.name}</span>
+                  </>
+                )}
+                {activeTabId === 'content' && (
+                  <>
+                    <span className="text-slate-300">/</span>
+                    <span className="text-sm font-bold text-slate-900">Contenidos</span>
                   </>
                 )}
              </div>
