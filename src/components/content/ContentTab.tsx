@@ -4,7 +4,7 @@ import { es } from 'date-fns/locale';
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Clock3, FilePlus2, LayoutList, LoaderCircle, Plus, RefreshCw, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { useClientStore } from '../../store/useClientStore.js';
 import { useContentStore } from '../../store/useContentStore.js';
-import { canCancelPublication, canReschedulePublication, canRunJob, filterItems, planItemActions, formatEditorialDate, isOutsideMonth, itemsOnDay, jobsForTimeline, monthDays, monthLabel, plainTextPreview, statusLabel } from '../../lib/content.js';
+import { canCancelPublication, canReschedulePublication, canRunJob, contentRefreshDelayMs, filterItems, planItemActions, formatEditorialDate, isOutsideMonth, itemsOnDay, jobsForTimeline, monthDays, monthLabel, plainTextPreview, statusLabel } from '../../lib/content.js';
 import type { PlanItem } from '../../services/contentApi.js';
 import { cn } from '../../lib/utils.js';
 import { ContentStatusBadge } from './ContentStatusBadge.js';
@@ -163,12 +163,23 @@ export function ContentTab({ clientId }: { clientId?: string | null }) {
   useEffect(() => { void load(token); }, [token, month, filters.clientId, filters.status, filters.format, filters.search, load]);
   useEffect(() => { if (filters.clientId) void loadReadiness(token, filters.clientId); }, [token, filters.clientId, loadReadiness]);
   useEffect(() => {
+    // Poll every 30s while a job is in flight, every 5 minutes otherwise (re-evaluated after each tick).
     let busy = false;
-    const tick = async () => { if (busy || document.visibilityState !== 'visible') return; busy = true; try { await pollJobs(token); await refresh(token); } finally { busy = false; } };
-    const timer = window.setInterval(() => void tick(), 30_000);
+    let timer: number | undefined;
+    let delay = 0;
+    const schedule = () => { window.clearTimeout(timer); delay = contentRefreshDelayMs(useContentStore.getState().jobs); timer = window.setTimeout(() => void tick(), delay); };
+    const tick = async () => {
+      if (busy) return;
+      if (document.visibilityState !== 'visible') { schedule(); return; }
+      busy = true;
+      try { await pollJobs(token); await refresh(token); } finally { busy = false; schedule(); }
+    };
+    schedule();
+    // A job created while idle (e.g. "Generar plan") switches to fast polling immediately.
+    const unsubscribe = useContentStore.subscribe((state, previous) => { if (!busy && state.jobs !== previous.jobs && contentRefreshDelayMs(state.jobs) < delay) schedule(); });
     const onVisible = () => { if (document.visibilityState === 'visible') void tick(); };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { window.clearTimeout(timer); unsubscribe(); document.removeEventListener('visibilitychange', onVisible); };
   }, [pollJobs, refresh, token]);
   const filtered = useMemo(() => filterItems(items, filters), [items, filters]);
   const dated = filtered.filter((item) => item.plannedAt);
