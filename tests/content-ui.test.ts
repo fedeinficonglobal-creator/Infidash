@@ -182,6 +182,8 @@ test('editorial readiness is loaded per client and gates job-creating actions', 
   };
   await useContentStore.getState().loadReadiness('token', 'client-a');
   const readiness = useContentStore.getState().readinessByClient['client-a'];
+  assert.equal(canRunJob(readiness, 'generate_plan'), true, 'multi-word job kinds survive response camelization');
+  assert.equal(canRunJob(readiness, 'generate_content'), true);
   assert.equal(canRunJob(readiness, 'publish'), true);
   assert.equal(canRunJob(readiness, 'cancel'), false);
   assert.equal(canRunJob(readiness, 'reschedule'), false);

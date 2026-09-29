@@ -203,8 +203,11 @@ export function getContentJobs(token: string, filters: { clientId?: string; stat
   return request<Page<ContentJob>>(`/api/content/jobs${queryString(filters)}`, token, { signal });
 }
 
-export function getEditorialReadiness(token: string, clientId: string) {
-  return request<EditorialReadiness>(`/api/clients/${encodeURIComponent(clientId)}/editorial-readiness`, token);
+export async function getEditorialReadiness(token: string, clientId: string): Promise<EditorialReadiness> {
+  const readiness = await request<EditorialReadiness>(`/api/clients/${encodeURIComponent(clientId)}/editorial-readiness`, token);
+  // camelize() also rewrites the JobKind map keys (generate_plan -> generatePlan); restore them.
+  const jobs = Object.fromEntries(Object.entries(readiness?.jobs ?? {}).map(([kind, ready]) => [kind.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), ready]));
+  return { enabled: Boolean(readiness?.enabled), jobs: jobs as EditorialReadiness['jobs'] };
 }
 
 export function recoverPlanJob(token: string, id: string) {
