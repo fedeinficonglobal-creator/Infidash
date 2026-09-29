@@ -7,7 +7,10 @@
       "name": "Trabajo recibido",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
-      "position": [-1200, 0]
+      "position": [
+        -1200,
+        0
+      ]
     },
     {
       "parameters": {
@@ -17,7 +20,11 @@
       "name": "Validar trabajo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1000, 0]
+      "position": [
+        -1000,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -26,7 +33,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -39,7 +49,11 @@
       "name": "Heartbeat antes de Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-800, 0]
+      "position": [
+        -800,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -48,7 +62,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "options": {}
@@ -57,18 +74,31 @@
       "name": "Cargar contexto Infidash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-600, 0]
+      "position": [
+        -600,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
             {
               "id": "b1a2c3d4-1111-4a5e-9f0c-7b1d4e6a2c58",
               "leftValue": "={{ $('Validar trabajo').first().json.job.payload.publication.media?.[0]?.url }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -79,7 +109,10 @@
       "name": "Ya hay imagen reutilizable",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [-520, -160]
+      "position": [
+        -520,
+        -160
+      ]
     },
     {
       "parameters": {
@@ -88,42 +121,62 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" }
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            }
           ]
         },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ model: 'gpt-image-1-mini', prompt: 'Imagen de cabecera fotorrealista y profesional, sin texto superpuesto, para una publicacion de marketing digital sobre: ' + $('Validar trabajo').first().json.job.payload.publication.copy.slice(0, 300), size: '1024x1024', quality: 'medium', output_format: 'jpeg', output_compression: 80 }) }}",
-        "options": { "timeout": 60000 }
+        "options": {
+          "timeout": 60000
+        }
       },
       "id": "generate-image-reschedule-v1",
       "name": "Generar imagen IA",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-560, 200],
+      "position": [
+        -560,
+        200
+      ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "operation": "toBinary",
         "sourceProperty": "data[0].b64_json",
-        "options": { "fileName": "publicacion.jpg", "mimeType": "image/jpeg" }
+        "options": {
+          "fileName": "publicacion.jpg",
+          "mimeType": "image/jpeg"
+        }
       },
       "id": "convert-image-reschedule-v1",
       "name": "Convertir imagen a binario",
       "type": "n8n-nodes-base.convertToFile",
       "typeVersion": 1.1,
-      "position": [-520, 200],
+      "position": [
+        -520,
+        200
+      ],
       "onError": "continueErrorOutput"
     },
     {
-      "parameters": { "operation": "uploadFile", "binaryProperty": "data" },
+      "parameters": {
+        "operation": "uploadFile",
+        "binaryProperty": "data"
+      },
       "id": "upload-image-postiz-reschedule-v1",
       "name": "Subir imagen a Postiz",
       "type": "n8n-nodes-postiz.postiz",
       "typeVersion": 1,
-      "position": [-480, 200],
+      "position": [
+        -480,
+        200
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -134,18 +187,31 @@
       "name": "Preparar reprogramacion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-400, 0]
+      "position": [
+        -400,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
             {
               "id": "c2b3d4e5-2222-4a5e-9f0c-7b1d4e6a2c58",
               "leftValue": "={{ $('Preparar reprogramacion').first().json.oldPostizPostId }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -156,7 +222,10 @@
       "name": "Hay publicacion anterior en Postiz",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [-260, 0]
+      "position": [
+        -260,
+        0
+      ]
     },
     {
       "parameters": {
@@ -165,24 +234,45 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ $env.POSTIZ_API_KEY }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ $env.POSTIZ_API_KEY }}"
+            }
           ]
         },
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
       "id": "delete-old-post-reschedule-v1",
       "name": "Eliminar publicacion anterior en Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-120, -80],
+      "position": [
+        -120,
+        -80
+      ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
-            { "id": "net-fb-check", "leftValue": "={{ $('Preparar reprogramacion').first().json.network }}", "rightValue": "facebook", "operator": { "type": "string", "operation": "equals" } }
+            {
+              "id": "net-fb-check",
+              "leftValue": "={{ $('Preparar reprogramacion').first().json.network }}",
+              "rightValue": "facebook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
           ],
           "combinator": "and"
         },
@@ -192,14 +282,30 @@
       "name": "Es Facebook",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [80, -160]
+      "position": [
+        80,
+        -160
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
-            { "id": "net-ig-check", "leftValue": "={{ $('Preparar reprogramacion').first().json.network }}", "rightValue": "instagram", "operator": { "type": "string", "operation": "equals" } }
+            {
+              "id": "net-ig-check",
+              "leftValue": "={{ $('Preparar reprogramacion').first().json.network }}",
+              "rightValue": "instagram",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
           ],
           "combinator": "and"
         },
@@ -209,14 +315,30 @@
       "name": "Es Instagram",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [80, 60]
+      "position": [
+        80,
+        60
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
-            { "id": "net-gmb-check", "leftValue": "={{ $('Preparar reprogramacion').first().json.network }}", "rightValue": "gmb", "operator": { "type": "string", "operation": "equals" } }
+            {
+              "id": "net-gmb-check",
+              "leftValue": "={{ $('Preparar reprogramacion').first().json.network }}",
+              "rightValue": "gmb",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
           ],
           "combinator": "and"
         },
@@ -226,7 +348,10 @@
       "name": "Es GMB",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [80, 280]
+      "position": [
+        80,
+        280
+      ]
     },
     {
       "parameters": {
@@ -236,7 +361,14 @@
           "post": [
             {
               "integrationId": "={{ $('Preparar reprogramacion').first().json.integrationId }}",
-              "settings": { "setting": [{ "key": "__type", "stringValue": "facebook" }] },
+              "settings": {
+                "setting": [
+                  {
+                    "key": "__type",
+                    "stringValue": "facebook"
+                  }
+                ]
+              },
               "value": {
                 "contentItem": [
                   {
@@ -244,7 +376,10 @@
                     "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
                     "image": {
                       "imageItem": [
-                        { "id": "img1", "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}" }
+                        {
+                          "id": "img1",
+                          "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}"
+                        }
                       ]
                     }
                   }
@@ -258,7 +393,10 @@
       "name": "Postiz Facebook",
       "type": "n8n-nodes-postiz.postiz",
       "typeVersion": 1,
-      "position": [320, -220],
+      "position": [
+        320,
+        -220
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -269,7 +407,14 @@
           "post": [
             {
               "integrationId": "={{ $('Preparar reprogramacion').first().json.integrationId }}",
-              "settings": { "setting": [{ "key": "post_type", "stringValue": "post" }] },
+              "settings": {
+                "setting": [
+                  {
+                    "key": "post_type",
+                    "stringValue": "post"
+                  }
+                ]
+              },
               "value": {
                 "contentItem": [
                   {
@@ -277,7 +422,10 @@
                     "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
                     "image": {
                       "imageItem": [
-                        { "id": "img1", "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}" }
+                        {
+                          "id": "img1",
+                          "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}"
+                        }
                       ]
                     }
                   }
@@ -291,7 +439,10 @@
       "name": "Postiz Instagram",
       "type": "n8n-nodes-postiz.postiz",
       "typeVersion": 1,
-      "position": [320, 0],
+      "position": [
+        320,
+        0
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -304,9 +455,18 @@
               "integrationId": "={{ $('Preparar reprogramacion').first().json.integrationId }}",
               "settings": {
                 "setting": [
-                  { "key": "topicType", "stringValue": "STANDARD" },
-                  { "key": "callToActionType", "stringValue": "LEARN_MORE" },
-                  { "key": "callToActionUrl", "stringValue": "={{ $('Preparar reprogramacion').first().json.externalUrl }}" }
+                  {
+                    "key": "topicType",
+                    "stringValue": "STANDARD"
+                  },
+                  {
+                    "key": "callToActionType",
+                    "stringValue": "LEARN_MORE"
+                  },
+                  {
+                    "key": "callToActionUrl",
+                    "stringValue": "={{ $('Preparar reprogramacion').first().json.externalUrl }}"
+                  }
                 ]
               },
               "value": {
@@ -316,7 +476,10 @@
                     "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
                     "image": {
                       "imageItem": [
-                        { "id": "img1", "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}" }
+                        {
+                          "id": "img1",
+                          "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}"
+                        }
                       ]
                     }
                   }
@@ -330,7 +493,10 @@
       "name": "Postiz GMB",
       "type": "n8n-nodes-postiz.postiz",
       "typeVersion": 1,
-      "position": [320, 220],
+      "position": [
+        320,
+        220
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -341,7 +507,9 @@
           "post": [
             {
               "integrationId": "={{ $('Preparar reprogramacion').first().json.integrationId }}",
-              "settings": { "setting": [] },
+              "settings": {
+                "setting": []
+              },
               "value": {
                 "contentItem": [
                   {
@@ -349,7 +517,10 @@
                     "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
                     "image": {
                       "imageItem": [
-                        { "id": "img1", "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}" }
+                        {
+                          "id": "img1",
+                          "path": "={{ $('Preparar reprogramacion').first().json.imageUrl }}"
+                        }
                       ]
                     }
                   }
@@ -363,24 +534,39 @@
       "name": "Postiz Generico",
       "type": "n8n-nodes-postiz.postiz",
       "typeVersion": 1,
-      "position": [320, 440],
+      "position": [
+        320,
+        440
+      ],
       "onError": "continueErrorOutput"
     },
     {
-      "parameters": { "jsCode": "return [{json:{postizResponse:$json}}];" },
+      "parameters": {
+        "jsCode": "return [{json:{postizResponse:$json}}];"
+      },
       "id": "capture-postiz-response-v1",
       "name": "Capturar respuesta Postiz",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, 0]
+      "position": [
+        240,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
-      "parameters": { "jsCode": "return [{json:{postizError:$json}}];" },
+      "parameters": {
+        "jsCode": "return [{json:{postizError:$json}}];"
+      },
       "id": "capture-postiz-error-v1",
       "name": "Capturar error Postiz",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [240, 420]
+      "position": [
+        240,
+        420
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -389,7 +575,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -402,7 +591,11 @@
       "name": "Heartbeat despues de Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [280, 0]
+      "position": [
+        280,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -412,7 +605,11 @@
       "name": "Normalizar reprogramacion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -421,7 +618,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -434,7 +634,11 @@
       "name": "Heartbeat despues de error Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [280, 420]
+      "position": [
+        280,
+        420
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -444,7 +648,11 @@
       "name": "Clasificar error Postiz",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 420]
+      "position": [
+        440,
+        420
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -453,7 +661,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -466,7 +677,11 @@
       "name": "Registrar evento Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 0]
+      "position": [
+        680,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -475,7 +690,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -488,7 +706,11 @@
       "name": "Guardar resultado Infidash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [920, 0]
+      "position": [
+        920,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -497,7 +719,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -510,7 +735,11 @@
       "name": "Registrar evento ambiguo o fallo",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 420]
+      "position": [
+        680,
+        420
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -519,7 +748,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -532,102 +764,567 @@
       "name": "Guardar fallo o unknown",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [920, 420]
+      "position": [
+        920,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo preparando la reprogramacion').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'before_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-confirmed-reschedule-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo tras modificar la publicacion en Postiz').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);let postizPostId=null;for(const name of [\"Capturar respuesta Postiz\",\"Postiz Facebook\",\"Postiz Instagram\",\"Postiz GMB\",\"Postiz Generico\"]){try{const json=$(name).first().json;const response=json?.postizResponse??json;const id=response?.postId??response?.id;if(id!=null&&!response?.error){postizPostId=String(id);break;}}catch(e){}}return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',error:message,publication:{status:'unknown',postizPostId,errorCode:'POST_WRITE_FAILURE',errorMessage:message},result:{workflowVersion:1,reconcileRequired:true,stage:'after_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-after-postiz-reschedule-v1",
+      "name": "Preparar fallo tras Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "fail-report-reschedule-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        900
+      ]
     }
   ],
   "connections": {
-    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo", "type": "main", "index": 0 }]] },
-    "Validar trabajo": { "main": [[{ "node": "Heartbeat antes de Postiz", "type": "main", "index": 0 }]] },
-    "Heartbeat antes de Postiz": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
-    "Cargar contexto Infidash": { "main": [[{ "node": "Ya hay imagen reutilizable", "type": "main", "index": 0 }]] },
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de Postiz": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "Ya hay imagen reutilizable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Ya hay imagen reutilizable": {
       "main": [
-        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }],
-        [{ "node": "Generar imagen IA", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Preparar reprogramacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generar imagen IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Generar imagen IA": {
       "main": [
-        [{ "node": "Convertir imagen a binario", "type": "main", "index": 0 }],
-        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Convertir imagen a binario",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar reprogramacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Convertir imagen a binario": {
       "main": [
-        [{ "node": "Subir imagen a Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Subir imagen a Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar reprogramacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Subir imagen a Postiz": {
       "main": [
-        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }],
-        [{ "node": "Preparar reprogramacion", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Preparar reprogramacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar reprogramacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Preparar reprogramacion": { "main": [[{ "node": "Hay publicacion anterior en Postiz", "type": "main", "index": 0 }]] },
+    "Preparar reprogramacion": {
+      "main": [
+        [
+          {
+            "node": "Hay publicacion anterior en Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Hay publicacion anterior en Postiz": {
       "main": [
-        [{ "node": "Eliminar publicacion anterior en Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Es Facebook", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Eliminar publicacion anterior en Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Es Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Eliminar publicacion anterior en Postiz": {
       "main": [
-        [{ "node": "Es Facebook", "type": "main", "index": 0 }],
-        [{ "node": "Es Facebook", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Es Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Es Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Es Facebook": {
       "main": [
-        [{ "node": "Postiz Facebook", "type": "main", "index": 0 }],
-        [{ "node": "Es Instagram", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Postiz Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Es Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Es Instagram": {
       "main": [
-        [{ "node": "Postiz Instagram", "type": "main", "index": 0 }],
-        [{ "node": "Es GMB", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Postiz Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Es GMB",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Es GMB": {
       "main": [
-        [{ "node": "Postiz GMB", "type": "main", "index": 0 }],
-        [{ "node": "Postiz Generico", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Postiz GMB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postiz Generico",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Postiz Facebook": {
       "main": [
-        [{ "node": "Capturar respuesta Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Capturar error Postiz", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Capturar respuesta Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Capturar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Postiz Instagram": {
       "main": [
-        [{ "node": "Capturar respuesta Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Capturar error Postiz", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Capturar respuesta Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Capturar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Postiz GMB": {
       "main": [
-        [{ "node": "Capturar respuesta Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Capturar error Postiz", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Capturar respuesta Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Capturar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Postiz Generico": {
       "main": [
-        [{ "node": "Capturar respuesta Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Capturar error Postiz", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Capturar respuesta Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Capturar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Capturar respuesta Postiz": { "main": [[{ "node": "Heartbeat despues de Postiz", "type": "main", "index": 0 }]] },
-    "Capturar error Postiz": { "main": [[{ "node": "Heartbeat despues de error Postiz", "type": "main", "index": 0 }]] },
-    "Heartbeat despues de Postiz": { "main": [[{ "node": "Normalizar reprogramacion", "type": "main", "index": 0 }]] },
-    "Normalizar reprogramacion": { "main": [[{ "node": "Registrar evento Postiz", "type": "main", "index": 0 }]] },
-    "Registrar evento Postiz": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] },
-    "Heartbeat despues de error Postiz": { "main": [[{ "node": "Clasificar error Postiz", "type": "main", "index": 0 }]] },
-    "Clasificar error Postiz": { "main": [[{ "node": "Registrar evento ambiguo o fallo", "type": "main", "index": 0 }]] },
-    "Registrar evento ambiguo o fallo": { "main": [[{ "node": "Guardar fallo o unknown", "type": "main", "index": 0 }]] }
+    "Capturar respuesta Postiz": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat despues de Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capturar error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat despues de error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de Postiz": {
+      "main": [
+        [
+          {
+            "node": "Normalizar reprogramacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar reprogramacion": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Clasificar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento ambiguo o fallo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento ambiguo o fallo": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo o unknown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo tras Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
   "active": false
 }

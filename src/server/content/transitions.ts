@@ -8,10 +8,11 @@ const planTransitions: Record<PlanItemStatus, readonly PlanItemStatus[]> = {
 const contentTransitions: Record<ContentStatus, readonly ContentStatus[]> = {
   draft: ['review', 'archived'], review: ['approved', 'draft', 'archived'], approved: ['review', 'archived'], archived: [],
 };
+// Postiz can report a post cancelled (or found after a failure) outside Infidash; reconcile must be able to record that.
 const publicationTransitions: Record<PublicationStatus, readonly PublicationStatus[]> = {
-  pending: ['sending', 'cancel_requested', 'cancelled'], sending: ['scheduled', 'published', 'draft', 'failed', 'unknown'],
-  scheduled: ['sending', 'published', 'failed', 'unknown', 'cancel_requested'], published: [], failed: ['sending', 'cancel_requested'],
-  unknown: ['sending', 'scheduled', 'published', 'failed', 'cancel_requested'], cancel_requested: ['cancelled', 'failed', 'unknown'],
+  pending: ['sending', 'cancel_requested', 'cancelled'], sending: ['scheduled', 'published', 'draft', 'failed', 'unknown', 'cancelled'],
+  scheduled: ['sending', 'published', 'failed', 'unknown', 'cancel_requested', 'cancelled'], published: [], failed: ['sending', 'scheduled', 'published', 'cancel_requested', 'cancelled'],
+  unknown: ['sending', 'scheduled', 'published', 'failed', 'cancel_requested', 'cancelled'], cancel_requested: ['cancelled', 'failed', 'unknown'],
   cancelled: [], draft: ['sending', 'published', 'failed', 'cancel_requested'],
 };
 

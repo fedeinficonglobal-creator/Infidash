@@ -7,7 +7,10 @@
       "name": "Trabajo recibido",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
-      "position": [-1200, 0]
+      "position": [
+        -1200,
+        0
+      ]
     },
     {
       "parameters": {
@@ -17,7 +20,11 @@
       "name": "Validar trabajo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1000, 0]
+      "position": [
+        -1000,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -26,7 +33,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -39,7 +49,11 @@
       "name": "Heartbeat antes de cancelar",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-800, 0]
+      "position": [
+        -800,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -48,7 +62,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "options": {}
@@ -57,7 +74,11 @@
       "name": "Cargar contexto Infidash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-600, 0]
+      "position": [
+        -600,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -67,18 +88,31 @@
       "name": "Preparar cancelacion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-400, 0]
+      "position": [
+        -400,
+        0
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
           "conditions": [
             {
               "id": "d3c4e5f6-3333-4a5e-9f0c-7b1d4e6a2c58",
               "leftValue": "={{ $('Preparar cancelacion').first().json.postizPostId }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -89,7 +123,10 @@
       "name": "Hay publicacion en Postiz",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [-220, 0]
+      "position": [
+        -220,
+        0
+      ]
     },
     {
       "parameters": {
@@ -98,16 +135,24 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ $env.POSTIZ_API_KEY }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ $env.POSTIZ_API_KEY }}"
+            }
           ]
         },
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
       "id": "delete-post-cancel-v1",
       "name": "Eliminar publicacion en Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-40, -80],
+      "position": [
+        -40,
+        -80
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -117,7 +162,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -130,7 +178,11 @@
       "name": "Heartbeat despues de Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [160, -80]
+      "position": [
+        160,
+        -80
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -140,7 +192,11 @@
       "name": "Normalizar cancelacion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [340, -80]
+      "position": [
+        340,
+        -80
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -149,7 +205,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -162,7 +221,11 @@
       "name": "Registrar evento Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [560, -80]
+      "position": [
+        560,
+        -80
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -171,7 +234,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -184,7 +250,11 @@
       "name": "Guardar resultado Infidash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [780, -80]
+      "position": [
+        780,
+        -80
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -193,7 +263,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -206,7 +279,11 @@
       "name": "Heartbeat despues de error Postiz",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [160, 220]
+      "position": [
+        160,
+        220
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -216,7 +293,11 @@
       "name": "Clasificar error Postiz",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [340, 220]
+      "position": [
+        340,
+        220
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -225,7 +306,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -238,7 +322,11 @@
       "name": "Registrar evento resultado cancelacion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [560, 220]
+      "position": [
+        560,
+        220
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -247,7 +335,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}" }
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
           ]
         },
         "sendBody": true,
@@ -260,34 +351,333 @@
       "name": "Guardar resultado cancelacion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [780, 220]
+      "position": [
+        780,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo preparando la cancelacion').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'before_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-confirmed-cancel-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo tras eliminar la publicacion en Postiz').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);let deleteRan=false;try{$('Eliminar publicacion en Postiz').first();deleteRan=true;}catch(e){}let postizPostId=null;try{postizPostId=$('Preparar cancelacion').first().json.postizPostId??null;}catch(e){}if(!deleteRan)return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'before_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',error:message,publication:{status:'unknown',postizPostId,errorCode:'POST_WRITE_FAILURE',errorMessage:message},result:{workflowVersion:1,reconcileRequired:true,stage:'after_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-after-postiz-cancel-v1",
+      "name": "Preparar fallo tras Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "fail-report-cancel-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        900
+      ]
     }
   ],
   "connections": {
-    "Trabajo recibido": { "main": [[{ "node": "Validar trabajo", "type": "main", "index": 0 }]] },
-    "Validar trabajo": { "main": [[{ "node": "Heartbeat antes de cancelar", "type": "main", "index": 0 }]] },
-    "Heartbeat antes de cancelar": { "main": [[{ "node": "Cargar contexto Infidash", "type": "main", "index": 0 }]] },
-    "Cargar contexto Infidash": { "main": [[{ "node": "Preparar cancelacion", "type": "main", "index": 0 }]] },
-    "Preparar cancelacion": { "main": [[{ "node": "Hay publicacion en Postiz", "type": "main", "index": 0 }]] },
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de cancelar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de cancelar": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "Preparar cancelacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar cancelacion": {
+      "main": [
+        [
+          {
+            "node": "Hay publicacion en Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Hay publicacion en Postiz": {
       "main": [
-        [{ "node": "Eliminar publicacion en Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Heartbeat despues de Postiz", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Eliminar publicacion en Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heartbeat despues de Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Eliminar publicacion en Postiz": {
       "main": [
-        [{ "node": "Heartbeat despues de Postiz", "type": "main", "index": 0 }],
-        [{ "node": "Heartbeat despues de error Postiz", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Heartbeat despues de Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heartbeat despues de error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Heartbeat despues de Postiz": { "main": [[{ "node": "Normalizar cancelacion", "type": "main", "index": 0 }]] },
-    "Normalizar cancelacion": { "main": [[{ "node": "Registrar evento Postiz", "type": "main", "index": 0 }]] },
-    "Registrar evento Postiz": { "main": [[{ "node": "Guardar resultado Infidash", "type": "main", "index": 0 }]] },
-    "Heartbeat despues de error Postiz": { "main": [[{ "node": "Clasificar error Postiz", "type": "main", "index": 0 }]] },
-    "Clasificar error Postiz": { "main": [[{ "node": "Registrar evento resultado cancelacion", "type": "main", "index": 0 }]] },
-    "Registrar evento resultado cancelacion": { "main": [[{ "node": "Guardar resultado cancelacion", "type": "main", "index": 0 }]] }
+    "Heartbeat despues de Postiz": {
+      "main": [
+        [
+          {
+            "node": "Normalizar cancelacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar cancelacion": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat despues de error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Clasificar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar error Postiz": {
+      "main": [
+        [
+          {
+            "node": "Registrar evento resultado cancelacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar evento resultado cancelacion": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado cancelacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo tras Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1", "timezone": "Europe/Madrid", "callerPolicy": "workflowsFromSameOwner" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
   "active": false
 }

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ContentStatusBadge } from '../src/components/content/ContentStatusBadge.tsx';
-import { canCancelPublication, canReschedulePublication, filterItems, jobsForTimeline, monthDays, plainTextPreview } from '../src/lib/content.ts';
+import { readFileSync } from 'node:fs';
+import { canCancelPublication, canReschedulePublication, canRunJob, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, timestampedIdempotencyKey } from '../src/lib/content.ts';
 import { camelize } from '../src/services/contentApi.ts';
 import { useContentStore } from '../src/store/useContentStore.ts';
 import type { PlanItem } from '../src/services/contentApi.ts';
@@ -152,4 +153,58 @@ test('scheduling uses a stable idempotency key and stores publication plus job',
   assert.equal(requestBody.externalUrl,'https://example.com/article');
   assert.equal(useContentStore.getState().publications[0].id,'publication-1');
   assert.equal(useContentStore.getState().jobs[0].id,'job-1');
+});
+
+test('admins can release a generation stuck in progress through the store', async () => {
+  let request: { url: string; method?: string; body: any } | null = null;
+  globalThis.fetch = async (input, init) => {
+    request = { url: String(input), method: init?.method, body: JSON.parse(String(init?.body)) };
+    return new Response(JSON.stringify({ plan_item: { ...item({ status: 'generation_failed', version: 6 }), client_id: 'client-a', calendar_id: 'calendar-a', planned_at: item().plannedAt } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  useContentStore.setState({ items: [item({ status: 'generating', version: 5 })] });
+  await useContentStore.getState().releasePlanGeneration('token', 'item-1', 5);
+  assert.deepEqual(request, { url: '/api/content/plan-items/item-1/release-generation', method: 'POST', body: { version: 5 } });
+  assert.equal(useContentStore.getState().items[0].status, 'generation_failed');
+  assert.equal(useContentStore.getState().items[0].version, 6);
+});
+
+test('a failed release surfaces the server conflict message', async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Hay una generación en curso; espera a que termine o caduque', code: 'JOB_IN_PROGRESS' }), { status: 409, headers: { 'content-type': 'application/json' } });
+  useContentStore.setState({ items: [item({ status: 'generating', version: 5 })] });
+  await assert.rejects(() => useContentStore.getState().releasePlanGeneration('token', 'item-1', 5));
+  assert.equal(useContentStore.getState().conflict, 'Hay una generación en curso; espera a que termine o caduque');
+});
+
+test('editorial readiness is loaded per client and gates job-creating actions', async () => {
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), '/api/clients/client-a/editorial-readiness');
+    return new Response(JSON.stringify({ enabled: true, jobs: { generate_plan: true, generate_content: true, publish: true, reschedule: false, cancel: false, reconcile: true } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  await useContentStore.getState().loadReadiness('token', 'client-a');
+  const readiness = useContentStore.getState().readinessByClient['client-a'];
+  assert.equal(canRunJob(readiness, 'publish'), true);
+  assert.equal(canRunJob(readiness, 'cancel'), false);
+  assert.equal(canRunJob(readiness, 'reschedule'), false);
+  assert.equal(canRunJob(undefined, 'generate_content'), false, 'unknown readiness hides the action');
+  assert.equal(canRunJob({ enabled: false, jobs: { ...readiness!.jobs } }, 'publish'), false);
+});
+
+test('plan item actions offer «Marcar como fallida» only to admins while generating, and hide unbound job actions', () => {
+  const ready = { enabled: true, jobs: { generate_plan: true, generate_content: true, publish: true, reschedule: false, cancel: false, reconcile: true } };
+  assert.deepEqual(planItemActions(item({ status: 'generating' }), { admin: true, readiness: undefined }), { generateContent: false, generateContentEnabled: false, releaseGeneration: true });
+  assert.deepEqual(planItemActions(item({ status: 'generation_failed' }), { admin: true, readiness: ready }), { generateContent: true, generateContentEnabled: true, releaseGeneration: false });
+  assert.deepEqual(planItemActions(item({ status: 'proposed' }), { admin: true, readiness: ready }), { generateContent: true, generateContentEnabled: false, releaseGeneration: false });
+  assert.deepEqual(planItemActions(item({ status: 'generating' }), { admin: false, readiness: ready }), { generateContent: false, generateContentEnabled: false, releaseGeneration: false });
+  const tab = readFileSync(new URL('../src/components/content/ContentTab.tsx', import.meta.url), 'utf8');
+  assert.match(tab, /Marcar como fallida/);
+  assert.match(tab, /borrador en WordPress/);
+  for (const kind of ['publish', 'cancel', 'reschedule']) assert.ok(tab.includes(`canRunJob(readiness, '${kind}')`), `${kind} actions are gated by readiness`);
+});
+
+test('manual reconciliations get a fresh idempotency key so a failed reconcile can be retried', () => {
+  assert.notEqual(timestampedIdempotencyKey('reconcile:job-1', 1), timestampedIdempotencyKey('reconcile:job-1', 2));
+  assert.equal(timestampedIdempotencyKey('reconcile:job-1', 42), 'reconcile:job-1:42');
+  const panel = readFileSync(new URL('../src/components/content/EditorialJobsPanel.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(panel, /idempotencyKey: `reconcile:\$\{job\.id\}`/);
+  assert.match(panel, /timestampedIdempotencyKey\(`reconcile:\$\{job\.id\}`\)/);
 });

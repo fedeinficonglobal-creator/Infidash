@@ -23,7 +23,8 @@
       "position": [
         -1000,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -51,7 +52,8 @@
       "position": [
         -800,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -75,7 +77,8 @@
       "position": [
         -600,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -187,7 +190,8 @@
       "position": [
         -400,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -486,7 +490,8 @@
       "position": [
         -20,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -499,7 +504,8 @@
       "position": [
         -20,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -527,7 +533,8 @@
       "position": [
         0,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -540,7 +547,8 @@
       "position": [
         220,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -568,7 +576,8 @@
       "position": [
         0,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -581,7 +590,8 @@
       "position": [
         220,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -609,7 +619,8 @@
       "position": [
         460,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -637,7 +648,8 @@
       "position": [
         700,
         0
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -665,7 +677,8 @@
       "position": [
         460,
         420
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -694,6 +707,74 @@
         700,
         420
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$input.first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');const instanceKey=String(account.instance_key||'').toLowerCase();const gmb=!instanceKey.includes('facebook')&&!instanceKey.includes('instagram')&&(instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google'));if(gmb&&!(requested.externalUrl||ctx.settings?.editorial_config?.site_url))throw new Error('La publicacion en GMB requiere una URL (externalUrl del job o editorial_config.site_url)');return $input.all();"
+      },
+      "id": "validate-publication-publish-v1",
+      "name": "Validar publicacion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        -320
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo preparando la publicacion').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'before_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-confirmed-publish-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo tras enviar la publicacion a Postiz').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);let postizPostId=null;for(const name of [\"Capturar respuesta Postiz\",\"Postiz Facebook\",\"Postiz Instagram\",\"Postiz GMB\",\"Postiz Generico\"]){try{const json=$(name).first().json;const response=json?.postizResponse??json;const id=response?.postId??response?.id;if(id!=null&&!response?.error){postizPostId=String(id);break;}}catch(e){}}return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',error:message,publication:{status:'unknown',postizPostId,errorCode:'POST_WRITE_FAILURE',errorMessage:message},result:{workflowVersion:1,reconcileRequired:true,stage:'after_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-after-postiz-publish-v1",
+      "name": "Preparar fallo tras Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "fail-report-publish-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        900
+      ]
     }
   ],
   "connections": {
@@ -716,6 +797,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -727,6 +815,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -734,7 +829,14 @@
       "main": [
         [
           {
-            "node": "Ya hay imagen reutilizable",
+            "node": "Validar publicacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -818,6 +920,13 @@
         [
           {
             "node": "Es Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
@@ -958,6 +1067,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -966,6 +1082,13 @@
         [
           {
             "node": "Heartbeat despues de error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
             "type": "main",
             "index": 0
           }
@@ -980,6 +1103,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -988,6 +1118,13 @@
         [
           {
             "node": "Registrar evento Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
             "type": "main",
             "index": 0
           }
@@ -1002,6 +1139,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1010,6 +1154,13 @@
         [
           {
             "node": "Clasificar error Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
             "type": "main",
             "index": 0
           }
@@ -1024,6 +1175,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1032,6 +1190,65 @@
         [
           {
             "node": "Guardar fallo o unknown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar publicacion": {
+      "main": [
+        [
+          {
+            "node": "Ya hay imagen reutilizable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo tras Postiz": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo tras Postiz",
             "type": "main",
             "index": 0
           }

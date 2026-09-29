@@ -156,6 +156,15 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     return reply.send({planItem});
   }));
 
+  app.post('/api/content/plan-items/:id/release-generation', route(async (request, reply) => {
+    const session=await requireHuman(request,'admin'); const body=requireObject(request.body??{});
+    const id=requireString(paramsOf(request).id,'id',100);
+    const item=await repository.getPlanItem(id);
+    if(!item) throw new ContentApiError(404,'NOT_FOUND','Propuesta no encontrada');
+    requireClientAccess(session,(item as any).client_id);
+    return reply.send({planItem:await repository.releaseGeneration(id,requirePositiveVersion(body.version),session.user.id)});
+  }));
+
   app.get('/api/content/items/:id', route(async (request, reply) => {
     const session=await requireHuman(request); const content=await repository.getContent(requireString(paramsOf(request).id,'id',100));
     if(!content) throw new ContentApiError(404,'NOT_FOUND','Contenido no encontrado');

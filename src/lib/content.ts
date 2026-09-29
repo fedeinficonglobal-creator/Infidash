@@ -1,6 +1,6 @@
 import { endOfMonth, endOfWeek, format, isSameDay, isSameMonth, parseISO, startOfMonth, startOfWeek, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
-import type { ContentJob, PlanItem } from '../services/contentApi.js';
+import type { ContentJob, EditorialReadiness, JobKind, PlanItem } from '../services/contentApi.js';
 
 export interface ContentFilters { clientId: string; status: string; format: string; search: string; }
 
@@ -27,6 +27,18 @@ export function jobsForTimeline(jobs: ContentJob[], planItemId: string, contentI
   const targets = new Set([planItemId, contentId, ...publicationIds].filter((id): id is string => Boolean(id)));
   return jobs.filter((job) => job.targetId !== null && targets.has(job.targetId));
 }
+
+/** Job-creating actions are only offered when the client has editorial automation enabled and an n8n workflow bound for that kind. */
+export function canRunJob(readiness: EditorialReadiness | null | undefined, kind: JobKind) { return Boolean(readiness?.enabled && readiness.jobs?.[kind]); }
+
+/** Brief-tab actions: "Marcar como fallida" unsticks a generation that never reported back (see POST /release-generation). */
+export function planItemActions(item: Pick<PlanItem, 'status'>, { admin, readiness }: { admin: boolean; readiness: EditorialReadiness | null | undefined }) {
+  const generateContent = admin && canRunJob(readiness, 'generate_content');
+  return { generateContent, generateContentEnabled: generateContent && ['approved', 'review', 'ready', 'generation_failed'].includes(item.status), releaseGeneration: admin && item.status === 'generating' };
+}
+
+/** Manual retries need a fresh key; the server's JOB_IN_PROGRESS guard is what prevents duplicates. */
+export function timestampedIdempotencyKey(prefix: string, now = Date.now()) { return `${prefix}:${now}`; }
 
 export function canCancelPublication(status: string) { return ['pending', 'scheduled', 'failed', 'unknown'].includes(status); }
 export function canReschedulePublication(status: string) { return status === 'scheduled'; }

@@ -16,6 +16,19 @@ function page<T extends Record<string, any>>(rows: T[], limit: number, atField =
 
 function json(value: unknown) { return JSON.stringify(value ?? {}); }
 
+/** YYYY-MM-DD for a valid date string or a pg DATE (parsed by node-postgres as local midnight); null otherwise. */
+function dateOnly(value: unknown): string | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(value) || Number.isNaN(Date.parse(value.slice(0, 10)))) return null;
+  return value.slice(0, 10);
+}
+function addDays(day: string, days: number) { const date = new Date(`${day}T00:00:00.000Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+/** The Monday strictly after today (UTC), so a new plan never starts on a day that is already under way. */
+function nextMonday() { const today = new Date().toISOString().slice(0, 10); const weekday = new Date(`${today}T00:00:00.000Z`).getUTCDay(); return addDays(today, ((8 - weekday) % 7) || 7); }
+
+/** Jobs that n8n claims again on its own after a failure; publish/reschedule/cancel only ever run once (see claimJob). */
+const AUTO_RETRY_KINDS = ['generate_plan', 'generate_content', 'reconcile'];
+
 function revisionFromRow(row: any) {
   return {
     id: row.id,
@@ -157,6 +170,36 @@ export class EditorialApiRepository {
     }, this.pool);
   }
 
+  /**
+   * Admin escape hatch for a plan item stuck in `generating` (job reported `unknown`, crashed or was
+   * orphaned). Every stale generate_content job for the item is frozen so a late n8n result can never
+   * be claimed or applied again; a live, leased execution must finish or expire first.
+   */
+  async releaseGeneration(id: string, expectedVersion: number, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      // Lock order matches claimJob (job rows, then plan item) so a concurrent claim cannot deadlock with this release.
+      const owner = await client.query('SELECT client_id FROM editorial.plan_items WHERE id=$1', [id]);
+      if (!owner.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      await client.query(`SELECT id FROM editorial.jobs WHERE client_id=$1 AND kind='generate_content' AND target_id=$2 FOR UPDATE`, [(owner.rows[0] as any).client_id, id]);
+      const current = await client.query('SELECT * FROM editorial.plan_items WHERE id=$1 FOR UPDATE', [id]);
+      const row = current.rows[0] as any;
+      if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      if (row.version !== expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada por otra ejecución');
+      if (row.status !== 'generating') throw new ContentApiError(409, 'INVALID_TRANSITION', 'Solo se puede marcar como fallida una propuesta en generación');
+      const live = await client.query(`SELECT id FROM editorial.jobs WHERE client_id=$1 AND kind='generate_content' AND target_id=$2 AND status='running' AND locked_until>now() FOR UPDATE`, [row.client_id, id]);
+      if (live.rows[0]) throw new ContentApiError(409, 'JOB_IN_PROGRESS', 'Hay una generación en curso; espera a que termine o caduque');
+      const released = await client.query(
+        `UPDATE editorial.jobs SET status='failed',attempt_count=GREATEST(attempt_count,8),lease_token=NULL,locked_until=NULL,last_error=$3,updated_at=now()
+         WHERE client_id=$1 AND kind='generate_content' AND target_id=$2 AND (status IN ('pending','failed','unknown') OR (status='running' AND (locked_until IS NULL OR locked_until<=now()))) RETURNING id`,
+        [row.client_id, id, 'Liberado manualmente por un administrador'],
+      );
+      assertPlanTransition(row.status, 'generation_failed');
+      const result = await client.query(`UPDATE editorial.plan_items SET status='generation_failed',version=version+1,updated_at=now() WHERE id=$1 RETURNING *`, [id]);
+      await this.auditWith(client, row.client_id, 'plan_item', id, 'plan_item.generation_released', actorId, { previousVersion: row.version, releasedJobIds: released.rows.map((job: any) => job.id) });
+      return result.rows[0];
+    }, this.pool);
+  }
+
   async getContent(id: string) {
     const [content, revisions] = await Promise.all([
       this.pool.query('SELECT * FROM editorial.contents WHERE id=$1', [id]),
@@ -275,9 +318,11 @@ export class EditorialApiRepository {
         if ((existing.rows[0] as any).request_hash !== hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otro payload');
         return { job: existing.rows[0], replayed: true };
       }
+      await this.refuseActiveDuplicate(client, input);
       await this.prepareJobTarget(client, input, actorId);
       await this.validateJobTarget(client, input);
       if (this.isPublicationJob(input.kind)) input.payload = await this.publicationPayloadForJob(client, input.clientId, input.targetId);
+      if (input.kind === 'generate_content') input.payload = await this.planItemPayloadForJob(client, input.clientId, input.targetId);
       const id=randomUUID();
       const result=await client.query(`INSERT INTO editorial.jobs (id,client_id,kind,target_id,idempotency_key,request_hash,payload) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,[id,input.clientId,input.kind,input.targetId??null,input.idempotencyKey,hash,json(redactSecrets(input.payload))]);
       await this.auditWith(client,input.clientId,'job',id,'job.created',actorId,{kind:input.kind,targetId:input.targetId??null});
@@ -312,6 +357,20 @@ export class EditorialApiRepository {
   private isPublicationJob(kind: string) { return ['publish', 'reschedule', 'cancel', 'reconcile'].includes(kind); }
 
   /**
+   * Server-side double-submit guard: UI idempotency keys include a timestamp, so two clicks would
+   * otherwise queue two jobs. Active = pending, leased, or failed/expired but still auto-retried by claimJob.
+   */
+  private async refuseActiveDuplicate(client: PoolClient, input: any) {
+    if (input.kind !== 'generate_plan' && !input.targetId) return;
+    const active = await client.query(
+      `SELECT id AS active_job FROM editorial.jobs WHERE client_id=$1 AND kind=$2 AND ($3::uuid IS NULL OR target_id=$3::uuid)
+        AND (status='pending' OR (status='running' AND (locked_until>now() OR ($4::boolean AND attempt_count<8))) OR (status='failed' AND $4::boolean AND attempt_count<8)) LIMIT 1`,
+      [input.clientId, input.kind, input.kind === 'generate_plan' ? null : input.targetId, AUTO_RETRY_KINDS.includes(input.kind)],
+    );
+    if (active.rows[0]) throw new ContentApiError(409, 'JOB_IN_PROGRESS', 'Ya hay un trabajo igual en curso');
+  }
+
+  /**
    * A plan always has a durable calendar before it leaves the API.  This also
    * keeps older callers (which only sent clientId) compatible with the v1
    * workflow contract.
@@ -319,22 +378,31 @@ export class EditorialApiRepository {
   private async prepareJobTarget(client: PoolClient, input: any, actorId: string | null) {
     if (input.kind !== 'generate_plan') return;
     const supplied = input.payload?.calendar ?? input.payload?.editorialCalendar ?? {};
+    const suppliedStart = dateOnly(supplied.startDate ?? supplied.start_date);
+    let periodStart: string;
     if (input.targetId) {
-      const calendar = await client.query('SELECT id FROM editorial.calendars WHERE client_id=$1 AND id=$2 FOR SHARE', [input.clientId, input.targetId]);
+      const calendar = await client.query('SELECT id,start_date FROM editorial.calendars WHERE client_id=$1 AND id=$2 FOR SHARE', [input.clientId, input.targetId]);
       if (!calendar.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Calendario editorial no encontrado');
+      periodStart = suppliedStart ?? dateOnly((calendar.rows[0] as any).start_date) ?? nextMonday();
     } else {
+      // The plan workflow dates each proposal from periodStart (week N, weekday), so a new calendar always has one.
+      const settings = await client.query('SELECT editorial_config FROM editorial.client_settings WHERE client_id=$1', [input.clientId]);
+      const config = (settings.rows[0] as any)?.editorial_config ?? {};
+      const horizon = Number(config.weeksHorizon ?? config.weeks_horizon);
+      const weeks = Number.isInteger(horizon) && horizon > 0 ? Math.min(horizon, 52) : 4;
+      periodStart = suppliedStart ?? nextMonday();
       input.targetId = randomUUID();
       await client.query(
         `INSERT INTO editorial.calendars (id,client_id,title,start_date,end_date,status,summary,insights,created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
         [input.targetId, input.clientId, supplied.title ?? `Calendario editorial ${new Date().toISOString().slice(0, 10)}`,
-          supplied.startDate ?? supplied.start_date ?? null, supplied.endDate ?? supplied.end_date ?? null,
+          periodStart, dateOnly(supplied.endDate ?? supplied.end_date) ?? addDays(periodStart, weeks * 7 - 1),
           supplied.status ?? 'draft', supplied.summary ?? null, json(supplied.insights ?? {}), actorId],
       );
       await this.auditWith(client, input.clientId, 'calendar', input.targetId, 'calendar.created_for_generation', actorId, { jobKind: input.kind });
     }
     input.payload = {
-      ...(input.payload ?? {}), schemaVersion: 1, calendarId: input.targetId, calendar_id: input.targetId,
+      ...(input.payload ?? {}), schemaVersion: 1, periodStart, calendarId: input.targetId, calendar_id: input.targetId,
       calendar: { ...supplied, id: input.targetId, calendarId: input.targetId, calendar_id: input.targetId },
     };
   }
@@ -372,6 +440,24 @@ export class EditorialApiRepository {
     return this.publicationPayload(result.rows[0], result.rows[0]);
   }
 
+  /** Full brief for generate.v1.json, read from the database so the writer never depends on (or trusts) the browser. */
+  private planItemPayload(row: any) {
+    return {
+      schemaVersion: 1,
+      planItem: {
+        id: row.id, calendarId: row.calendar_id, title: row.title, theme: row.theme ?? null, rationale: row.rationale ?? null, format: row.format ?? null,
+        keywordPrimary: row.keyword_primary ?? null, keywords: Array.isArray(row.keywords) ? row.keywords : [], entities: Array.isArray(row.entities) ? row.entities : [],
+        cta: row.cta ?? null, priority: row.priority ?? null, plannedAt: row.planned_at ?? null, version: row.version,
+      },
+    };
+  }
+
+  private async planItemPayloadForJob(client: PoolClient, clientId: string, planItemId: string) {
+    const result = await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2', [clientId, planItemId]);
+    if (!result.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+    return this.planItemPayload(result.rows[0]);
+  }
+
   private async validateJobTarget(client: PoolClient, input: any) {
     if (input.kind === 'generate_content') {
       if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', 'generate_content requiere targetId y expectedVersion');
@@ -379,7 +465,7 @@ export class EditorialApiRepository {
       const item = result.rows[0] as any;
       if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
       if (item.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada antes de solicitar la generación');
-      if (item.status === 'generating') throw new ContentApiError(409, 'RECONCILIATION_REQUIRED', 'La generación anterior sigue sin confirmar; reconcilia WordPress antes de crear otro borrador');
+      if (item.status === 'generating') throw new ContentApiError(409, 'GENERATION_RELEASE_REQUIRED', 'La generación anterior sigue sin confirmar; revisa WordPress y usa «Marcar como fallida» antes de generar otro borrador');
       assertPlanTransition(item.status, 'generating');
       await client.query(`UPDATE editorial.plan_items SET status='generating',version=version+1,updated_at=now() WHERE id=$1`, [input.targetId]);
       return;
@@ -483,6 +569,11 @@ export class EditorialApiRepository {
         selectedJob.payload = payload;
         await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
       }
+      if(selectedJob.kind==='generate_content' && selectedJob.target_id) {
+        const payload = await this.planItemPayloadForJob(client, selectedJob.client_id, selectedJob.target_id);
+        selectedJob.payload = payload;
+        await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
+      }
       const leaseToken=randomUUID();
       const result=await client.query(`UPDATE editorial.jobs SET status='running',attempt_count=attempt_count+1,lease_token=$2,locked_until=now()+make_interval(secs=>$3),execution_id=$4,updated_at=now() WHERE id=$1 RETURNING *`,[selectedJob.id,leaseToken,input.leaseSeconds,input.executionId]);
       return {...result.rows[0],leaseToken};
@@ -518,7 +609,8 @@ export class EditorialApiRepository {
         const plan=await client.query('SELECT status FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
         if((plan.rows[0] as any)?.status==='generating') await client.query(`UPDATE editorial.plan_items SET status='generation_failed',version=version+1,updated_at=now() WHERE id=$1`,[job.target_id]);
       }
-      if(!input.publication && ['publish','reschedule','cancel','reconcile'].includes(job.kind) && job.target_id) {
+      // A failed reconcile says nothing about the post itself (it is retried), so only publishing operations fall back.
+      if(!input.publication && ['publish','reschedule','cancel'].includes(job.kind) && job.target_id) {
         const fallbackStatus=status==='unknown'?'unknown':status==='failed'?'failed':null;
         if(fallbackStatus) {
           const current=await client.query('SELECT status FROM editorial.publications WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
