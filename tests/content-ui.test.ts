@@ -3,7 +3,7 @@ import test, { afterEach } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ContentStatusBadge } from '../src/components/content/ContentStatusBadge.tsx';
 import { readFileSync } from 'node:fs';
-import { canCancelPublication, canReschedulePublication, canRunJob, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, timestampedIdempotencyKey } from '../src/lib/content.ts';
+import { canCancelPublication, canReschedulePublication, canRunJob, contentRefreshDelayMs, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, timestampedIdempotencyKey } from '../src/lib/content.ts';
 import { camelize } from '../src/services/contentApi.ts';
 import { useContentStore } from '../src/store/useContentStore.ts';
 import type { PlanItem } from '../src/services/contentApi.ts';
@@ -209,4 +209,15 @@ test('manual reconciliations get a fresh idempotency key so a failed reconcile c
   const panel = readFileSync(new URL('../src/components/content/EditorialJobsPanel.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(panel, /idempotencyKey: `reconcile:\$\{job\.id\}`/);
   assert.match(panel, /timestampedIdempotencyKey\(`reconcile:\$\{job\.id\}`\)/);
+});
+
+test('content auto-refresh polls fast only while a job is in flight', () => {
+  const job = (status: string) => ({ status }) as any;
+  assert.equal(contentRefreshDelayMs([]), 300_000, 'idle screens refresh every 5 minutes');
+  assert.equal(contentRefreshDelayMs([job('succeeded'), job('failed'), job('unknown')]), 300_000, 'settled or human-blocked jobs do not need fast polling');
+  assert.equal(contentRefreshDelayMs([job('succeeded'), job('pending')]), 30_000);
+  assert.equal(contentRefreshDelayMs([job('running')]), 30_000);
+  const tab = readFileSync('src/components/content/ContentTab.tsx', 'utf8');
+  assert.ok(tab.includes('contentRefreshDelayMs('), 'ContentTab schedules its refresh with the adaptive delay');
+  assert.ok(!tab.includes('setInterval(() => void tick(), 30_000)'), 'the fixed 30s interval is gone');
 });

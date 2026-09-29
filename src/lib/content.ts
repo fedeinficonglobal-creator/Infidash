@@ -28,6 +28,11 @@ export function jobsForTimeline(jobs: ContentJob[], planItemId: string, contentI
   return jobs.filter((job) => job.targetId !== null && targets.has(job.targetId));
 }
 
+/** Auto-refresh cadence for the Contenidos screen: fast only while n8n may still change something. */
+export function contentRefreshDelayMs(jobs: Pick<ContentJob, 'status'>[]) {
+  return jobs.some((job) => job.status === 'pending' || job.status === 'running') ? 30_000 : 300_000;
+}
+
 /** Job-creating actions are only offered when the client has editorial automation enabled and an n8n workflow bound for that kind. */
 export function canRunJob(readiness: EditorialReadiness | null | undefined, kind: JobKind) { return Boolean(readiness?.enabled && readiness.jobs?.[kind]); }
 
