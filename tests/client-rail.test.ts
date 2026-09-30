@@ -99,11 +99,19 @@ test('the sidebar renders a client rail with one avatar link per client and high
   assert.match(html, />Ventas \(Woo\)</);
   assert.doesNotMatch(html, />Redes Sociales</);
 
-  // The old long client list is gone: inactive clients only appear as rail avatars (no visible name text).
-  assert.doesNotMatch(html, />Clientes</);
-  assert.doesNotMatch(html, />Inficon Global</);
-  assert.doesNotMatch(html, />matundy</);
-  assert.match(html, />C Rocio Vazquez</);
+  // Rail tiles show the client's name under its avatar (Postiz-style), with a hidden scrollbar.
+  const rail = html.match(/<nav[^>]*aria-label="Clientes"[\s\S]*?<\/nav>/)?.[0] ?? '';
+  for (const client of clients) assert.match(rail, new RegExp(`>${client.name}</span>`), `rail label for ${client.name}`);
+  assert.match(rail, />Inicio</);
+  assert.match(rail, />Buscar</);
+  assert.match(rail, /\[scrollbar-width:none\]/, 'the client list scrolls without a visible scrollbar');
+
+  // The old long client list is gone: outside the rail only the active client's name appears.
+  const main = html.replace(rail, '');
+  assert.doesNotMatch(main, />Clientes</);
+  assert.doesNotMatch(main, />Inficon Global</);
+  assert.doesNotMatch(main, />matundy</);
+  assert.match(main, />C Rocio Vazquez</);
 });
 
 test('without an active client the home button is current and no client menu is shown', () => {
