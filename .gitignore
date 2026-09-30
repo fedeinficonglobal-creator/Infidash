@@ -5,3 +5,6 @@ node_modules
 .env
 .env.*
 !.env.example
+
+# Per-client n8n imports generated from workflows/content templates
+n8n-import/
