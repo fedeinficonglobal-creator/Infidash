@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import type { Client } from '../store/useClientStore.js';
 import { cn } from '../lib/utils.js';
 import { DASHBOARD_PATH, clientPath } from '../lib/routes.js';
-import { clientColor, clientInitials, clientLogoUrl, filterClients } from '../lib/clientAvatar.js';
+import { clientColor, clientInitials, clientLogoUrl, filterClients, sortClients } from '../lib/clientAvatar.js';
 
 const railTileClass =
   'relative w-[4.25rem] shrink-0 flex flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary';
@@ -52,7 +52,7 @@ function ClientSearch({ clients }: { clients: Client[] }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelId = useId();
-  const matches = filterClients(clients, query);
+  const matches = filterClients(sortClients(clients), query);
 
   const close = (restoreFocus = false) => {
     setOpen(false);
@@ -164,7 +164,7 @@ export function ClientRail({ clients, activeClientId }: { clients: Client[]; act
       <div className="w-8 border-t border-slate-200" />
 
       <ul className={cn('flex-1 min-h-0 w-full overflow-y-auto flex flex-col items-center gap-1 py-3', railScrollClass)}>
-        {clients.map((client) => {
+        {sortClients(clients).map((client) => {
           const isActive = client.id === activeClientId;
           return (
             <li key={client.id} className="relative w-full flex justify-center">
