@@ -4,7 +4,7 @@ import { es } from 'date-fns/locale';
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Clock3, FilePlus2, LayoutList, LoaderCircle, Plus, RefreshCw, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { useClientStore } from '../../store/useClientStore.js';
 import { useContentStore } from '../../store/useContentStore.js';
-import { canCancelPublication, canReschedulePublication, canRunJob, contentRefreshDelayMs, displayPublications, displayStatus, filterItems, planItemActions, formatEditorialDate, isOutsideMonth, itemsOnDay, jobsForTimeline, monthDays, monthLabel, plainTextPreview, statusLabel } from '../../lib/content.js';
+import { canCancelPublication, canReschedulePublication, canRunJob, contentRefreshDelayMs, displayPublications, displayStatus, filterItems, planItemActions, formatEditorialDate, splitPlanInputs, isOutsideMonth, itemsOnDay, jobsForTimeline, monthDays, monthLabel, plainTextPreview, statusLabel } from '../../lib/content.js';
 import type { PlanItem } from '../../services/contentApi.js';
 import { cn } from '../../lib/utils.js';
 import { ContentStatusBadge } from './ContentStatusBadge.js';
@@ -116,9 +116,9 @@ function Timeline({ content, publications, jobs, item }: { content: ReturnType<t
   return <div className="space-y-0">{events.map((event) => <div key={event.id} className="relative border-l-2 border-slate-200 pb-5 pl-5"><span className="absolute -left-2 top-0 size-3.5 rounded-full border-2 border-white bg-brand-primary" /><p className="text-sm font-bold text-slate-800">{event.title}</p><p className="text-xs text-slate-500">{event.detail} · {formatEditorialDate(event.at)}</p></div>)}</div>;
 }
 
-function Field({ label, value, onChange, disabled, multiline, rows = 4, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; multiline?: boolean; rows?: number; type?: string }) {
+function Field({ label, value, onChange, disabled, multiline, rows = 4, type = 'text', required, maxLength }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; multiline?: boolean; rows?: number; type?: string; required?: boolean; maxLength?: number }) {
   const className = 'mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 disabled:bg-slate-100 disabled:text-slate-500';
-  return <label className="block text-xs font-bold text-slate-500">{label}{multiline ? <textarea rows={rows} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={className} /> : <input type={type} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={className} />}</label>;
+  return <label className="block text-xs font-bold text-slate-500">{label}{multiline ? <textarea rows={rows} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required} maxLength={maxLength} className={className} /> : <input type={type} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required} maxLength={maxLength} className={className} />}</label>;
 }
 
 function CreatePanel({ onClose }: { onClose: () => void }) {
@@ -154,14 +154,52 @@ function CreateCalendarPanel({ clientId, onClose }: { clientId: string; onClose:
   </div>;
 }
 
+export function GeneratePlanDialog({ clientId, onClose }: { clientId: string; onClose: () => void }) {
+  const token = useClientStore((state) => state.sessionToken)!;
+  const loadPlanInputs = useContentStore((state) => state.loadPlanInputs);
+  const generatePlan = useContentStore((state) => state.generatePlan);
+  const [topic, setTopic] = useState('');
+  const [keywords, setKeywords] = useState('');
+  const [competitors, setCompetitors] = useState('');
+  const [isLoadingInputs, setIsLoadingInputs] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setIsLoadingInputs(true);
+    loadPlanInputs(token, clientId)
+      .then((inputs) => { if (active) { setTopic(inputs.topic); setKeywords(inputs.keywords.join('\n')); setCompetitors(inputs.competitors.join('\n')); } })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar el tema, las keywords y los competidores'); })
+      .finally(() => { if (active) setIsLoadingInputs(false); });
+    return () => { active = false; };
+  }, [clientId, loadPlanInputs, token]);
+  return <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Generar plan editorial">
+    <form className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl" onSubmit={async (event) => {
+      event.preventDefault();
+      setError(null);
+      setIsSubmitting(true);
+      try { await generatePlan(token, clientId, { topic: topic.trim(), keywords: splitPlanInputs(keywords, { commas: true }), competitors: splitPlanInputs(competitors, { commas: false }) }); onClose(); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo iniciar la generación del plan'); }
+      finally { setIsSubmitting(false); }
+    }}>
+      <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Generar plan</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar"><X className="size-4" /></Button></div>
+      <p className="text-xs text-slate-500">El tema define el enfoque del plan, las keywords orientan las propuestas y los competidores se analizan al generar el plan. Se guardan para las próximas generaciones.</p>
+      <Field label="Tema" value={topic} onChange={setTopic} disabled={isLoadingInputs} required maxLength={200} />
+      <Field label="Keywords (una por línea o separadas por comas)" value={keywords} onChange={setKeywords} disabled={isLoadingInputs} multiline rows={5} />
+      <Field label="Competidores (un dominio o URL por línea)" value={competitors} onChange={setCompetitors} disabled={isLoadingInputs} multiline rows={4} />
+      {error && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</p>}
+      <div className="flex justify-end gap-2"><Button type="button" onClick={onClose} className="bg-slate-100 text-slate-700">Cancelar</Button><Button type="submit" disabled={isSubmitting || isLoadingInputs || !topic.trim()} className="bg-slate-900 text-white">{isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Generar plan</Button></div>
+    </form>
+  </div>;
+}
+
 export function ContentTab({ clientId }: { clientId?: string | null }) {
   const token = useClientStore((state) => state.sessionToken)!;
   const role = useClientStore((state) => state.currentUser?.role);
-  const { month, view, filters, items, nextCursor, page, isLoading, isLoadingMore, isRefreshing, error, lastUpdatedAt, jobs, readinessByClient, setView, setMonth, reset, setFilters, load, loadMore, refresh, pollJobs, createJob, loadReadiness } = useContentStore();
+  const { month, view, filters, items, nextCursor, page, isLoading, isLoadingMore, isRefreshing, error, lastUpdatedAt, jobs, readinessByClient, setView, setMonth, reset, setFilters, load, loadMore, refresh, pollJobs, loadReadiness } = useContentStore();
   const [creating, setCreating] = useState(false);
   const [creatingCalendar, setCreatingCalendar] = useState(false);
-  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
-  const [planCreateError, setPlanCreateError] = useState<string | null>(null);
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [dismissedPlanJobId, setDismissedPlanJobId] = useState<string | null>(null);
   useEffect(() => { reset(clientId ?? ''); }, [clientId, reset]);
   useEffect(() => { void load(token); }, [token, month, view, filters.clientId, filters.status, filters.format, filters.search, load]);
@@ -192,19 +230,10 @@ export function ContentTab({ clientId }: { clientId?: string | null }) {
   const canGeneratePlan = Boolean(filters.clientId) && canRunJob(readinessByClient[filters.clientId], 'generate_plan');
   const planJob = jobs.find((job) => job.kind === 'generate_plan' && job.clientId === filters.clientId);
   const showPlanBanner = Boolean(planJob && planJob.id !== dismissedPlanJobId);
-  const generatePlan = async () => {
-    if (!filters.clientId) return;
-    setPlanCreateError(null);
-    setIsGeneratingPlan(true);
-    try { await createJob(token, { clientId: filters.clientId, kind: 'generate_plan' }); }
-    catch (jobError) { setPlanCreateError(jobError instanceof Error ? jobError.message : 'No se pudo iniciar la generación del plan'); }
-    finally { setIsGeneratingPlan(false); }
-  };
-  return <div className="space-y-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-brand-primary">Planificación editorial</p><h1 className="mt-1 text-[1.4rem] font-bold text-slate-900">Contenidos</h1></div>{admin && <div className="flex flex-wrap gap-2">{filters.clientId && <Button onClick={() => setCreatingCalendar(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><CalendarDays className="size-4" />Nuevo calendario</Button>}<Button onClick={() => setCreating(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><Plus className="size-4" />Nuevo contenido</Button><Button disabled={!canGeneratePlan || isRefreshing || isGeneratingPlan} title={filters.clientId && !canGeneratePlan ? 'El workflow de plan no está configurado para este cliente' : undefined} onClick={() => void generatePlan()} className="bg-slate-900 text-white">{isGeneratingPlan ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Generar plan</Button></div>}</div>
+  return <div className="space-y-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-brand-primary">Planificación editorial</p><h1 className="mt-1 text-[1.4rem] font-bold text-slate-900">Contenidos</h1></div>{admin && <div className="flex flex-wrap gap-2">{filters.clientId && <Button onClick={() => setCreatingCalendar(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><CalendarDays className="size-4" />Nuevo calendario</Button>}<Button onClick={() => setCreating(true)} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><Plus className="size-4" />Nuevo contenido</Button><Button disabled={!canGeneratePlan || isRefreshing || planDialogOpen} title={filters.clientId && !canGeneratePlan ? 'El workflow de plan no está configurado para este cliente' : undefined} onClick={() => setPlanDialogOpen(true)} className="bg-slate-900 text-white"><Sparkles className="size-4" />Generar plan</Button></div>}</div>
     <Filters /><SummaryCards />
     <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3"><div className="inline-flex rounded-xl border border-slate-200 bg-white p-1"><button onClick={() => setView('calendar')} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold', view === 'calendar' ? 'bg-slate-900 text-white' : 'text-slate-500')}><CalendarDays className="size-4" />Calendario</button><button onClick={() => setView('list')} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold', view === 'list' ? 'bg-slate-900 text-white' : 'text-slate-500')}><LayoutList className="size-4" />Lista</button></div>{view === 'calendar' && <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1"><button onClick={() => setMonth(subMonths(month, 1))} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100" aria-label="Mes anterior"><ChevronLeft className="size-4" /></button><span className="min-w-28 px-1 text-center text-xs font-bold capitalize text-slate-700">{monthLabel(month)}</span><button onClick={() => setMonth(addMonths(month, 1))} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100" aria-label="Mes siguiente"><ChevronRight className="size-4" /></button></div>}</div><div className="flex items-center gap-2 text-xs text-slate-400"><Clock3 className="size-3.5" />{lastUpdatedAt ? `Actualizado ${format(parseISO(lastUpdatedAt), 'HH:mm:ss', { locale: es })}` : 'Pendiente de actualizar'}<button onClick={() => void refresh(token)} disabled={isRefreshing} aria-label="Actualizar contenidos" className="rounded-lg p-2 hover:bg-white"><RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} /></button></div></div>
     {error && <div role="alert" className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{error}</span><Button onClick={() => void load(token)} className="bg-white px-3 text-rose-700">Reintentar</Button></div>}
-    {planCreateError && <div role="alert" className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{planCreateError}</span><Button onClick={() => setPlanCreateError(null)} className="bg-white px-3 text-rose-700"><X className="size-4" /></Button></div>}
     {showPlanBanner && planJob && ['pending', 'running'].includes(planJob.status) && <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800"><LoaderCircle className="size-4 shrink-0 animate-spin" />Generando plan editorial… puede tardar varios minutos. Las propuestas nuevas aparecerán aquí automáticamente.</div>}
     {showPlanBanner && planJob && planJob.status === 'unknown' && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">El resultado del plan no está confirmado. Revisa el trabajo antes de crear otro.</div>}
     {showPlanBanner && planJob && planJob.status === 'succeeded' && <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"><span>Plan generado correctamente.</span><Button onClick={() => setDismissedPlanJobId(planJob.id)} className="bg-white px-3 text-emerald-700"><X className="size-4" /></Button></div>}
@@ -212,6 +241,6 @@ export function ContentTab({ clientId }: { clientId?: string | null }) {
     {isLoading ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-28 animate-pulse rounded-2xl bg-slate-200" />)}</div> : filtered.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white"><Empty label={items.length ? 'Ningún contenido coincide con los filtros' : (view === 'list' ? 'No hay contenidos' : `No hay contenidos en ${monthLabel(month)}`)} /></div> : <>{view === 'calendar' ? <><EditorialCalendar items={dated} />{nextCursor && <Button onClick={() => void loadMore(token)} disabled={isLoadingMore} className="bg-white text-slate-700 shadow-sm">{isLoadingMore && <LoaderCircle className="size-4 animate-spin" />}Cargar más contenidos del calendario</Button>}</> : <ContentTable items={filtered} />}{view === 'calendar' && <UndatedTray items={undated} />}</>}
     {view === 'list' && (page > 1 || nextCursor) && <ListPagination />}
     {filters.clientId && <EditorialJobsPanel clientId={filters.clientId} />}
-    <DetailPanel />{creating && <CreatePanel onClose={() => setCreating(false)} />}{creatingCalendar && filters.clientId && <CreateCalendarPanel clientId={filters.clientId} onClose={() => setCreatingCalendar(false)} />}
+    <DetailPanel />{creating && <CreatePanel onClose={() => setCreating(false)} />}{creatingCalendar && filters.clientId && <CreateCalendarPanel clientId={filters.clientId} onClose={() => setCreatingCalendar(false)} />}{planDialogOpen && filters.clientId && <GeneratePlanDialog clientId={filters.clientId} onClose={() => setPlanDialogOpen(false)} />}
   </div>;
 }

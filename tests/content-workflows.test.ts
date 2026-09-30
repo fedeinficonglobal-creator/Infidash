@@ -375,7 +375,7 @@ const MERGE_INPUTS: Record<number, string> = { 0: 'published_articles', 1: 'tren
 
 test('plan data sources are optional: every source failure feeds a stub into the same merge input', () => {
   const plan = loadWorkflow('inficon-global/plan.v1.json');
-  const merge = edgesInto(plan, '🔗 Merge 4 Análisis2');
+  const merge = edgesInto(plan, '🔗 Merge 4 Análisis');
   for (let input = 0; input < 8; input += 1) assert.ok(merge.some((edge) => edge.input === input && edge.output === 0), `merge input ${input} has a success feeder`);
   for (const [input, analysisType] of Object.entries(MERGE_INPUTS)) {
     const stubs = merge.filter((edge) => edge.input === Number(input) && edge.from.startsWith('Sin datos:'));
@@ -386,29 +386,29 @@ test('plan data sources are optional: every source failure feeds a stub into the
     assert.equal(stub.json.error, 'HTTP 500');
     assert.match(stub.json.insights, /^Sin datos disponibles de /);
   }
-  for (const source of ['📈 A: Google Trends1', '🌍 D: Estacionalidad — SerpAPI1', '📊 C: GA4 — Top Contenidos1', 'Query search console1', 'Pages search console1', 'Datos serprobot 7 dias1', '🏢 B: Scrape JINA Reader', '🏢 B: Scrape JINA Reader2', '🤖 Agente IA: Tendencias', '🤖 Agente IA: Histórico', '🤖 Agente IA: SC Páginas', '🤖 Agente IA: Queries', '🤖 Agente IA: Rankings', '🤖 Agente IA: Estacionalidad', '🏢 B: IA Analiza Competidor3', '🏢 B: IA Analiza Competidor1']) {
+  for (const source of ['📈 A: Google Trends', '🌍 D: Estacionalidad — SerpAPI', '📊 C: GA4 — Top Contenidos', 'Query search console', 'Pages search console', 'Datos serprobot 7 dias', '🏢 B: Scrape JINA Reader1', '🏢 B: Scrape JINA Reader3', '🤖 Agente IA: Tendencias1', '🤖 Agente IA: Histórico1', '🤖 Agente IA: SC Páginas1', '🤖 Agente IA: Queries1', '🤖 Agente IA: Rankings1', '🤖 Agente IA: Estacionalidad1', '🏢 B: IA Analiza Competidor', '🏢 B: IA Analiza Competidor2']) {
     const [stub] = targets(plan, source, 1);
     assert.ok(stub?.startsWith('Sin datos:'), `${source} degrades to a stub, got ${stub}`);
   }
-  for (const [jina, input] of [['🏢 B: Scrape JINA Reader', 0], ['🏢 B: Scrape JINA Reader2', 1]] as const) {
+  for (const [jina, input] of [['🏢 B: Scrape JINA Reader1', 0], ['🏢 B: Scrape JINA Reader3', 1]] as const) {
     const stubName = targets(plan, jina, 1)[0];
-    assert.deepEqual(edgesInto(plan, 'Merge1').filter((edge) => edge.from === stubName).map((edge) => edge.input), [input]);
+    assert.deepEqual(edgesInto(plan, 'Merge').filter((edge) => edge.from === stubName).map((edge) => edge.input), [input]);
     const [stub] = runCode(plan, stubName, { input: [{ error: 'timeout' }] });
     assert.equal(stub.json.unavailable, true);
     assert.ok(Array.isArray(stub.json.articulos));
   }
   const reporters = new Set(edgesInto(plan, 'Preparar fallo confirmado').map((edge) => edge.from));
-  const allowed = new Set(['Validar trabajo', 'Heartbeat inicial', 'Cargar contexto Infidash', '⚙️ Configuración1', '🧩 Preparar Contexto IA2', '🤖 IA: Plan de Contenidos2', '📝 Parsear Plan JSON2', 'Heartbeat tras IA', 'Normalizar resultado del plan', 'Guardar resultado Infidash']);
+  const allowed = new Set(['Validar trabajo', 'Heartbeat inicial', 'Cargar contexto Infidash', '⚙️ Configuración', '🧩 Preparar Contexto IA', '🤖 IA: Plan de Contenidos', '📝 Parsear Plan JSON', 'Heartbeat tras IA', 'Normalizar resultado del plan', 'Guardar resultado Infidash']);
   for (const reporter of reporters) assert.ok(allowed.has(reporter), `${reporter} must not fail the whole plan`);
-  for (const core of ['🤖 IA: Plan de Contenidos2', 'Heartbeat inicial', 'Heartbeat tras IA', 'Cargar contexto Infidash', 'Normalizar resultado del plan']) assert.ok(reporters.has(core), `${core} reports failures`);
+  for (const core of ['🤖 IA: Plan de Contenidos', 'Heartbeat inicial', 'Heartbeat tras IA', 'Cargar contexto Infidash', 'Normalizar resultado del plan']) assert.ok(reporters.has(core), `${core} reports failures`);
 });
 
 test('the plan synthesis context tolerates stub analyses', () => {
   const plan = loadWorkflow('inficon-global/plan.v1.json');
   const stubs = Object.values(MERGE_INPUTS).map((analysisType) => ({ analysis_type: analysisType, unavailable: true, error: 'HTTP 500', insights: `Sin datos disponibles de ${analysisType}` }));
-  const [context] = runCode(plan, '🧩 Preparar Contexto IA2', {
+  const [context] = runCode(plan, '🧩 Preparar Contexto IA', {
     input: [...stubs, { analysis_type: 'competitors', competitors_analysis: [] }],
-    nodes: { '⚙️ Configuración1': [{ topic: 'marketing', keywords: 'seo, sem', weeks_horizon: 4, country: 'ES' }], 'Cargar contexto Infidash': [{ planItems: [] }] },
+    nodes: { '⚙️ Configuración': [{ topic: 'marketing', keywords: 'seo, sem', weeks_horizon: 4, country: 'ES' }], 'Cargar contexto Infidash': [{ planItems: [] }] },
   });
   assert.match(context.json.trends_data, /Fuente no disponible/);
   assert.match(context.json.trends_data, /Sin datos disponibles de trends/);
@@ -419,7 +419,49 @@ test('the plan normalizer dates proposals from a YYYY-MM-DD periodStart and repo
   const plan = loadWorkflow('inficon-global/plan.v1.json');
   const job = { ...JOB, target_id: 'calendar-1', payload: { periodStart: '2026-10-05' } };
   const parsed = { success: true, plan: { content_plan: [{ week: 2, posts: [{ title: 'Guía', day: 'miércoles', keywords: ['bombas'] }] }] } };
-  const [result] = runCode(plan, 'Normalizar resultado del plan', { nodes: { 'Validar trabajo': [{ job }], '📝 Parsear Plan JSON2': [parsed] } });
+  const [result] = runCode(plan, 'Normalizar resultado del plan', { nodes: { 'Validar trabajo': [{ job }], '📝 Parsear Plan JSON': [parsed] } });
   assert.equal(result.json.planItems[0].plannedAt, '2026-10-14T00:00:00.000Z');
-  assert.throws(() => runCode(plan, 'Normalizar resultado del plan', { nodes: { 'Validar trabajo': [{ job }], '📝 Parsear Plan JSON2': [{ success: false, error: 'Unexpected token } in JSON' }] } }), /Unexpected token/);
+  assert.throws(() => runCode(plan, 'Normalizar resultado del plan', { nodes: { 'Validar trabajo': [{ job }], '📝 Parsear Plan JSON': [{ success: false, error: 'Unexpected token } in JSON' }] } }), /Unexpected token/);
+});
+
+test('the plan workflow has no client-specific hardcoded values or paired-item config lookups', () => {
+  const raw = readFileSync(join(workflowRoot, 'inficon-global', 'plan.v1.json'), 'utf8');
+  for (const hardcoded of ['soyrafaramos.com', 'moodmarketing.es', '4958413', 'GA4_PROPERTY_ID_INFICON', 'inficonglobal.es', 'marketing digital y automatización', 'inficon-plan:']) {
+    assert.equal(raw.includes(hardcoded), false, `plan.v1.json must not contain ${hardcoded}`);
+  }
+  assert.equal(raw.includes("$('⚙️ Configuración').item"), false, 'Configuración1 is read with .first(), never .item, so merges cannot break paired-item resolution');
+  const plan = loadWorkflow('inficon-global/plan.v1.json');
+  assert.match(nodeNamed(plan, '🤖 IA: Plan de Contenidos').parameters.text, /\{\{ \$json\.config\.keywords \}\}/);
+  assert.match(nodeNamed(plan, '🤖 Agente IA: Tendencias1').parameters.text, /negocio del sector \{\{ \$\('⚙️ Configuración'\)\.first\(\)\.json\.topic \}\}/);
+});
+
+test('plan configuration comes only from editorial_config and fails loudly without topic or site URL', () => {
+  const plan = loadWorkflow('inficon-global/plan.v1.json');
+  const run = (config: Record<string, unknown> | null) => runCode(plan, '⚙️ Configuración', { nodes: { 'Cargar contexto Infidash': [{ settings: { editorial_config: config }, planItems: [] }] } })[0].json;
+  assert.throws(() => run({ siteUrl: 'https://example.com' }), /Falta editorial_config\.topic/);
+  assert.throws(() => run({ topic: '   ', siteUrl: 'https://example.com' }), /Falta editorial_config\.topic/);
+  assert.throws(() => run({ topic: 'Fontanería' }), /Falta editorial_config\.siteUrl/);
+  assert.throws(() => run(null), /Falta editorial_config\.topic/);
+
+  const minimal = run({ topic: ' Fontanería ', site_url: 'https://example.com' });
+  assert.equal(minimal.topic, 'Fontanería');
+  assert.equal(minimal.site_url, 'https://example.com', 'site_url is accepted as a legacy alias of siteUrl');
+  assert.equal(minimal.keywords, 'Fontanería', 'keywords fall back to the topic');
+  assert.deepEqual(minimal.keywords_list, ['Fontanería']);
+  assert.deepEqual(minimal.competitors, []);
+  assert.equal(minimal.serprobotProjectId, null);
+  assert.equal(minimal.ga4PropertyId, null);
+  assert.equal(minimal.country, 'ES');
+  assert.equal(minimal.weeks_horizon, 4);
+
+  const full = run({ topic: 'Fontanería', siteUrl: 'https://shop.example', site_url: 'https://ignored.example', keywords: [' desatascos ', '', 'calderas'], competitors: ['a.com', ' b.com '], serprobotProjectId: 123, ga4PropertyId: ' 456 ', country: 'MX', weeksHorizon: '6' });
+  assert.equal(full.site_url, 'https://shop.example');
+  assert.equal(full.keywords, 'desatascos, calderas');
+  assert.deepEqual(full.keywords_list, ['desatascos', 'calderas']);
+  assert.deepEqual(full.competitors, ['a.com', 'b.com']);
+  assert.equal(full.serprobotProjectId, '123');
+  assert.equal(full.ga4PropertyId, '456');
+  assert.equal(full.country, 'MX');
+  assert.equal(full.weeks_horizon, 6);
+  assert.deepEqual(run({ topic: 'Fontanería', siteUrl: 'https://example.com', keywords: 'seo, , sem' }).keywords_list, ['seo', 'sem'], 'legacy comma-separated keywords are still read');
 });

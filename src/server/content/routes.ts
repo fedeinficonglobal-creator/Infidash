@@ -232,6 +232,21 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     return reply.send(await repository.readiness(clientId));
   }));
 
+  app.get('/api/clients/:clientId/editorial-plan-inputs', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    return reply.send(await repository.getPlanInputs(clientId));
+  }));
+
+  app.put('/api/clients/:clientId/editorial-plan-inputs', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    const body = requireObject(request.body);
+    return reply.send(await repository.savePlanInputs(clientId, { topic: body.topic, keywords: body.keywords, competitors: body.competitors }));
+  }));
+
   app.get('/api/content/items/:id/publications', route(async (request, reply) => {
     const session=await requireHuman(request);
     const contentId=requireString(paramsOf(request).id,'id',100);

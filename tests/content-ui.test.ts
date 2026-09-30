@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createElement } from 'react';
 import { ContentStatusBadge } from '../src/components/content/ContentStatusBadge.tsx';
 import { readFileSync } from 'node:fs';
-import { canCancelPublication, canReschedulePublication, canRunJob, displayPublications, displayStatus, contentRefreshDelayMs, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, timestampedIdempotencyKey } from '../src/lib/content.ts';
+import { canCancelPublication, canReschedulePublication, canRunJob, displayPublications, displayStatus, contentRefreshDelayMs, filterItems, jobsForTimeline, monthDays, plainTextPreview, planItemActions, splitPlanInputs, timestampedIdempotencyKey } from '../src/lib/content.ts';
+import { GeneratePlanDialog } from '../src/components/content/ContentTab.tsx';
 import { camelize } from '../src/services/contentApi.ts';
 import { useContentStore } from '../src/store/useContentStore.ts';
 import type { PlanItem } from '../src/services/contentApi.ts';
@@ -173,6 +175,65 @@ test('a failed release surfaces the server conflict message', async () => {
   useContentStore.setState({ items: [item({ status: 'generating', version: 5 })] });
   await assert.rejects(() => useContentStore.getState().releasePlanGeneration('token', 'item-1', 5));
   assert.equal(useContentStore.getState().conflict, 'Hay una generación en curso; espera a que termine o caduque');
+});
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+test('plan inputs load as plain string arrays that survive response camelization', async () => {
+  let requested: string | null = null;
+  globalThis.fetch = async (input) => { requested = String(input); return jsonResponse({ topic: 'Marketing local', keywords: ['seo_local', 'marketing'], competitors: ['foo.com'] }); };
+  const inputs = await useContentStore.getState().loadPlanInputs('token', 'client-a');
+  assert.equal(requested, '/api/clients/client-a/editorial-plan-inputs');
+  assert.deepEqual(inputs, { topic: 'Marketing local', keywords: ['seo_local', 'marketing'], competitors: ['foo.com'] });
+});
+
+test('generating a plan saves the inputs before creating the generate_plan job', async () => {
+  const calls: Array<{ method: string; url: string; body: any }> = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push({ method: init?.method ?? 'GET', url: String(input), body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (String(input).endsWith('/editorial-plan-inputs')) return jsonResponse({ topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] });
+    return jsonResponse({ job: { id: 'job-plan', client_id: 'client-a', kind: 'generate_plan', status: 'pending', target_id: null, last_error: null, created_at: '2026-09-30T10:00:00.000Z', updated_at: '2026-09-30T10:00:00.000Z' }, replayed: false }, 202);
+  };
+  await useContentStore.getState().generatePlan('token', 'client-a', { topic: 'SEO', keywords: ['seo'], competitors: ['https://foo.com'] });
+  assert.deepEqual(calls.map(({ method, url }) => `${method} ${url}`), ['PUT /api/clients/client-a/editorial-plan-inputs', 'POST /api/content/jobs']);
+  assert.deepEqual(calls[0].body, { topic: 'SEO', keywords: ['seo'], competitors: ['https://foo.com'] });
+  assert.equal(calls[1].body.kind, 'generate_plan');
+  assert.equal(calls[1].body.clientId, 'client-a');
+  assert.equal(useContentStore.getState().jobs[0]?.id, 'job-plan');
+  assert.equal(useContentStore.getState().isSaving, false);
+});
+
+test('generating a plan does not create the job when saving the inputs fails', async () => {
+  const calls: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return jsonResponse({ error: 'Añade al menos un competidor', code: 'INVALID_PAYLOAD' }, 400);
+  };
+  await assert.rejects(() => useContentStore.getState().generatePlan('token', 'client-a', { topic: 'SEO', keywords: ['seo'], competitors: [] }), /Añade al menos un competidor/);
+  assert.deepEqual(calls, ['PUT /api/clients/client-a/editorial-plan-inputs']);
+  assert.equal(useContentStore.getState().jobs.length, 0);
+  assert.equal(useContentStore.getState().isSaving, false);
+});
+
+test('plan input text splits keywords on lines and commas and competitors on lines only', () => {
+  assert.deepEqual(splitPlanInputs(' seo local, marketing\n\n  sem ,', { commas: true }), ['seo local', 'marketing', 'sem']);
+  assert.deepEqual(splitPlanInputs('https://foo.com/?a=1,2\r\n\nbar.es  ', { commas: false }), ['https://foo.com/?a=1,2', 'bar.es']);
+});
+
+test('the generate plan dialog asks for a topic, keywords and competitors with cancel and submit actions', () => {
+  const html = renderToStaticMarkup(createElement(GeneratePlanDialog, { clientId: 'client-a', onClose: () => {} }));
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /Tema/);
+  assert.ok(html.indexOf('Tema') < html.indexOf('Keywords'), 'the topic field comes before keywords');
+  assert.match(html, /<input[^>]*required/, 'the topic input is required');
+  assert.match(html, /tema define el enfoque del plan/i);
+  assert.match(html, /Keywords/);
+  assert.match(html, /Competidores/);
+  assert.match(html, /competidores se analizan/i);
+  assert.match(html, /Cancelar/);
+  assert.match(html, /Generar plan/);
 });
 
 test('editorial readiness is loaded per client and gates job-creating actions', async () => {

@@ -633,3 +633,121 @@ test('approving content without a linked plan item skips the plan item update', 
   await new EditorialApiRepository(pool).approveContent('content-1', 'revision-3', 4, 'user-1');
   assert.equal(statements.some(({ sql }) => sql.includes('editorial.plan_items')), false);
 });
+
+async function planInputsApp(repository: unknown) {
+  const app = Fastify({ logger: false });
+  await app.register(contentRoutes, {
+    repository: repository as any,
+    resolveHumanSession: (token: string) => token === 'admin' ? { user: { id: 'user-1', role: 'admin' as const, clientIds: null } } : token === 'viewer' ? { user: { id: 'user-2', role: 'viewer' as const, clientIds: ['client-a'] } } : null,
+  });
+  return app;
+}
+
+test('editorial plan inputs read topic, keywords and competitors from editorial_config, normalizing legacy strings', async () => {
+  const values: unknown[][] = [];
+  const pool = poolWithClient(async (sql, params = []) => {
+    values.push(params);
+    if (sql.includes('FROM editorial.client_settings')) return { rows: [{ editorial_config: { topic: '  Marketing  ', keywords: ' seo local, , marketing digital ', site_url: 'https://example.com' } }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  assert.deepEqual(await new EditorialApiRepository(pool).getPlanInputs('client-a'), { topic: 'Marketing', keywords: ['seo local', 'marketing digital'], competitors: [] });
+  assert.ok(values.some((params) => params.includes('client-a')));
+
+  const arrays = poolWithClient(async (sql) => sql.includes('FROM editorial.client_settings') ? { rows: [{ editorial_config: { topic: 42, keywords: ['seo', ' ', 'sem'], competitors: ['foo.com', 7] } }], rowCount: 1 } : { rows: [], rowCount: 0 });
+  assert.deepEqual(await new EditorialApiRepository(arrays).getPlanInputs('client-a'), { topic: '', keywords: ['seo', 'sem'], competitors: ['foo.com'] });
+
+  const empty = poolWithClient(async (sql) => sql.includes('FROM editorial.client_settings') ? { rows: [{ editorial_config: null }], rowCount: 1 } : { rows: [], rowCount: 0 });
+  assert.deepEqual(await new EditorialApiRepository(empty).getPlanInputs('client-a'), { topic: '', keywords: [], competitors: [] });
+});
+
+test('editorial plan inputs refuse a client without editorial settings with 409 EDITORIAL_DISABLED', async () => {
+  const pool = poolWithClient(async () => ({ rows: [], rowCount: 0 }));
+  const repository = new EditorialApiRepository(pool);
+  await assert.rejects(() => repository.getPlanInputs('client-x'), (error: any) => error.statusCode === 409 && error.code === 'EDITORIAL_DISABLED');
+  await assert.rejects(() => repository.savePlanInputs('client-x', { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] }), (error: any) => error.statusCode === 409 && error.code === 'EDITORIAL_DISABLED');
+});
+
+test('saving plan inputs merges the trimmed topic and normalized arrays into editorial_config and keeps other keys', async () => {
+  const statements: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = poolWithClient(async (sql, values = []) => {
+    statements.push({ sql, values });
+    if (sql.includes('UPDATE editorial.client_settings')) return { rows: [{ client_id: 'client-a' }], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  });
+  const saved = await new EditorialApiRepository(pool).savePlanInputs('client-a', {
+    topic: '  Marketing local  ',
+    keywords: ['  SEO local ', 'seo LOCAL', '', 'marketing'],
+    competitors: ['https://www.Foo.com/path?x=1', 'http://bar.es/', 'FOO.com', 'www.baz.org#top', '  '],
+  });
+  assert.deepEqual(saved, { topic: 'Marketing local', keywords: ['SEO local', 'marketing'], competitors: ['foo.com', 'bar.es', 'baz.org'] });
+  const update = statements.find(({ sql }) => sql.includes('UPDATE editorial.client_settings'))!;
+  assert.match(update.sql, /editorial_config\s*=\s*COALESCE\(editorial_config,\s*'\{\}'::jsonb\)\s*\|\|\s*\$2::jsonb/);
+  assert.match(update.sql, /updated_at\s*=\s*now\(\)/);
+  assert.match(update.sql, /WHERE client_id\s*=\s*\$1/);
+  assert.equal(update.values[0], 'client-a');
+  assert.deepEqual(JSON.parse(String(update.values[1])), { topic: 'Marketing local', keywords: ['SEO local', 'marketing'], competitors: ['foo.com', 'bar.es', 'baz.org'] });
+});
+
+test('saving plan inputs validates every rule before touching the database', async () => {
+  let queried = false;
+  const pool = poolWithClient(async () => { queried = true; return { rows: [{ client_id: 'client-a' }], rowCount: 1 }; });
+  const repository = new EditorialApiRepository(pool);
+  const rejects = (input: any, pattern: RegExp) => assert.rejects(() => repository.savePlanInputs('client-a', input), (error: any) => error.statusCode === 400 && error.code === 'INVALID_PAYLOAD' && pattern.test(error.message));
+  await rejects({ topic: 'SEO', keywords: 'seo', competitors: ['foo.com'] }, /keywords/);
+  await rejects({ topic: 'SEO', keywords: ['seo', 3], competitors: ['foo.com'] }, /keywords/);
+  await rejects({ topic: 'SEO', keywords: ['seo'], competitors: 'foo.com' }, /competidores/);
+  await rejects({ topic: 'SEO', keywords: [' ', ''], competitors: ['foo.com'] }, /al menos una keyword/);
+  await rejects({ topic: 'SEO', keywords: ['seo'], competitors: [] }, /al menos un competidor/);
+  await rejects({ topic: 'SEO', keywords: Array.from({ length: 21 }, (_, index) => `kw ${index}`), competitors: ['foo.com'] }, /20 keywords/);
+  await rejects({ topic: 'SEO', keywords: ['x'.repeat(101)], competitors: ['foo.com'] }, /100 caracteres/);
+  await rejects({ topic: 'SEO', keywords: ['seo'], competitors: ['a.com', 'b.com', 'c.com', 'd.com', 'e.com', 'f.com'] }, /5 competidores/);
+  await rejects({ topic: 'SEO', keywords: ['seo'], competitors: ['localhost'] }, /localhost/);
+  await rejects({ topic: 'SEO', keywords: ['seo'], competitors: ['foo_bar.com'] }, /foo_bar\.com/);
+  await rejects({ topic: 'SEO', keywords: ['seo'], competitors: ['foo.com:8080'] }, /foo\.com:8080/);
+  await rejects({ keywords: ['seo'], competitors: ['foo.com'] }, /Indica el tema del plan/);
+  await rejects({ topic: '   ', keywords: ['seo'], competitors: ['foo.com'] }, /Indica el tema del plan/);
+  await rejects({ topic: 7, keywords: ['seo'], competitors: ['foo.com'] }, /Indica el tema del plan/);
+  await rejects({ topic: 'x'.repeat(201), keywords: ['seo'], competitors: ['foo.com'] }, /tema debe tener como máximo 200 caracteres/);
+  assert.equal(queried, false);
+  assert.equal((await repository.savePlanInputs('client-a', { topic: ` ${'x'.repeat(200)} `, keywords: ['seo'], competitors: ['foo.com'] })).topic, 'x'.repeat(200));
+  // Duplicates collapse before the limits are counted.
+  const saved = await repository.savePlanInputs('client-a', { topic: 'SEO', keywords: Array.from({ length: 25 }, (_, index) => (index % 2 ? 'SEO' : 'seo')), competitors: ['a.com', 'A.com', 'www.a.com', 'b.com', 'c.com', 'd.com', 'e.com'] });
+  assert.deepEqual(saved, { topic: 'SEO', keywords: ['seo'], competitors: ['a.com', 'b.com', 'c.com', 'd.com', 'e.com'] });
+});
+
+test('plan input routes are admin-only and client-scoped', async () => {
+  const calls: unknown[][] = [];
+  const app = await planInputsApp({
+    ...fakeRepository(),
+    async getPlanInputs(clientId: string) { calls.push(['get', clientId]); return { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] }; },
+    async savePlanInputs(clientId: string, input: unknown) { calls.push(['save', clientId, input]); return { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] }; },
+  });
+  const url = '/api/clients/client-a/editorial-plan-inputs';
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+  assert.equal((await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer viewer' } })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'PUT', url, headers: { authorization: 'Bearer viewer' }, payload: { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] } })).statusCode, 403);
+  assert.equal(calls.length, 0);
+
+  const read = await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer admin' } });
+  assert.equal(read.statusCode, 200);
+  assert.deepEqual(read.json(), { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] });
+  const saved = await app.inject({ method: 'PUT', url, headers: { authorization: 'Bearer admin' }, payload: { topic: 'SEO', keywords: ['seo'], competitors: ['https://foo.com'] } });
+  assert.equal(saved.statusCode, 200);
+  assert.deepEqual(saved.json(), { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] });
+  assert.deepEqual(calls, [['get', 'client-a'], ['save', 'client-a', { topic: 'SEO', keywords: ['seo'], competitors: ['https://foo.com'] }]]);
+  await app.close();
+});
+
+test('plan input route returns 400 validation errors and normalized competitors from the real repository', async () => {
+  const pool = poolWithClient(async (sql) => sql.includes('UPDATE editorial.client_settings') ? { rows: [{ client_id: 'client-a' }], rowCount: 1 } : { rows: [], rowCount: 0 });
+  const app = await planInputsApp(new EditorialApiRepository(pool));
+  const url = '/api/clients/client-a/editorial-plan-inputs';
+  const invalid = await app.inject({ method: 'PUT', url, headers: { authorization: 'Bearer admin' }, payload: { topic: 'SEO', keywords: ['seo'], competitors: [] } });
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().code, 'INVALID_PAYLOAD');
+  assert.match(invalid.json().error, /competidor/);
+  const valid = await app.inject({ method: 'PUT', url, headers: { authorization: 'Bearer admin' }, payload: { topic: 'SEO', keywords: ['seo'], competitors: ['https://www.Foo.com/path?x=1'] } });
+  assert.equal(valid.statusCode, 200);
+  assert.deepEqual(valid.json(), { topic: 'SEO', keywords: ['seo'], competitors: ['foo.com'] });
+  await app.close();
+});

@@ -3,19 +3,149 @@
   "nodes": [
     {
       "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        6896,
+        20000
+      ],
+      "id": "70f9c786-37f9-4c86-bbbf-07a89467f538",
+      "name": "Trabajo recibido"
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'published_articles',unavailable:true,source:'Infidash (contenidos existentes)',error,resumen:'Sin datos disponibles de Infidash (contenidos existentes)',insights:'Sin datos disponibles de Infidash (contenidos existentes)'}}];"
+      },
+      "id": "6de43c43-d872-4e1f-91ca-a9f085e3fc21",
+      "name": "Sin datos: Publicados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8896,
+        19152
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'trends',unavailable:true,source:'Google Trends',error,resumen:'Sin datos disponibles de Google Trends',insights:'Sin datos disponibles de Google Trends'}}];"
+      },
+      "id": "caccc87f-9f95-44be-b30f-f96654be7d86",
+      "name": "Sin datos: Tendencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9424,
+        19504
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'historical',unavailable:true,source:'GA4',error,resumen:'Sin datos disponibles de GA4',insights:'Sin datos disponibles de GA4'}}];"
+      },
+      "id": "952c14f8-154f-4091-ab6c-9b5c9a1d17f6",
+      "name": "Sin datos: Histórico",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9648,
+        20144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'search_console',unavailable:true,source:'Search Console (páginas)',error,resumen:'Sin datos disponibles de Search Console (páginas)',insights:'Sin datos disponibles de Search Console (páginas)'}}];"
+      },
+      "id": "63f22923-8712-4589-aa5e-2ac22f847366",
+      "name": "Sin datos: SC Páginas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9600,
+        20560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'queries_analytics',unavailable:true,source:'Search Console (consultas)',error,resumen:'Sin datos disponibles de Search Console (consultas)',insights:'Sin datos disponibles de Search Console (consultas)'}}];"
+      },
+      "id": "9dbd2b74-46b2-46cd-844b-59af1eec8fb3",
+      "name": "Sin datos: Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9424,
+        20768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'serplab_rankings',unavailable:true,source:'SerpRobot',error,resumen:'Sin datos disponibles de SerpRobot',insights:'Sin datos disponibles de SerpRobot'}}];"
+      },
+      "id": "49ae164a-199a-4593-9966-7d36c2596532",
+      "name": "Sin datos: Rankings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9408,
+        20992
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'seasonal',unavailable:true,source:'SerpAPI (estacionalidad)',error,resumen:'Sin datos disponibles de SerpAPI (estacionalidad)',insights:'Sin datos disponibles de SerpAPI (estacionalidad)'}}];"
+      },
+      "id": "54ad77cc-0e95-41e2-8f05-9dfe4f117b80",
+      "name": "Sin datos: Estacionalidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9408,
+        21232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{articulos:[{id:1,header:'Sin datos disponibles de competidor 1',resumen:''}],total:0,unavailable:true,source:'competidor 1',error}}];"
+      },
+      "id": "8170eb31-4398-45d8-a19c-3887f96af133",
+      "name": "Sin datos: Competidor 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9424,
+        19744
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{articulos:[{id:1,header:'Sin datos disponibles de competidor 2',resumen:''}],total:0,unavailable:true,source:'competidor 2',error}}];"
+      },
+      "id": "1bc81f61-7fd7-4a61-9c5c-d451018e2918",
+      "name": "Sin datos: Competidor 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9408,
+        19968
+      ]
+    },
+    {
+      "parameters": {
         "promptType": "define",
-        "text": "=Eres un analista de tendencias de búsqueda para una agencia de marketing digital y automatización con IA.\n\nDatos de Google Trends (queries en alza y queries top):\nRising: {{ JSON.stringify($json.rising_queries, null, 2) }}\nTop: {{ JSON.stringify($json.top_queries, null, 2) }}\nResumen previo: {{ $json.summary }}\n\nTarea: identifica qué tendencias son realmente aprovechables para crear contenido en las próximas semanas, descartando ruido (queries genéricas, de marca ajena o sin relación con el sector).\n\nDevuelve SOLO este JSON (sin markdown, sin explicaciones):\n{\n  \"analysis_type\": \"trends\",\n  \"resumen\": \"2-3 líneas con la lectura general de las tendencias\",\n  \"tendencias_relevantes\": [\n    {\"query\": \"...\", \"motivo\": \"por qué es aprovechable para contenido\", \"urgencia\": \"alta|media|baja\"}\n  ],\n  \"tendencias_descartadas\": [\"query1\", \"query2\"],\n  \"angulos_de_contenido\": [\"idea de ángulo editorial 1\", \"idea de ángulo editorial 2\"]\n}",
+        "text": "=Eres un analista de tendencias de búsqueda para un negocio del sector {{ $('⚙️ Configuración').first().json.topic }}.\n\nDatos de Google Trends (queries en alza y queries top):\nRising: {{ JSON.stringify($json.rising_queries, null, 2) }}\nTop: {{ JSON.stringify($json.top_queries, null, 2) }}\nResumen previo: {{ $json.summary }}\n\nTarea: identifica qué tendencias son realmente aprovechables para crear contenido en las próximas semanas, descartando ruido (queries genéricas, de marca ajena o sin relación con el sector).\n\nDevuelve SOLO este JSON (sin markdown, sin explicaciones):\n{\n  \"analysis_type\": \"trends\",\n  \"resumen\": \"2-3 líneas con la lectura general de las tendencias\",\n  \"tendencias_relevantes\": [\n    {\"query\": \"...\", \"motivo\": \"por qué es aprovechable para contenido\", \"urgencia\": \"alta|media|baja\"}\n  ],\n  \"tendencias_descartadas\": [\"query1\", \"query2\"],\n  \"angulos_de_contenido\": [\"idea de ángulo editorial 1\", \"idea de ángulo editorial 2\"]\n}",
         "messages": {
           "messageValues": []
         }
       },
-      "id": "bfba4f8b-8eaf-4924-bf09-b18a9995be99",
-      "name": "🤖 Agente IA: Tendencias",
+      "id": "2254ae1a-6a36-4ab8-8bc1-bea2407abc83",
+      "name": "🤖 Agente IA: Tendencias1",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        336,
-        2032
+        8832,
+        19360
       ],
       "onError": "continueErrorOutput"
     },
@@ -23,13 +153,13 @@
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'trends', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'trends';\nreturn [{ json: parsed }];"
       },
-      "id": "d9c0262a-5503-4890-993e-402a8027e184",
-      "name": "📝 Parsear IA Tendencias",
+      "id": "849208db-25c5-45c6-bdc3-3d16edb69bc0",
+      "name": "📝 Parsear IA Tendencias1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        656,
-        2032
+        9152,
+        19344
       ],
       "onError": "continueErrorOutput"
     },
@@ -45,13 +175,13 @@
           "maxTokens": 1800
         }
       },
-      "id": "7a217eae-6880-4996-a1c3-88333af2e464",
-      "name": "OpenAI — Histórico",
+      "id": "ff9a9f8d-3006-432d-9997-46e4fb36c21e",
+      "name": "OpenAI — Histórico1",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        912,
-        2928
+        9616,
+        20352
       ]
     },
     {
@@ -62,13 +192,13 @@
           "messageValues": []
         }
       },
-      "id": "5ac18214-4d8e-4b80-8b48-9be1b2f668de",
-      "name": "🤖 Agente IA: Histórico",
+      "id": "ff3bb1c6-2a44-46e6-af66-6908a113e485",
+      "name": "🤖 Agente IA: Histórico1",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        320,
-        2832
+        8832,
+        20144
       ],
       "onError": "continueErrorOutput"
     },
@@ -76,13 +206,13 @@
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'historical', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'historical';\nreturn [{ json: parsed }];"
       },
-      "id": "9f4d3b5a-f7b0-4330-8e6d-b27fa2f60ff5",
-      "name": "📝 Parsear IA Histórico",
+      "id": "ee922ac1-3c48-409a-897b-1c0210e5e661",
+      "name": "📝 Parsear IA Histórico1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        800,
-        2832
+        9408,
+        20128
       ],
       "onError": "continueErrorOutput"
     },
@@ -98,13 +228,13 @@
           "maxTokens": 1800
         }
       },
-      "id": "f9ce8fb0-8c75-4b4a-9e69-f670d773dd99",
-      "name": "OpenAI — Search Console Páginas",
+      "id": "7ce99b03-ba0c-4e8d-8bfa-e2fe941fc31a",
+      "name": "OpenAI — Search Console Páginas1",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        912,
-        3216
+        9408,
+        20576
       ]
     },
     {
@@ -115,13 +245,13 @@
           "messageValues": []
         }
       },
-      "id": "888421e5-94e6-4594-a60d-3fd3fce33000",
-      "name": "🤖 Agente IA: SC Páginas",
+      "id": "6e8cc75d-093f-4b58-9af0-694754978879",
+      "name": "🤖 Agente IA: SC Páginas1",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        384,
-        3072
+        8832,
+        20368
       ],
       "onError": "continueErrorOutput"
     },
@@ -129,13 +259,13 @@
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'search_console', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'search_console';\nreturn [{ json: parsed }];"
       },
-      "id": "44fcccb6-9457-40a2-a70c-de79ba76deb8",
-      "name": "📝 Parsear IA SC Páginas",
+      "id": "84ea878e-b1cc-4701-a66e-8b57b7d65d5e",
+      "name": "📝 Parsear IA SC Páginas1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        864,
-        3072
+        9408,
+        20352
       ],
       "onError": "continueErrorOutput"
     },
@@ -151,13 +281,13 @@
           "maxTokens": 1800
         }
       },
-      "id": "b8ca27b3-44d6-4c0d-a839-64601526a86e",
-      "name": "OpenAI — Queries",
+      "id": "29fa4d3e-8b54-4b83-b391-9f6dd94c22be",
+      "name": "OpenAI — Queries1",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        928,
-        3392
+        9632,
+        20768
       ]
     },
     {
@@ -168,13 +298,13 @@
           "messageValues": []
         }
       },
-      "id": "9f2b8e5f-715c-48cb-9b09-fa6fe8eb1e15",
-      "name": "🤖 Agente IA: Queries",
+      "id": "073ae66b-4e59-446f-a0b4-34320d09f589",
+      "name": "🤖 Agente IA: Queries1",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        416,
-        3280
+        8832,
+        20592
       ],
       "onError": "continueErrorOutput"
     },
@@ -182,13 +312,13 @@
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'queries_analytics', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'queries_analytics';\nreturn [{ json: parsed }];"
       },
-      "id": "19b1f7fe-f273-40f7-b624-fd9663f17ae2",
-      "name": "📝 Parsear IA Queries",
+      "id": "0492e660-b3be-472f-bc5f-133190d9b11e",
+      "name": "📝 Parsear IA Queries1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        704,
-        3280
+        9168,
+        20592
       ],
       "onError": "continueErrorOutput"
     },
@@ -201,16 +331,16 @@
           "cachedResultName": "gpt-4.1"
         },
         "options": {
-          "maxTokens": 1000
+          "maxTokens": 1800
         }
       },
-      "id": "d2444b52-171a-411d-919a-ff5a02f23471",
-      "name": "OpenAI — Rankings SerpLab",
+      "id": "de3be64e-adcd-4180-9611-06a332fc00aa",
+      "name": "OpenAI — Rankings SerpLab1",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        944,
-        3616
+        9664,
+        20992
       ]
     },
     {
@@ -221,13 +351,13 @@
           "messageValues": []
         }
       },
-      "id": "caf0ba8c-0b15-49aa-9fbd-b1d0be7dabbd",
-      "name": "🤖 Agente IA: Rankings",
+      "id": "76eb5661-6456-48f4-95a9-e44a016963a9",
+      "name": "🤖 Agente IA: Rankings1",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        432,
-        3504
+        8848,
+        20880
       ],
       "onError": "continueErrorOutput"
     },
@@ -235,13 +365,13 @@
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'serplab_rankings', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'serplab_rankings';\nreturn [{ json: parsed }];"
       },
-      "id": "874ca9e0-a1af-476b-87f3-18cbbe1aec09",
-      "name": "📝 Parsear IA Rankings",
+      "id": "6f36eda4-d6f8-4340-8c6d-4e7e522210fb",
+      "name": "📝 Parsear IA Rankings1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        704,
-        3504
+        9184,
+        20864
       ],
       "onError": "continueErrorOutput"
     },
@@ -257,13 +387,13 @@
           "maxTokens": 1000
         }
       },
-      "id": "faf45aa3-7283-45e3-9274-135e146b9283",
-      "name": "OpenAI — Estacionalidad",
+      "id": "d9608055-9c8a-4ffa-bcf0-18b9ab079ec0",
+      "name": "OpenAI — Estacionalidad1",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        400,
-        3904
+        8896,
+        21264
       ]
     },
     {
@@ -274,13 +404,13 @@
           "messageValues": []
         }
       },
-      "id": "78a65cc6-f573-4d41-9e77-bb73d98d2480",
-      "name": "🤖 Agente IA: Estacionalidad",
+      "id": "51cae711-c1ec-4c19-8a5d-71c6a5c5977d",
+      "name": "🤖 Agente IA: Estacionalidad1",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        400,
-        3744
+        8848,
+        21072
       ],
       "onError": "continueErrorOutput"
     },
@@ -288,27 +418,27 @@
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'seasonal', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'seasonal';\nreturn [{ json: parsed }];"
       },
-      "id": "41c8bd4d-ba1a-4525-99a3-f695ce3939d8",
-      "name": "📝 Parsear IA Estacionalidad",
+      "id": "e62098f5-d357-4cb4-944b-532d13b16de7",
+      "name": "📝 Parsear IA Estacionalidad1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        672,
-        3744
+        9184,
+        21056
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const ctx=$('Cargar contexto Infidash').first().json;const cfg=ctx.settings?.editorial_config??{};const defaultCompetitors=['soyrafaramos.com','moodmarketing.es'];const competitors=Array.isArray(cfg.competitors)&&cfg.competitors.length?cfg.competitors:defaultCompetitors;const topic=cfg.topic??'marketing digital';const rawKeywords=Array.isArray(cfg.keywords)?cfg.keywords.join(', '):(cfg.keywords??'');const keywords=rawKeywords.trim().length?rawKeywords:topic;const serprobotProjectId=cfg.serprobotProjectId??'4958413';const ga4PropertyId=cfg.ga4PropertyId??$env.GA4_PROPERTY_ID_INFICON;return [{json:{topic,country:cfg.country??'ES',keywords,weeks_horizon:Number(cfg.weeksHorizon??4),site_url:cfg.siteUrl??'https://inficonglobal.es/',competitors,serprobotProjectId,ga4PropertyId,client_context:ctx}}];"
+        "jsCode": "// All values come from the client's editorial_config; no client-specific fallbacks.\nconst ctx = $('Cargar contexto Infidash').first().json;\nconst cfg = ctx.settings?.editorial_config ?? {};\nconst list = (value) => Array.isArray(value)\n  ? value.map((item) => String(item).trim()).filter(Boolean)\n  : typeof value === 'string'\n    ? value.split(',').map((item) => item.trim()).filter(Boolean)\n    : [];\nconst text = (value) => (value === undefined || value === null ? '' : String(value).trim());\nconst topic = text(cfg.topic);\nif (!topic) throw new Error('Falta editorial_config.topic para este cliente');\nconst siteUrl = text(cfg.siteUrl) || text(cfg.site_url);\nif (!siteUrl) throw new Error('Falta editorial_config.siteUrl para este cliente');\nconst keywordsList = list(cfg.keywords);\nconst competitors = list(cfg.competitors);\nreturn [{ json: {\n  topic,\n  country: text(cfg.country) || 'ES',\n  keywords: keywordsList.length ? keywordsList.join(', ') : topic,\n  keywords_list: keywordsList.length ? keywordsList : [topic],\n  weeks_horizon: Number(cfg.weeksHorizon ?? 4),\n  site_url: siteUrl,\n  competitors,\n  serprobotProjectId: text(cfg.serprobotProjectId) || null,\n  ga4PropertyId: text(cfg.ga4PropertyId) || null,\n  client_context: ctx,\n} }];"
       },
-      "id": "93543e5e-47b6-4b87-9d57-8e481ac7e340",
-      "name": "⚙️ Configuración1",
+      "id": "5658db7c-12c0-4322-827e-98e216b0e1d8",
+      "name": "⚙️ Configuración",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -656,
-        2592
+        7840,
+        19952
       ],
       "onError": "continueErrorOutput"
     },
@@ -324,7 +454,7 @@
             },
             {
               "name": "geo",
-              "value": "={{ $('⚙️ Configuración1').item.json.country }}"
+              "value": "={{ $('⚙️ Configuración').first().json.country }}"
             },
             {
               "name": "engine",
@@ -344,13 +474,13 @@
           "timeout": 15000
         }
       },
-      "id": "fb252dd0-62b1-4df7-b38d-0ef63e137ce4",
-      "name": "📈 A: Google Trends1",
+      "id": "d1c9365c-d3e2-4feb-8928-08db6f08648f",
+      "name": "📈 A: Google Trends",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -96,
-        2032
+        8400,
+        19392
       ],
       "onError": "continueErrorOutput"
     },
@@ -358,13 +488,13 @@
       "parameters": {
         "jsCode": "const d = $input.item.json;\nconst rising = (d.related_queries?.rising || []).slice(0, 10);\nconst top    = (d.related_queries?.top    || []).slice(0, 10);\nreturn [{ json: {\n  analysis_type: 'trends',\n  rising_queries: rising.map(r => ({ query: r.query, value: r.value })),\n  top_queries:    top.map(t    => ({ query: t.query, value: t.value })),\n  summary: `${rising.length} tendencias en alza · ${top.length} queries top detectadas`\n}}];"
       },
-      "id": "3c52fc7a-a491-4ac8-925f-4c85b82f810d",
-      "name": "📈 A: Procesar Tendencias1",
+      "id": "7f7fd556-b861-4246-a719-5ac1dfa7bb6b",
+      "name": "📈 A: Procesar Tendencias",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        128,
-        2032
+        8624,
+        19376
       ],
       "onError": "continueErrorOutput"
     },
@@ -381,13 +511,13 @@
           "temperature": 0.2
         }
       },
-      "id": "37d25c73-bb0d-407b-b750-edcd3a243d7a",
-      "name": "OpenAI — Competidor1",
+      "id": "e7094e8f-0b73-460d-8cd9-4dab278fc605",
+      "name": "OpenAI — Competidor",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        912,
-        2704
+        8848,
+        20000
       ]
     },
     {
@@ -396,13 +526,13 @@
         "destinationFieldName": "competitors_analysis",
         "options": {}
       },
-      "id": "e558aac6-1037-4d92-ae28-d54d7036ca56",
-      "name": "🏢 B: Agregar Competidores1",
+      "id": "c21b97ba-e034-4a68-8cf4-27dc18bc6506",
+      "name": "🏢 B: Agregar Competidores",
       "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        1376,
-        2400
+        9872,
+        19760
       ]
     },
     {
@@ -422,20 +552,20 @@
           "dotNotation": false
         }
       },
-      "id": "2c249c83-b8cf-4984-892a-94dc04a47f27",
-      "name": "🏢 B: Marcar Tipo1",
+      "id": "ffd35467-e7ea-4142-a086-0984bc7c0d74",
+      "name": "🏢 B: Marcar Tipo",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        1552,
-        2400
+        10048,
+        19760
       ]
     },
     {
       "parameters": {
         "propertyId": {
           "__rl": true,
-          "value": "={{ $('⚙️ Configuración1').first().json.ga4PropertyId }}",
+          "value": "={{ $('⚙️ Configuración').first().json.ga4PropertyId }}",
           "mode": "id"
         },
         "dateRange": "last30days",
@@ -462,13 +592,13 @@
         },
         "additionalFields": {}
       },
-      "id": "ac2c0691-44a9-4653-af9a-de3d46655bcc",
-      "name": "📊 C: GA4 — Top Contenidos1",
+      "id": "155af73c-e2c5-468e-966f-193e2684a400",
+      "name": "📊 C: GA4 — Top Contenidos",
       "type": "n8n-nodes-base.googleAnalytics",
       "typeVersion": 2,
       "position": [
-        -128,
-        2832
+        8400,
+        20176
       ],
       "onError": "continueErrorOutput"
     },
@@ -476,13 +606,13 @@
       "parameters": {
         "jsCode": "var allItems = $input.all();\nvar pages = [];\n\nfor (var i = 0; i < allItems.length; i++) {\n  var r = allItems[i].json;\n\n  var path = r.landingPage || r.pagePath || r.pageLocation || '';\n\n  if (path.indexOf('http') === 0) {\n    try { path = new URL(path).pathname; } catch(e) {}\n  }\n\n  if (!path) continue;\n\n  var views    = parseInt(r.totalUsers || r.screenPageViews || 0);\n  var duration = parseFloat(r.averageSessionDuration || r.userEngagementDuration || 0);\n  var events   = parseFloat(r.eventsPerSession || 0);\n  var title    = r.pageTitle || path;\n\n  pages.push({\n    path:         path,\n    title:        title,\n    views:        views,\n    duration:     duration.toFixed(0) + 's',\n    duration_raw: duration,\n    events_per_session: events.toFixed(2)\n  });\n}\n\npages.sort(function(a, b) { return b.views - a.views; });\n\nvar total_views = 0;\nfor (var j = 0; j < pages.length; j++) {\n  total_views += pages[j].views;\n}\n\nvar avg_duration = 0;\nfor (var k = 0; k < pages.length; k++) {\n  avg_duration += pages[k].duration_raw;\n}\navg_duration = pages.length > 0\n  ? (avg_duration / pages.length).toFixed(0) + 's'\n  : 'N/A';\n\nvar top10 = pages.slice(0, 10);\n\nvar high_duration = pages.slice().sort(function(a, b) {\n  return b.duration_raw - a.duration_raw;\n}).slice(0, 5);\n\nvar high_engagement = pages.slice().sort(function(a, b) {\n  return parseFloat(b.events_per_session) - parseFloat(a.events_per_session);\n}).slice(0, 5);\n\nvar parts = [];\nparts.push(pages.length + ' landings analizadas. Total usuarios: ' + total_views + '.');\nif (top10[0]) {\n  parts.push('Top landing: ' + (top10[0].title || top10[0].path) + ' con ' + top10[0].views + ' usuarios.');\n}\nparts.push('Duracion media de sesion: ' + avg_duration + '.');\nif (high_duration.length > 0) {\n  parts.push('Mayor tiempo en pagina: ' + high_duration.slice(0, 3).map(function(p) {\n    return p.path + ' (' + p.duration + ')';\n  }).join(', ') + '.');\n}\n\nreturn [{\n  json: {\n    analysis_type: 'historical',\n    meta: {\n      total_pages_analyzed: pages.length,\n      total_users: total_views,\n      avg_session_duration: avg_duration,\n      period_days: 30\n    },\n    top_performing:       top10,\n    all_pages:            pages,\n    high_duration_pages:  high_duration,\n    high_engagement_pages: high_engagement,\n    best_content: top10[0] ? (top10[0].title || top10[0].path) : 'N/A',\n    insights: parts.join(' ')\n  }\n}];"
       },
-      "id": "2435f8c3-a3a9-4666-81b8-1179ed2f616a",
-      "name": "📊 C: Procesar Histórico1",
+      "id": "74631cb9-08dd-4701-9238-bfffcfe6e605",
+      "name": "📊 C: Procesar Histórico",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        112,
-        2832
+        8608,
+        20160
       ],
       "onError": "continueErrorOutput"
     },
@@ -498,11 +628,11 @@
             },
             {
               "name": "q",
-              "value": "={{ $('⚙️ Configuración1').item.json.keywords }}"
+              "value": "={{ $('⚙️ Configuración').first().json.keywords }}"
             },
             {
               "name": "geo",
-              "value": "={{ $('⚙️ Configuración1').item.json.country }}"
+              "value": "={{ $('⚙️ Configuración').first().json.country }}"
             },
             {
               "name": "data_type",
@@ -522,13 +652,13 @@
           "timeout": 15000
         }
       },
-      "id": "b6d6383c-8b92-4186-9b7a-1a78a6c9e529",
-      "name": "🌍 D: Estacionalidad — SerpAPI1",
+      "id": "e7cf8371-2eaa-4dbd-8025-211eb3bbbd38",
+      "name": "🌍 D: Estacionalidad — SerpAPI",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -80,
-        3744
+        8400,
+        21104
       ],
       "onError": "continueErrorOutput"
     },
@@ -536,20 +666,20 @@
       "parameters": {
         "jsCode": "const tl = $input.item.json?.interest_over_time?.timeline_data || [];\nconst monthly = {};\ntl.forEach(p => {\n  const dt = new Date(p.timestamp * 1000);\n  const k  = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;\n  if (!monthly[k]) monthly[k] = [];\n  monthly[k].push(parseInt(p.values?.[0]?.extracted_value || 0));\n});\nconst avgs = Object.entries(monthly)\n  .map(([m, v]) => ({ month: m, avg: Math.round(v.reduce((a,b)=>a+b,0)/v.length) }))\n  .sort((a, b) => b.avg - a.avg);\nreturn [{ json: {\n  analysis_type:    'seasonal',\n  monthly_interest: avgs,\n  peak_month:       avgs[0]?.month || 'N/A',\n  top_months:       avgs.slice(0, 4),\n  seasonal_tip:     `Pico de interés detectado en ${avgs[0]?.month}`\n}}];"
       },
-      "id": "b4d6542a-380d-4b80-babf-d3e103758ef9",
-      "name": "🌍 D: Procesar Estacionalidad1",
+      "id": "c86b53b8-7fdc-41e8-8137-c8a39d66d377",
+      "name": "🌍 D: Procesar Estacionalidad",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        176,
-        3744
+        8656,
+        21088
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "operation": "getPageInsights",
-        "siteUrl": "={{ $('⚙️ Configuración1').first().json.site_url }}",
+        "siteUrl": "={{ $('⚙️ Configuración').first().json.site_url }}",
         "dateRangeMode": "last12mo",
         "rowLimit": 20,
         "dimensions": [
@@ -562,26 +692,26 @@
       "type": "n8n-nodes-google-search-console.googleSearchConsole",
       "typeVersion": 1,
       "position": [
-        -80,
-        3280
+        8400,
+        20624
       ],
-      "id": "3057f23a-d644-498b-9210-08b9d2e999b8",
-      "name": "Query search console1",
+      "id": "0a2cfbc2-d9b1-4fba-97bd-8cdbfbb419bf",
+      "name": "Query search console",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "operation": "getPageInsights",
-        "siteUrl": "={{ $('⚙️ Configuración1').first().json.site_url }}"
+        "siteUrl": "={{ $('⚙️ Configuración').first().json.site_url }}"
       },
       "type": "n8n-nodes-google-search-console.googleSearchConsole",
       "typeVersion": 1,
       "position": [
-        -64,
-        3072
+        8400,
+        20400
       ],
-      "id": "15130ffc-85ea-47af-9693-33bc81dd9807",
-      "name": "Pages search console1",
+      "id": "2bfad5c7-a440-432e-96db-d4e0e9cc17a5",
+      "name": "Pages search console",
       "onError": "continueErrorOutput"
     },
     {
@@ -591,11 +721,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        176,
-        3280
+        8624,
+        20608
       ],
-      "id": "ddb475ec-c4b1-4742-bc61-3193f1f7754c",
-      "name": "Code querys1",
+      "id": "9e9782c6-698a-4790-a9be-24f86947a328",
+      "name": "Code querys",
       "onError": "continueErrorOutput"
     },
     {
@@ -605,11 +735,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        144,
-        3072
+        8624,
+        20384
       ],
-      "id": "0e5690ae-0d6e-4499-a2ec-6b29813cf344",
-      "name": "search console pages1",
+      "id": "60409265-d76e-4a1e-b9f0-0530abab1f60",
+      "name": "search console pages",
       "onError": "continueErrorOutput"
     },
     {
@@ -617,11 +747,11 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        1216,
-        2400
+        9712,
+        19760
       ],
-      "id": "faece732-0df5-4b45-9ccd-f9fd9df3d053",
-      "name": "Merge1"
+      "id": "6994b8cd-587a-4a51-86ef-4051f97e9d47",
+      "name": "Merge"
     },
     {
       "parameters": {
@@ -630,11 +760,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        160,
-        1808
+        8656,
+        19136
       ],
-      "id": "c3313fab-4c5a-466a-acae-02ce2b4407d1",
-      "name": "Code in JavaScript4",
+      "id": "85f87c9a-10f0-42df-baab-0c7b51c8072f",
+      "name": "Code in JavaScript",
       "onError": "continueErrorOutput"
     },
     {
@@ -645,13 +775,13 @@
           "messageValues": []
         }
       },
-      "id": "7055159e-d6d5-4b87-839d-879fbe469547",
-      "name": "🏢 B: IA Analiza Competidor3",
+      "id": "6992bdc5-b49a-429e-ad99-f39a672302f7",
+      "name": "🏢 B: IA Analiza Competidor",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        480,
-        2272
+        8832,
+        19584
       ],
       "alwaysOutputData": false,
       "executeOnce": false,
@@ -664,11 +794,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        816,
-        2272
+        9152,
+        19568
       ],
-      "id": "56cae06d-f3ca-47fe-80d3-546ac4e9e478",
-      "name": "Code in JavaScript5",
+      "id": "d4dbbcc0-0dc9-469e-9788-b0c142c41fca",
+      "name": "Code in JavaScript8",
       "onError": "continueErrorOutput"
     },
     {
@@ -679,13 +809,13 @@
           "messageValues": []
         }
       },
-      "id": "2f220f54-ed8b-4556-a1fa-3f511c04db10",
-      "name": "🏢 B: IA Analiza Competidor1",
+      "id": "cdd8b64a-ab77-4982-a191-8f9d842b4c03",
+      "name": "🏢 B: IA Analiza Competidor2",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        496,
-        2480
+        8832,
+        19808
       ],
       "alwaysOutputData": false,
       "executeOnce": false,
@@ -698,11 +828,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        832,
-        2480
+        9168,
+        19792
       ],
-      "id": "4aa5cb28-d260-4305-88f1-8dec498aeffa",
-      "name": "Code in JavaScript6",
+      "id": "1a2095e3-8c37-4625-a1d1-96161e955167",
+      "name": "Code in JavaScript9",
       "onError": "continueErrorOutput"
     },
     {
@@ -712,31 +842,31 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        192,
-        3504
+        8672,
+        20896
       ],
-      "id": "dcf91dd5-c854-4648-bbc6-aedad6d1a693",
-      "name": "Code in JavaScript7",
+      "id": "0627b737-93e9-4263-aab9-a2775bd1ee39",
+      "name": "Code in JavaScript10",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "url": "={{ $env.SERPROBOT_API_URL + '?api_key=' + $env.SERPROBOT_API_KEY + '&action=project_report&project_id=' + $('⚙️ Configuración1').first().json.serprobotProjectId + '&start=7daysAgo' }}",
+        "url": "={{ $env.SERPROBOT_API_URL + '?api_key=' + $env.SERPROBOT_API_KEY + '&action=project_report&project_id=' + $('⚙️ Configuración').first().json.serprobotProjectId + '&start=7daysAgo' }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -64,
-        3504
+        8400,
+        20912
       ],
-      "id": "6e73abcf-4da6-4ba6-9577-11579c44005e",
-      "name": "Datos serprobot 7 dias1",
+      "id": "b954e67b-931b-4728-a6ff-318671c867ad",
+      "name": "Datos serprobot 7 dias",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "url": "=https://r.jina.ai/{{ $('⚙️ Configuración1').first().json.competitors[0] }}",
+        "url": "=https://r.jina.ai/{{ $('⚙️ Configuración').first().json.competitors[0] }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -757,16 +887,16 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -144,
-        2272
+        8400,
+        19600
       ],
-      "id": "98eb9376-a5d4-4536-a93a-7d5226a1c621",
-      "name": "🏢 B: Scrape JINA Reader",
+      "id": "64b42f98-f662-4d99-a8c1-b6a9747087d9",
+      "name": "🏢 B: Scrape JINA Reader1",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "url": "=https://r.jina.ai/{{ $('⚙️ Configuración1').first().json.competitors[1] }}",
+        "url": "=https://r.jina.ai/{{ $('⚙️ Configuración').first().json.competitors[1] }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -787,56 +917,55 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -128,
-        2480
+        8400,
+        19824
       ],
-      "id": "07ac81dc-9bd9-4999-ad8e-e86499fe6507",
-      "name": "🏢 B: Scrape JINA Reader2",
+      "id": "b208ee7e-4feb-4b04-95d1-85d6088af854",
+      "name": "🏢 B: Scrape JINA Reader3",
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "numberInputs": 8
       },
-      "id": "c8922a79-7768-44a8-bc31-5122dc4d885a",
-      "name": "🔗 Merge 4 Análisis2",
+      "id": "0dd5ec5e-a4c5-4a8f-a671-f5cf60dcd839",
+      "name": "🔗 Merge 4 Análisis",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        2048,
-        2352
+        10544,
+        19712
       ]
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst find = type => items.find(i => i.json.analysis_type === type)?.json || {};\n\n// ── Helpers de formateo ──────────────────────────────────────────────────\nconst NA = '(sin datos)';\nconst list = (arr, mapper) => {\n  if (!Array.isArray(arr) || arr.length === 0) return '  ' + NA;\n  return arr.map(x => '  - ' + (mapper ? mapper(x) : x)).join('\\n');\n};\n// Si el parser detectó un error de JSON, devolvemos el fallback en vez de romper el prompt\nconst errBlock = b => b && b.unavailable\n  ? `⚠️ Fuente no disponible (${b.error}). ${b.insights || NA}`\n  : b && b.error\n  ? `⚠️ No se pudo parsear el análisis de este bloque (${b.error}).\\nResumen crudo: ${b.insights || b.raw || NA}`\n  : null;\n\n// ── TENDENCIAS ────────────────────────────────────────────────────────────\nconst trends = find('trends');\nconst trends_data = errBlock(trends) || [\n  `Resumen: ${trends.resumen || NA}`,\n  `Tendencias relevantes:`,\n  list(trends.tendencias_relevantes, t => `${t.query} (urgencia ${t.urgencia}): ${t.motivo}`),\n  `Ángulos de contenido sugeridos:`,\n  list(trends.angulos_de_contenido)\n].join('\\n');\n\n// ── HISTÓRICO GA4 ─────────────────────────────────────────────────────────\nconst hist = find('historical');\nconst historical_data = errBlock(hist) || [\n  `Resumen: ${hist.resumen || NA}`,\n  `Patrones ganadores:`,\n  list(hist.patrones_ganadores),\n  `Contenido a actualizar:`,\n  list(hist.contenido_a_actualizar),\n  `Contenido a replicar en el nuevo calendario:`,\n  list(hist.contenido_a_replicar)\n].join('\\n');\n\n// ── ESTACIONALIDAD ────────────────────────────────────────────────────────\nconst seasonal = find('seasonal');\nconst seasonal_data = errBlock(seasonal) || [\n  `Resumen: ${seasonal.resumen || NA}`,\n  `Alerta estacional: ${seasonal.alerta_estacional || 'sin alertas próximas'}`,\n  `Temas a anticipar:`,\n  list(seasonal.temas_a_anticipar),\n  `Recomendación de timing: ${seasonal.recomendacion_timing || NA}`\n].join('\\n');\n\n// ── RANKINGS SERPLAB ──────────────────────────────────────────────────────\nconst serplab = find('serplab_rankings');\nconst serplab_data = errBlock(serplab) || [\n  `Resumen: ${serplab.resumen || NA}`,\n  `Keywords a rescatar (perdieron posición):`,\n  list(serplab.keywords_a_rescatar, k => `${k.keyword} (actual ${k.posicion_actual}, mejor ${k.mejor_posicion}): ${k.accion}`),\n  `Keywords cerca de página 1:`,\n  list(serplab.keywords_cerca_de_pagina_1, k => `${k.keyword} (pos ${k.posicion_actual}): ${k.accion}`),\n  `Oportunidades de alto valor sin explotar:`,\n  list(serplab.oportunidades_alto_valor_sin_explotar, k => `${k.keyword} (CPC €${k.cpc}): ${k.accion}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — PÁGINAS ──────────────────────────────────────────────\nconst sc = find('search_console');\nconst search_console_data = errBlock(sc) || [\n  `Resumen: ${sc.resumen || NA}`,\n  `Páginas a proteger (van bien, no tocar):`,\n  list(sc.paginas_proteger),\n  `Páginas a optimizar para mejorar CTR:`,\n  list(sc.paginas_optimizar_ctr, p => `${p.pagina} (pos ${p.posicion}): ${p.accion_sugerida}`),\n  `Páginas a reforzar con contenido nuevo (pillar/cluster):`,\n  list(sc.paginas_reforzar_con_contenido_nuevo, p => `${p.pagina}: ${p.tema_sugerido_para_pillar_o_cluster}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — QUERIES ──────────────────────────────────────────────\nconst queries = find('queries_analytics');\nconst queries_data = errBlock(queries) || [\n  `Resumen: ${queries.resumen || NA}`,\n  `Clusters de intención de búsqueda:`,\n  list(queries.clusters_de_intencion, c => `${c.tema} [prioridad ${c.prioridad}] (${(c.queries || []).join(', ')}): ${c.justificacion}`),\n  `Keywords con impresiones altas y pocos clicks (oportunidad):`,\n  list(queries.keywords_alta_impresion_bajo_click)\n].join('\\n');\n\n// ── COMPETIDORES Y PUBLICADOS (sin agente intermedio, se mantienen igual) ──\nconst comp = items.find(i => i.json.analysis_type === 'competitors')?.json || {};\nconst published = find('published_articles');\n\n// ── Datos DIRECTOS del nodo ⚙️ Configuración (incluye keywords) ────────────\nconst cfg = $('⚙️ Configuración1').first().json;\nconst keywordsRaw  = cfg.keywords || '';\nconst keywordsList = String(keywordsRaw).split(',').map(k => k.trim()).filter(Boolean);\n\n// Datos editoriales canónicos desde Infidash\nconst calendario = $('Cargar contexto Infidash').first().json.planItems || [];\n\nreturn [{ json: {\n  trends_data,\n  historical_data,\n  seasonal_data,\n  serplab_data,\n  search_console_data,\n  queries_data,\n  competitor_data:           JSON.stringify(comp,       null, 2),\n  published_data:            JSON.stringify(published,  null, 2),\n  calendario_editorial_data: JSON.stringify(calendario, null, 2),\n  config: {\n    topic:         cfg.topic,\n    weeks:         cfg.weeks_horizon,\n    country:       cfg.country,\n    keywords:      keywordsRaw,\n    keywords_list: keywordsList\n  }\n}}];\n"
+        "jsCode": "const items = $input.all();\nconst find = type => items.find(i => i.json.analysis_type === type)?.json || {};\n\n// ── Helpers de formateo ──────────────────────────────────────────────────\nconst NA = '(sin datos)';\nconst list = (arr, mapper) => {\n  if (!Array.isArray(arr) || arr.length === 0) return '  ' + NA;\n  return arr.map(x => '  - ' + (mapper ? mapper(x) : x)).join('\\n');\n};\n// Si el parser detectó un error de JSON, devolvemos el fallback en vez de romper el prompt\nconst errBlock = b => b && b.unavailable\n  ? `⚠️ Fuente no disponible (${b.error}). ${b.insights || NA}`\n  : b && b.error\n  ? `⚠️ No se pudo parsear el análisis de este bloque (${b.error}).\\nResumen crudo: ${b.insights || b.raw || NA}`\n  : null;\n\n// ── TENDENCIAS ────────────────────────────────────────────────────────────\nconst trends = find('trends');\nconst trends_data = errBlock(trends) || [\n  `Resumen: ${trends.resumen || NA}`,\n  `Tendencias relevantes:`,\n  list(trends.tendencias_relevantes, t => `${t.query} (urgencia ${t.urgencia}): ${t.motivo}`),\n  `Ángulos de contenido sugeridos:`,\n  list(trends.angulos_de_contenido)\n].join('\\n');\n\n// ── HISTÓRICO GA4 ─────────────────────────────────────────────────────────\nconst hist = find('historical');\nconst historical_data = errBlock(hist) || [\n  `Resumen: ${hist.resumen || NA}`,\n  `Patrones ganadores:`,\n  list(hist.patrones_ganadores),\n  `Contenido a actualizar:`,\n  list(hist.contenido_a_actualizar),\n  `Contenido a replicar en el nuevo calendario:`,\n  list(hist.contenido_a_replicar)\n].join('\\n');\n\n// ── ESTACIONALIDAD ────────────────────────────────────────────────────────\nconst seasonal = find('seasonal');\nconst seasonal_data = errBlock(seasonal) || [\n  `Resumen: ${seasonal.resumen || NA}`,\n  `Alerta estacional: ${seasonal.alerta_estacional || 'sin alertas próximas'}`,\n  `Temas a anticipar:`,\n  list(seasonal.temas_a_anticipar),\n  `Recomendación de timing: ${seasonal.recomendacion_timing || NA}`\n].join('\\n');\n\n// ── RANKINGS SERPLAB ──────────────────────────────────────────────────────\nconst serplab = find('serplab_rankings');\nconst serplab_data = errBlock(serplab) || [\n  `Resumen: ${serplab.resumen || NA}`,\n  `Keywords a rescatar (perdieron posición):`,\n  list(serplab.keywords_a_rescatar, k => `${k.keyword} (actual ${k.posicion_actual}, mejor ${k.mejor_posicion}): ${k.accion}`),\n  `Keywords cerca de página 1:`,\n  list(serplab.keywords_cerca_de_pagina_1, k => `${k.keyword} (pos ${k.posicion_actual}): ${k.accion}`),\n  `Oportunidades de alto valor sin explotar:`,\n  list(serplab.oportunidades_alto_valor_sin_explotar, k => `${k.keyword} (CPC €${k.cpc}): ${k.accion}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — PÁGINAS ──────────────────────────────────────────────\nconst sc = find('search_console');\nconst search_console_data = errBlock(sc) || [\n  `Resumen: ${sc.resumen || NA}`,\n  `Páginas a proteger (van bien, no tocar):`,\n  list(sc.paginas_proteger),\n  `Páginas a optimizar para mejorar CTR:`,\n  list(sc.paginas_optimizar_ctr, p => `${p.pagina} (pos ${p.posicion}): ${p.accion_sugerida}`),\n  `Páginas a reforzar con contenido nuevo (pillar/cluster):`,\n  list(sc.paginas_reforzar_con_contenido_nuevo, p => `${p.pagina}: ${p.tema_sugerido_para_pillar_o_cluster}`)\n].join('\\n');\n\n// ── SEARCH CONSOLE — QUERIES ──────────────────────────────────────────────\nconst queries = find('queries_analytics');\nconst queries_data = errBlock(queries) || [\n  `Resumen: ${queries.resumen || NA}`,\n  `Clusters de intención de búsqueda:`,\n  list(queries.clusters_de_intencion, c => `${c.tema} [prioridad ${c.prioridad}] (${(c.queries || []).join(', ')}): ${c.justificacion}`),\n  `Keywords con impresiones altas y pocos clicks (oportunidad):`,\n  list(queries.keywords_alta_impresion_bajo_click)\n].join('\\n');\n\n// ── COMPETIDORES Y PUBLICADOS (sin agente intermedio, se mantienen igual) ──\nconst comp = items.find(i => i.json.analysis_type === 'competitors')?.json || {};\nconst published = find('published_articles');\n\n// ── Datos DIRECTOS del nodo ⚙️ Configuración (incluye keywords) ────────────\nconst cfg = $('⚙️ Configuración').first().json;\nconst keywordsRaw  = cfg.keywords || '';\nconst keywordsList = String(keywordsRaw).split(',').map(k => k.trim()).filter(Boolean);\n\n// Datos editoriales canónicos desde Infidash\nconst calendario = $('Cargar contexto Infidash').first().json.planItems || [];\n\nreturn [{ json: {\n  trends_data,\n  historical_data,\n  seasonal_data,\n  serplab_data,\n  search_console_data,\n  queries_data,\n  competitor_data:           JSON.stringify(comp,       null, 2),\n  published_data:            JSON.stringify(published,  null, 2),\n  calendario_editorial_data: JSON.stringify(calendario, null, 2),\n  config: {\n    topic:         cfg.topic,\n    weeks:         cfg.weeks_horizon,\n    country:       cfg.country,\n    keywords:      keywordsRaw,\n    keywords_list: keywordsList\n  }\n}}];\n"
       },
-      "id": "f012d6fe-1cff-4aaf-a91d-40608e9e79e3",
-      "name": "🧩 Preparar Contexto IA2",
+      "id": "442338d1-de34-468b-b74f-33df766427cb",
+      "name": "🧩 Preparar Contexto IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2256,
-        2448
+        10752,
+        19808
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Eres un experto en estrategia de contenidos. Genera un plan editorial detallado para las próximas {{ $json.config.weeks }} semanas para el mercado {{ $json.config.country }} sobre: {{ $json.config.topic }}.\nExtrae identidades interesantes para el Calendario editorial a partir de los datos extraidos en el calendario editorial ya publicado {{ $json.published_data }}.\nKeywords objetivo prioritarias (definidas por el cliente en ⚙️ Configuración): {{ $('⚙️ Configuración1').item.json.keywords }}\n\n## TENDENCIAS ACTUALES:\n{{ $json.trends_data }}\n\n## RENDIMIENTO HISTÓRICO (GA4):\n{{ $json.historical_data }}\n\n## ESTACIONALIDAD:\n{{ $json.seasonal_data }}\n\n## POSICIONAMIENTO WEB:\n{{ $json.serplab_data }}\n\n## ANÁLISIS DE COMPETIDORES:\n{{ $json.competitor_data }}\n\n## QUERIES DATA (queries reales que te encuentran):\n{{ $json.queries_data }}\n\n## SEARCH CONSOLE (paginas top de nuestro blog):\n{{ $json.search_console_data }}\n\n## ARTÍCULOS YA PUBLICADOS (NO repetir estos títulos ni keywords):\n{{ $json.published_data }}\n\n## CALENDARIO EDITORIAL ACTUAL (contenidos ya planificados/en curso — NO los dupliques, dales continuidad y cubre los huecos):\n{{ $json.calendario_editorial_data }}\n\n---\nDevuelve SOLO este JSON válido (sin markdown, sin explicaciones):\n{\n  \"summary\": \"resumen ejecutivo en 2-3 líneas\",\n  \"key_insights\": [\"insight1\", \"insight2\", \"insight3\"],\n  \"keywords_to_target\": [\"kw1\", \"kw2\", \"kw3\", \"kw4\", \"kw5\"],\n  \"competitor_gaps\": [\"oportunidad1\", \"oportunidad2\", \"oportunidad3\"],\n  \"seasonal_alerts\": [\"alerta1\", \"alerta2\"],\n  \"content_plan\": [\n    {\n      \"week\": 1,\n      \"theme\": \"tema de la semana\",\n      \"rationale\": \"justificación basada en los datos\",\n      \"posts\": [\n        {\n          \"day\": \"Lunes\",\n          \"plannedAt\": \"fecha y hora ISO-8601 con zona\",\n          \"title\": \"título SEO-friendly\",\n          \"format\": \"reel|post|blog\",\n          \"channel\": \"canal recomendado\",\n          \"keywords\": [\"kw1\", \"kw2\"],\n          \"cta\": \"llamada a la acción\",\n          \"priority\": \"alta|media|baja\",\n          \"data_source\": \"tendencia|histórico|estacional|competidor\",\n          \"identities\": \"identidad1,identidad2,identidad3\"\n        }\n      ]\n    }\n  ]\n}\n\n  **hoy** es {{ $now.format('yyyy-MM-dd') }}",
-        "hasOutputParser": false,
+        "text": "=Eres un experto en estrategia de contenidos. Genera un plan editorial detallado para las próximas {{ $json.config.weeks }} semanas para el mercado {{ $json.config.country }} sobre: {{ $json.config.topic }}.\nExtrae identidades interesantes para el Calendario editorial a partir de los datos extraidos en el calendario editorial ya publicado {{ $json.published_data }}.\nKeywords objetivo prioritarias (definidas por el cliente en ⚙️ Configuración): \n{{ $json.config.keywords }}\n## TENDENCIAS ACTUALES:\n{{ $json.trends_data }}\n\n## RENDIMIENTO HISTÓRICO (GA4):\n{{ $json.historical_data }}\n\n## ESTACIONALIDAD:\n{{ $json.seasonal_data }}\n\n## POSICIONAMIENTO WEB:\n{{ $json.serplab_data }}\n\n## ANÁLISIS DE COMPETIDORES:\n{{ $json.competitor_data }}\n\n## QUERIES DATA (queries reales que te encuentran):\n{{ $json.queries_data }}\n\n## SEARCH CONSOLE (paginas top de nuestro blog):\n{{ $json.search_console_data }}\n\n## ARTÍCULOS YA PUBLICADOS (NO repetir estos títulos ni keywords):\n{{ $json.published_data }}\n\n## CALENDARIO EDITORIAL ACTUAL (contenidos ya planificados/en curso — NO los dupliques, dales continuidad y cubre los huecos):\n{{ $json.calendario_editorial_data }}\n\n---\nDevuelve SOLO este JSON válido (sin markdown, sin explicaciones):\n{\n  \"summary\": \"resumen ejecutivo en 2-3 líneas\",\n  \"key_insights\": [\"insight1\", \"insight2\", \"insight3\"],\n  \"keywords_to_target\": [\"kw1\", \"kw2\", \"kw3\", \"kw4\", \"kw5\"],\n  \"competitor_gaps\": [\"oportunidad1\", \"oportunidad2\", \"oportunidad3\"],\n  \"seasonal_alerts\": [\"alerta1\", \"alerta2\"],\n  \"content_plan\": [\n    {\n      \"week\": 1,\n      \"theme\": \"tema de la semana\",\n      \"rationale\": \"justificación basada en los datos\",\n      \"posts\": [\n        {\n          \"day\": \"Lunes\",\n          \"plannedAt\": \"fecha y hora ISO-8601 con zona\",\n          \"title\": \"título SEO-friendly\",\n          \"format\": \"reel|post|blog\",\n          \"channel\": \"canal recomendado\",\n          \"keywords\": [\"kw1\", \"kw2\"],\n          \"cta\": \"llamada a la acción\",\n          \"priority\": \"alta|media|baja\",\n          \"data_source\": \"tendencia|histórico|estacional|competidor\",\n          \"identities\": \"identidad1,identidad2,identidad3\"\n        }\n      ]\n    }\n  ]\n}\n\n  **hoy** es {{ $now.format('yyyy-MM-dd') }}",
         "messages": {
           "messageValues": []
         }
       },
-      "id": "0b83cf58-9192-4665-982d-0e4a813245aa",
-      "name": "🤖 IA: Plan de Contenidos2",
+      "id": "fdafe969-40f9-4ef8-8d0b-f8d1b9929390",
+      "name": "🤖 IA: Plan de Contenidos",
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.4,
       "position": [
-        2480,
-        2448
+        10976,
+        19808
       ],
       "onError": "continueErrorOutput"
     },
@@ -853,26 +982,26 @@
           "temperature": 0.5
         }
       },
-      "id": "d6e14bb8-d457-46b3-add9-5b64eacc116c",
-      "name": "OpenAI — Síntesis Final2",
+      "id": "6c6302e3-22ab-4979-81cd-a719838860b3",
+      "name": "OpenAI — Síntesis Final",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
       "position": [
-        2336,
-        2736
+        10832,
+        20096
       ]
     },
     {
       "parameters": {
         "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\ntry {\n  const plan = JSON.parse(text);\n  return [{ json: { success: true, plan, raw: text } }];\n} catch (e) {\n  return [{ json: { success: false, error: e.message, raw: text } }];\n}"
       },
-      "id": "408dfc5b-ce08-4373-be03-f8fa2905b091",
-      "name": "📝 Parsear Plan JSON2",
+      "id": "caa0ac5f-4b3a-4440-8fa0-7a5c1155edc0",
+      "name": "📝 Parsear Plan JSON",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2800,
-        2448
+        11296,
+        19808
       ],
       "onError": "continueErrorOutput"
     },
@@ -881,11 +1010,11 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        672,
-        2832
+        9152,
+        20128
       ],
-      "id": "13898cf5-7429-44e3-9974-7914bfee3680",
-      "name": "Wait",
+      "id": "0ad0fbf5-2936-46fd-a64f-87ccff8771cc",
+      "name": "Wait2",
       "webhookId": "470190f3-c5d0-4369-a776-8dfa08dddcee"
     },
     {
@@ -893,35 +1022,24 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        672,
-        3072
+        9168,
+        20352
       ],
-      "id": "629b1e91-f368-46d7-a8fb-5fe54ba317e6",
-      "name": "Wait1",
+      "id": "708d5ed9-89a0-4139-bde1-fcd4941c6d10",
+      "name": "Wait3",
       "webhookId": "3f41332e-c3a0-459c-a395-ea66cd676efd"
-    },
-    {
-      "parameters": {},
-      "id": "trigger-plan-v1",
-      "name": "Trabajo recibido",
-      "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "typeVersion": 1.1,
-      "position": [
-        -2500,
-        0
-      ]
     },
     {
       "parameters": {
         "jsCode": "const input=$input.first().json; const job=input.job??input;\nconst calendarId=job.target_id??job.payload?.calendarId??job.payload?.calendar_id;\nif(job.kind!=='generate_plan'||!job.id||!job.client_id||!job.leaseToken||!calendarId) throw new Error('Contrato generate_plan v1 invalido: calendarId es obligatorio');\nif(String(calendarId)!==String(job.target_id)) throw new Error('calendarId debe coincidir con target_id');\nreturn [{json:{job:{...job,target_id:calendarId,payload:{...job.payload,calendarId,calendar_id:calendarId}}}}];"
       },
-      "id": "validate-plan-v1",
+      "id": "ea3ee345-1450-4732-a622-1a0a9f0da1b6",
       "name": "Validar trabajo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2260,
-        0
+        7120,
+        20000
       ],
       "onError": "continueErrorOutput"
     },
@@ -944,19 +1062,18 @@
         "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 2700 }) }}",
         "options": {}
       },
-      "id": "heartbeat-plan-start-v1",
+      "id": "fed3042f-93da-40ee-8f95-e5e4e99ebe68",
       "name": "Heartbeat inicial",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2020,
-        0
+        7360,
+        19984
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "method": "GET",
         "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
         "sendHeaders": true,
         "headerParameters": {
@@ -969,13 +1086,13 @@
         },
         "options": {}
       },
-      "id": "context-plan-v1",
+      "id": "7c5ed2ff-85b4-4360-9254-68dc9df7f831",
       "name": "Cargar contexto Infidash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1780,
-        0
+        7600,
+        19968
       ],
       "onError": "continueErrorOutput"
     },
@@ -998,56 +1115,27 @@
         "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 600 }) }}",
         "options": {}
       },
-      "id": "heartbeat-plan-end-v1",
+      "id": "796697bb-2e0a-42db-a6fc-45e15f3a6783",
       "name": "Heartbeat tras IA",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2500,
-        0
+        11520,
+        19792
       ],
       "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;\nconst parsed=$('📝 Parsear Plan JSON2').first().json;\nif(!parsed.success||!parsed.plan?.content_plan) throw new Error(parsed.error||'La IA no devolvio content_plan');\nconst dayOffset={lunes:0,martes:1,miercoles:2,miércoles:2,jueves:3,viernes:4,sabado:5,domingo:6};\nconst base=job.payload?.periodStart?new Date(job.payload.periodStart):null; const out=[];\nfor(const week of parsed.plan.content_plan){for(const post of week.posts??[]){if(!post.title)throw new Error('Cada propuesta requiere title');const calendarId=job.target_id;if(!calendarId)throw new Error('calendarId es obligatorio');if(post.calendarId&&String(post.calendarId)!==String(calendarId))throw new Error('La IA devolvió un calendarId distinto al reservado');let plannedAt=post.plannedAt??null;if(!plannedAt&&base&&dayOffset[String(post.day??'').toLowerCase()]!==undefined){const d=new Date(base);d.setUTCDate(d.getUTCDate()+(Number(week.week||1)-1)*7+dayOffset[String(post.day).toLowerCase()]);plannedAt=d.toISOString();}if(plannedAt&&Number.isNaN(Date.parse(plannedAt)))throw new Error('plannedAt debe ser ISO-8601');out.push({calendarId,title:String(post.title).trim(),theme:week.theme??null,rationale:week.rationale??null,format:post.format??null,keywordPrimary:post.keywords?.[0]??null,keywords:Array.isArray(post.keywords)?post.keywords:[],entities:Array.isArray(post.entities)?post.entities:String(post.identities??'').split(',').map(x=>x.trim()).filter(Boolean),cta:post.cta??null,priority:post.priority??null,plannedAt,sourceContext:{workflowVersion:1,dataSource:post.data_source??null},sourceKey:post.sourceKey??`inficon-plan:${job.id}:${out.length}`});}}\nif(!out.length)throw new Error('El plan no contiene propuestas');return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',planItems:out,result:{count:out.length,summary:parsed.plan.summary??null,workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;\nconst parsed=$('📝 Parsear Plan JSON').first().json;\nif(!parsed.success||!parsed.plan?.content_plan) throw new Error(parsed.error||'La IA no devolvio content_plan');\nconst dayOffset={lunes:0,martes:1,miercoles:2,miércoles:2,jueves:3,viernes:4,sabado:5,domingo:6};\nconst base=job.payload?.periodStart?new Date(job.payload.periodStart):null; const out=[];\nfor(const week of parsed.plan.content_plan){for(const post of week.posts??[]){if(!post.title)throw new Error('Cada propuesta requiere title');const calendarId=job.target_id;if(!calendarId)throw new Error('calendarId es obligatorio');if(post.calendarId&&String(post.calendarId)!==String(calendarId))throw new Error('La IA devolvió un calendarId distinto al reservado');let plannedAt=post.plannedAt??null;if(!plannedAt&&base&&dayOffset[String(post.day??'').toLowerCase()]!==undefined){const d=new Date(base);d.setUTCDate(d.getUTCDate()+(Number(week.week||1)-1)*7+dayOffset[String(post.day).toLowerCase()]);plannedAt=d.toISOString();}if(plannedAt&&Number.isNaN(Date.parse(plannedAt)))throw new Error('plannedAt debe ser ISO-8601');out.push({calendarId,title:String(post.title).trim(),theme:week.theme??null,rationale:week.rationale??null,format:post.format??null,keywordPrimary:post.keywords?.[0]??null,keywords:Array.isArray(post.keywords)?post.keywords:[],entities:Array.isArray(post.entities)?post.entities:String(post.identities??'').split(',').map(x=>x.trim()).filter(Boolean),cta:post.cta??null,priority:post.priority??null,plannedAt,sourceContext:{workflowVersion:1,dataSource:post.data_source??null},sourceKey:post.sourceKey??`plan:${job.id}:${out.length}`});}}\nif(!out.length)throw new Error('El plan no contiene propuestas');return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',planItems:out,result:{count:out.length,summary:parsed.plan.summary??null,workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
-      "id": "normalize-plan-v1",
+      "id": "21ecf620-c74b-4f86-a35d-cb7e6378d184",
       "name": "Normalizar resultado del plan",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2740,
-        0
-      ],
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ schemaVersion:$json.schemaVersion, clientId:$json.clientId, status:$json.status, planItems:$json.planItems, result:$json.result, leaseToken:$json.leaseToken }) }}",
-        "options": {}
-      },
-      "id": "result-plan-v1",
-      "name": "Guardar resultado Infidash",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        2980,
-        0
+        11792,
+        19776
       ],
       "onError": "continueErrorOutput"
     },
@@ -1055,13 +1143,13 @@
       "parameters": {
         "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo confirmado en fuente o IA').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
-      "id": "fail-plan-v1",
+      "id": "4eafcf52-6563-4804-b5f8-7a33b2a5ecdb",
       "name": "Preparar fallo confirmado",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2500,
-        500
+        12240,
+        20240
       ]
     },
     {
@@ -1083,139 +1171,161 @@
         "body": "={{ JSON.stringify($json) }}",
         "options": {}
       },
-      "id": "fail-result-plan-v1",
+      "id": "8533d176-6392-4e24-8a5a-2bfdd2a5000f",
       "name": "Guardar fallo Infidash",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2740,
-        500
+        12480,
+        20240
       ]
     },
     {
       "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'published_articles',unavailable:true,source:'Infidash (contenidos existentes)',error,resumen:'Sin datos disponibles de Infidash (contenidos existentes)',insights:'Sin datos disponibles de Infidash (contenidos existentes)'}}];"
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion:$json.schemaVersion, clientId:$json.clientId, status:$json.status, planItems:$json.planItems, result:$json.result, leaseToken:$json.leaseToken }) }}",
+        "options": {}
       },
-      "id": "7d153638-c1a8-445d-b841-d94b071f3ab0",
-      "name": "Sin datos: Publicados",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "716cbb0c-6b4c-4fd2-bca8-821a924aef81",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        400,
-        1928
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'trends',unavailable:true,source:'Google Trends',error,resumen:'Sin datos disponibles de Google Trends',insights:'Sin datos disponibles de Google Trends'}}];"
-      },
-      "id": "34083696-27b0-49b0-96ec-132396f8759b",
-      "name": "Sin datos: Tendencias",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        896,
-        2152
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'historical',unavailable:true,source:'GA4',error,resumen:'Sin datos disponibles de GA4',insights:'Sin datos disponibles de GA4'}}];"
-      },
-      "id": "948c69e5-4669-4308-9256-96f3fc83e311",
-      "name": "Sin datos: Histórico",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1040,
-        2952
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'search_console',unavailable:true,source:'Search Console (páginas)',error,resumen:'Sin datos disponibles de Search Console (páginas)',insights:'Sin datos disponibles de Search Console (páginas)'}}];"
-      },
-      "id": "5556a914-c394-4fb9-b3b2-06d8dda15d3d",
-      "name": "Sin datos: SC Páginas",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1104,
-        3192
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'queries_analytics',unavailable:true,source:'Search Console (consultas)',error,resumen:'Sin datos disponibles de Search Console (consultas)',insights:'Sin datos disponibles de Search Console (consultas)'}}];"
-      },
-      "id": "ac3086c9-101f-4e6c-acdf-0b99a8bc5ad6",
-      "name": "Sin datos: Queries",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        944,
-        3400
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'serplab_rankings',unavailable:true,source:'SerpRobot',error,resumen:'Sin datos disponibles de SerpRobot',insights:'Sin datos disponibles de SerpRobot'}}];"
-      },
-      "id": "a7bd506c-e5ab-4087-ab57-ccc321bc1afb",
-      "name": "Sin datos: Rankings",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        944,
-        3624
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'seasonal',unavailable:true,source:'SerpAPI (estacionalidad)',error,resumen:'Sin datos disponibles de SerpAPI (estacionalidad)',insights:'Sin datos disponibles de SerpAPI (estacionalidad)'}}];"
-      },
-      "id": "1747397f-4e50-46a5-b813-dd3767a6c71d",
-      "name": "Sin datos: Estacionalidad",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        912,
-        3864
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{articulos:[{id:1,header:'Sin datos disponibles de competidor 1',resumen:''}],total:0,unavailable:true,source:'competidor 1',error}}];"
-      },
-      "id": "62b56fdb-4b65-40e0-818d-dfe830c247ee",
-      "name": "Sin datos: Competidor 1",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1016,
-        2372
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{articulos:[{id:1,header:'Sin datos disponibles de competidor 2',resumen:''}],total:0,unavailable:true,source:'competidor 2',error}}];"
-      },
-      "id": "e7f62e8e-2662-4376-a210-0d013f230561",
-      "name": "Sin datos: Competidor 2",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1032,
-        2580
-      ]
+        12080,
+        19760
+      ],
+      "onError": "continueErrorOutput"
     }
   ],
   "connections": {
-    "🤖 Agente IA: Tendencias": {
+    "Trabajo recibido": {
       "main": [
         [
           {
-            "node": "📝 Parsear IA Tendencias",
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Publicados": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Tendencias": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Sin datos: Histórico": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Sin datos: SC Páginas": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Sin datos: Queries": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Sin datos: Rankings": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "Sin datos: Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "Sin datos: Competidor 1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Competidor 2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Tendencias1": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Tendencias1",
             "type": "main",
             "index": 0
           }
@@ -1229,11 +1339,11 @@
         ]
       ]
     },
-    "📝 Parsear IA Tendencias": {
+    "📝 Parsear IA Tendencias1": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 1
           }
@@ -1247,22 +1357,22 @@
         ]
       ]
     },
-    "OpenAI — Histórico": {
+    "OpenAI — Histórico1": {
       "ai_languageModel": [
         [
           {
-            "node": "🤖 Agente IA: Histórico",
+            "node": "🤖 Agente IA: Histórico1",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "🤖 Agente IA: Histórico": {
+    "🤖 Agente IA: Histórico1": {
       "main": [
         [
           {
-            "node": "Wait",
+            "node": "Wait2",
             "type": "main",
             "index": 0
           }
@@ -1276,11 +1386,11 @@
         ]
       ]
     },
-    "📝 Parsear IA Histórico": {
+    "📝 Parsear IA Histórico1": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 3
           }
@@ -1294,22 +1404,22 @@
         ]
       ]
     },
-    "OpenAI — Search Console Páginas": {
+    "OpenAI — Search Console Páginas1": {
       "ai_languageModel": [
         [
           {
-            "node": "🤖 Agente IA: SC Páginas",
+            "node": "🤖 Agente IA: SC Páginas1",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "🤖 Agente IA: SC Páginas": {
+    "🤖 Agente IA: SC Páginas1": {
       "main": [
         [
           {
-            "node": "Wait1",
+            "node": "Wait3",
             "type": "main",
             "index": 0
           }
@@ -1323,11 +1433,11 @@
         ]
       ]
     },
-    "📝 Parsear IA SC Páginas": {
+    "📝 Parsear IA SC Páginas1": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 4
           }
@@ -1341,22 +1451,22 @@
         ]
       ]
     },
-    "OpenAI — Queries": {
+    "OpenAI — Queries1": {
       "ai_languageModel": [
         [
           {
-            "node": "🤖 Agente IA: Queries",
+            "node": "🤖 Agente IA: Queries1",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "🤖 Agente IA: Queries": {
+    "🤖 Agente IA: Queries1": {
       "main": [
         [
           {
-            "node": "📝 Parsear IA Queries",
+            "node": "📝 Parsear IA Queries1",
             "type": "main",
             "index": 0
           }
@@ -1370,11 +1480,11 @@
         ]
       ]
     },
-    "📝 Parsear IA Queries": {
+    "📝 Parsear IA Queries1": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 5
           }
@@ -1388,22 +1498,22 @@
         ]
       ]
     },
-    "OpenAI — Rankings SerpLab": {
+    "OpenAI — Rankings SerpLab1": {
       "ai_languageModel": [
         [
           {
-            "node": "🤖 Agente IA: Rankings",
+            "node": "🤖 Agente IA: Rankings1",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "🤖 Agente IA: Rankings": {
+    "🤖 Agente IA: Rankings1": {
       "main": [
         [
           {
-            "node": "📝 Parsear IA Rankings",
+            "node": "📝 Parsear IA Rankings1",
             "type": "main",
             "index": 0
           }
@@ -1417,11 +1527,11 @@
         ]
       ]
     },
-    "📝 Parsear IA Rankings": {
+    "📝 Parsear IA Rankings1": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 6
           }
@@ -1435,22 +1545,22 @@
         ]
       ]
     },
-    "OpenAI — Estacionalidad": {
+    "OpenAI — Estacionalidad1": {
       "ai_languageModel": [
         [
           {
-            "node": "🤖 Agente IA: Estacionalidad",
+            "node": "🤖 Agente IA: Estacionalidad1",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "🤖 Agente IA: Estacionalidad": {
+    "🤖 Agente IA: Estacionalidad1": {
       "main": [
         [
           {
-            "node": "📝 Parsear IA Estacionalidad",
+            "node": "📝 Parsear IA Estacionalidad1",
             "type": "main",
             "index": 0
           }
@@ -1464,11 +1574,11 @@
         ]
       ]
     },
-    "📝 Parsear IA Estacionalidad": {
+    "📝 Parsear IA Estacionalidad1": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 7
           }
@@ -1482,51 +1592,51 @@
         ]
       ]
     },
-    "⚙️ Configuración1": {
+    "⚙️ Configuración": {
       "main": [
         [
           {
-            "node": "📈 A: Google Trends1",
+            "node": "📈 A: Google Trends",
             "type": "main",
             "index": 0
           },
           {
-            "node": "📊 C: GA4 — Top Contenidos1",
+            "node": "📊 C: GA4 — Top Contenidos",
             "type": "main",
             "index": 0
           },
           {
-            "node": "🌍 D: Estacionalidad — SerpAPI1",
+            "node": "🌍 D: Estacionalidad — SerpAPI",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Pages search console1",
+            "node": "Pages search console",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Query search console1",
+            "node": "Query search console",
             "type": "main",
             "index": 0
           },
           {
-            "node": "🏢 B: Scrape JINA Reader",
+            "node": "🏢 B: Scrape JINA Reader1",
             "type": "main",
             "index": 0
           },
           {
-            "node": "🏢 B: Scrape JINA Reader2",
+            "node": "🏢 B: Scrape JINA Reader3",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Datos serprobot 7 dias1",
+            "node": "Datos serprobot 7 dias",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Code in JavaScript4",
+            "node": "Code in JavaScript",
             "type": "main",
             "index": 0
           }
@@ -1540,11 +1650,11 @@
         ]
       ]
     },
-    "📈 A: Google Trends1": {
+    "📈 A: Google Trends": {
       "main": [
         [
           {
-            "node": "📈 A: Procesar Tendencias1",
+            "node": "📈 A: Procesar Tendencias",
             "type": "main",
             "index": 0
           }
@@ -1558,11 +1668,11 @@
         ]
       ]
     },
-    "📈 A: Procesar Tendencias1": {
+    "📈 A: Procesar Tendencias": {
       "main": [
         [
           {
-            "node": "🤖 Agente IA: Tendencias",
+            "node": "🤖 Agente IA: Tendencias1",
             "type": "main",
             "index": 0
           }
@@ -1576,54 +1686,54 @@
         ]
       ]
     },
-    "OpenAI — Competidor1": {
+    "OpenAI — Competidor": {
       "ai_languageModel": [
         [
           {
-            "node": "🏢 B: IA Analiza Competidor1",
+            "node": "🏢 B: IA Analiza Competidor2",
             "type": "ai_languageModel",
             "index": 0
           },
           {
-            "node": "🏢 B: IA Analiza Competidor3",
+            "node": "🏢 B: IA Analiza Competidor",
             "type": "ai_languageModel",
             "index": 0
           },
           {
-            "node": "🤖 Agente IA: Tendencias",
+            "node": "🤖 Agente IA: Tendencias1",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "🏢 B: Agregar Competidores1": {
+    "🏢 B: Agregar Competidores": {
       "main": [
         [
           {
-            "node": "🏢 B: Marcar Tipo1",
+            "node": "🏢 B: Marcar Tipo",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "🏢 B: Marcar Tipo1": {
+    "🏢 B: Marcar Tipo": {
       "main": [
         [
           {
-            "node": "🔗 Merge 4 Análisis2",
+            "node": "🔗 Merge 4 Análisis",
             "type": "main",
             "index": 2
           }
         ]
       ]
     },
-    "📊 C: GA4 — Top Contenidos1": {
+    "📊 C: GA4 — Top Contenidos": {
       "main": [
         [
           {
-            "node": "📊 C: Procesar Histórico1",
+            "node": "📊 C: Procesar Histórico",
             "type": "main",
             "index": 0
           }
@@ -1637,11 +1747,11 @@
         ]
       ]
     },
-    "📊 C: Procesar Histórico1": {
+    "📊 C: Procesar Histórico": {
       "main": [
         [
           {
-            "node": "🤖 Agente IA: Histórico",
+            "node": "🤖 Agente IA: Histórico1",
             "type": "main",
             "index": 0
           }
@@ -1655,11 +1765,11 @@
         ]
       ]
     },
-    "🌍 D: Estacionalidad — SerpAPI1": {
+    "🌍 D: Estacionalidad — SerpAPI": {
       "main": [
         [
           {
-            "node": "🌍 D: Procesar Estacionalidad1",
+            "node": "🌍 D: Procesar Estacionalidad",
             "type": "main",
             "index": 0
           }
@@ -1673,11 +1783,11 @@
         ]
       ]
     },
-    "🌍 D: Procesar Estacionalidad1": {
+    "🌍 D: Procesar Estacionalidad": {
       "main": [
         [
           {
-            "node": "🤖 Agente IA: Estacionalidad",
+            "node": "🤖 Agente IA: Estacionalidad1",
             "type": "main",
             "index": 0
           }
@@ -1691,11 +1801,11 @@
         ]
       ]
     },
-    "Query search console1": {
+    "Query search console": {
       "main": [
         [
           {
-            "node": "Code querys1",
+            "node": "Code querys",
             "type": "main",
             "index": 0
           }
@@ -1709,11 +1819,11 @@
         ]
       ]
     },
-    "Pages search console1": {
+    "Pages search console": {
       "main": [
         [
           {
-            "node": "search console pages1",
+            "node": "search console pages",
             "type": "main",
             "index": 0
           }
@@ -1727,11 +1837,11 @@
         ]
       ]
     },
-    "Code querys1": {
+    "Code querys": {
       "main": [
         [
           {
-            "node": "🤖 Agente IA: Queries",
+            "node": "🤖 Agente IA: Queries1",
             "type": "main",
             "index": 0
           }
@@ -1745,11 +1855,11 @@
         ]
       ]
     },
-    "search console pages1": {
+    "search console pages": {
       "main": [
         [
           {
-            "node": "🤖 Agente IA: SC Páginas",
+            "node": "🤖 Agente IA: SC Páginas1",
             "type": "main",
             "index": 0
           }
@@ -1763,22 +1873,40 @@
         ]
       ]
     },
-    "Merge1": {
+    "Merge": {
       "main": [
         [
           {
-            "node": "🏢 B: Agregar Competidores1",
+            "node": "🏢 B: Agregar Competidores",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "🏢 B: IA Analiza Competidor3": {
+    "Code in JavaScript": {
       "main": [
         [
           {
-            "node": "Code in JavaScript5",
+            "node": "🔗 Merge 4 Análisis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Publicados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏢 B: IA Analiza Competidor": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript8",
             "type": "main",
             "index": 0
           }
@@ -1792,11 +1920,11 @@
         ]
       ]
     },
-    "Code in JavaScript5": {
+    "Code in JavaScript8": {
       "main": [
         [
           {
-            "node": "Merge1",
+            "node": "Merge",
             "type": "main",
             "index": 0
           }
@@ -1810,11 +1938,11 @@
         ]
       ]
     },
-    "🏢 B: IA Analiza Competidor1": {
+    "🏢 B: IA Analiza Competidor2": {
       "main": [
         [
           {
-            "node": "Code in JavaScript6",
+            "node": "Code in JavaScript9",
             "type": "main",
             "index": 0
           }
@@ -1828,11 +1956,11 @@
         ]
       ]
     },
-    "Code in JavaScript6": {
+    "Code in JavaScript9": {
       "main": [
         [
           {
-            "node": "Merge1",
+            "node": "Merge",
             "type": "main",
             "index": 1
           }
@@ -1846,11 +1974,11 @@
         ]
       ]
     },
-    "Code in JavaScript7": {
+    "Code in JavaScript10": {
       "main": [
         [
           {
-            "node": "🤖 Agente IA: Rankings",
+            "node": "🤖 Agente IA: Rankings1",
             "type": "main",
             "index": 0
           }
@@ -1864,11 +1992,11 @@
         ]
       ]
     },
-    "Datos serprobot 7 dias1": {
+    "Datos serprobot 7 dias": {
       "main": [
         [
           {
-            "node": "Code in JavaScript7",
+            "node": "Code in JavaScript10",
             "type": "main",
             "index": 0
           }
@@ -1882,11 +2010,11 @@
         ]
       ]
     },
-    "🏢 B: Scrape JINA Reader": {
+    "🏢 B: Scrape JINA Reader1": {
       "main": [
         [
           {
-            "node": "🏢 B: IA Analiza Competidor3",
+            "node": "🏢 B: IA Analiza Competidor",
             "type": "main",
             "index": 0
           }
@@ -1900,11 +2028,11 @@
         ]
       ]
     },
-    "🏢 B: Scrape JINA Reader2": {
+    "🏢 B: Scrape JINA Reader3": {
       "main": [
         [
           {
-            "node": "🏢 B: IA Analiza Competidor1",
+            "node": "🏢 B: IA Analiza Competidor2",
             "type": "main",
             "index": 0
           }
@@ -1918,22 +2046,22 @@
         ]
       ]
     },
-    "🔗 Merge 4 Análisis2": {
+    "🔗 Merge 4 Análisis": {
       "main": [
         [
           {
-            "node": "🧩 Preparar Contexto IA2",
+            "node": "🧩 Preparar Contexto IA",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "🧩 Preparar Contexto IA2": {
+    "🧩 Preparar Contexto IA": {
       "main": [
         [
           {
-            "node": "🤖 IA: Plan de Contenidos2",
+            "node": "🤖 IA: Plan de Contenidos",
             "type": "main",
             "index": 0
           }
@@ -1947,11 +2075,11 @@
         ]
       ]
     },
-    "🤖 IA: Plan de Contenidos2": {
+    "🤖 IA: Plan de Contenidos": {
       "main": [
         [
           {
-            "node": "📝 Parsear Plan JSON2",
+            "node": "📝 Parsear Plan JSON",
             "type": "main",
             "index": 0
           }
@@ -1965,44 +2093,51 @@
         ]
       ]
     },
-    "OpenAI — Síntesis Final2": {
+    "OpenAI — Síntesis Final": {
       "ai_languageModel": [
         [
           {
-            "node": "🤖 IA: Plan de Contenidos2",
+            "node": "🤖 IA: Plan de Contenidos",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "Wait": {
+    "📝 Parsear Plan JSON": {
       "main": [
         [
           {
-            "node": "📝 Parsear IA Histórico",
+            "node": "Heartbeat tras IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Wait1": {
+    "Wait2": {
       "main": [
         [
           {
-            "node": "📝 Parsear IA SC Páginas",
+            "node": "📝 Parsear IA Histórico1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Trabajo recibido": {
+    "Wait3": {
       "main": [
         [
           {
-            "node": "Validar trabajo",
+            "node": "📝 Parsear IA SC Páginas1",
             "type": "main",
             "index": 0
           }
@@ -2049,43 +2184,7 @@
       "main": [
         [
           {
-            "node": "⚙️ Configuración1",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Preparar fallo confirmado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Code in JavaScript4": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Sin datos: Publicados",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "📝 Parsear Plan JSON2": {
-      "main": [
-        [
-          {
-            "node": "Heartbeat tras IA",
+            "node": "⚙️ Configuración",
             "type": "main",
             "index": 0
           }
@@ -2142,105 +2241,6 @@
             "node": "Guardar fallo Infidash",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Sin datos: Publicados": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Sin datos: Tendencias": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Sin datos: Histórico": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 3
-          }
-        ]
-      ]
-    },
-    "Sin datos: SC Páginas": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 4
-          }
-        ]
-      ]
-    },
-    "Sin datos: Queries": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 5
-          }
-        ]
-      ]
-    },
-    "Sin datos: Rankings": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 6
-          }
-        ]
-      ]
-    },
-    "Sin datos: Estacionalidad": {
-      "main": [
-        [
-          {
-            "node": "🔗 Merge 4 Análisis2",
-            "type": "main",
-            "index": 7
-          }
-        ]
-      ]
-    },
-    "Sin datos: Competidor 1": {
-      "main": [
-        [
-          {
-            "node": "Merge1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Sin datos: Competidor 2": {
-      "main": [
-        [
-          {
-            "node": "Merge1",
-            "type": "main",
-            "index": 1
           }
         ]
       ]

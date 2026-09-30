@@ -10,11 +10,13 @@ import {
   getContentJobs,
   getContentSummary,
   getEditorialCalendars,
+  getEditorialPlanInputs,
   getEditorialReadiness,
   getPlanItems,
   getPublications,
   getPublishingAccounts,
   releasePlanGeneration as releasePlanGenerationRequest,
+  saveEditorialPlanInputs,
   schedulePublication as schedulePublicationRequest,
   updateContentItem,
   updatePlanItem,
@@ -23,6 +25,7 @@ import {
   type ContentJob,
   type ContentSummary,
   type EditorialCalendar,
+  type EditorialPlanInputs,
   type EditorialReadiness,
   type JobKind,
   type PlanItem,
@@ -79,6 +82,9 @@ interface ContentState {
   approveContent: (token: string, id: string, revisionId: string, version: number) => Promise<void>;
   schedulePublication: (token: string, input: { contentId: string; clientId: string; expectedVersion: number; accountId: string; desiredScheduledAt: string; externalUrl?: string; copy?: string }) => Promise<void>;
   createJob: (token: string, input: { clientId: string; kind: JobKind; targetId?: string; expectedVersion?: number; payload?: Record<string, unknown> }) => Promise<void>;
+  loadPlanInputs: (token: string, clientId: string) => Promise<EditorialPlanInputs>;
+  /** Saves the plan inputs into editorial_config, then queues the generate_plan job; no job is created if saving fails. */
+  generatePlan: (token: string, clientId: string, inputs: EditorialPlanInputs) => Promise<void>;
   pollJobs: (token: string) => Promise<void>;
   clearConflict: () => void;
 }
@@ -299,6 +305,13 @@ export const useContentStore = create<ContentState>((set, get) => ({
       set((state) => ({ jobs: [response.job, ...state.jobs.filter((job) => job.id !== response.job.id)] }));
     } catch (error) { if (isConflict(error)) set({ conflict: message(error) }); else set({ detailError: message(error) }); throw error; }
     finally { set({ isSaving: false }); }
+  },
+  loadPlanInputs: (token, clientId) => getEditorialPlanInputs(token, clientId),
+  generatePlan: async (token, clientId, inputs) => {
+    set({ isSaving: true });
+    try { await saveEditorialPlanInputs(token, clientId, inputs); }
+    finally { set({ isSaving: false }); }
+    await get().createJob(token, { clientId, kind: 'generate_plan' });
   },
   pollJobs: async (token) => {
     const pending = get().jobs.filter((job) => ['pending', 'running', 'unknown'].includes(job.status));
