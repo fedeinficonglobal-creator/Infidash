@@ -198,13 +198,22 @@ test('generate_content failures are retryable before WordPress, ambiguous only f
 
 test('generate_content prefers the server-built plan item and records the draft event against the plan item', () => {
   const generate = loadWorkflow('inficon-global/generate.v1.json');
-  const ctx = { accounts: [{ provider: 'wordpress', active: true, instance_key: 'inficonglobal-blog' }], planItems: [{ id: 'target-1', title: 'Título del contexto' }] };
+  const ctx = { settings: { editorial_config: { siteUrl: 'https://www.acme.example/', brandName: 'Acme Bombas', topic: 'Bombas industriales' } }, accounts: [{ provider: 'wordpress', active: true, instance_key: 'inficonglobal-blog' }], planItems: [{ id: 'target-1', title: 'Título del contexto' }] };
   const planItem = { id: 'target-1', title: 'Guía de bombas', keywords: ['bombas', 'caudal'], entities: ['ISO 9906'], rationale: 'Demanda alta', format: 'blog', keywordPrimary: 'bombas' };
   const [prepared] = runCode(generate, 'Preparar contenido aprobado', { nodes: { 'Validar trabajo': [{ job: { ...JOB, payload: { schemaVersion: 1, planItem } } }] }, input: [ctx] });
   assert.equal(prepared.json.title, 'Guía de bombas');
   assert.equal(prepared.json.keywords, 'bombas, caudal');
   assert.equal(prepared.json.Entidades, 'ISO 9906');
   assert.equal(prepared.json.Justificacion, 'Demanda alta');
+  assert.equal(prepared.json.siteUrl, 'https://www.acme.example', 'the trailing slash is dropped so WordPress paths can be appended');
+  assert.equal(prepared.json.brandName, 'Acme Bombas');
+  assert.equal(prepared.json.sector, 'Bombas industriales');
+  const withConfig = (config: Record<string, unknown>) => ({ ...ctx, settings: { editorial_config: config } });
+  assert.throws(() => runCode(generate, 'Preparar contenido aprobado', { nodes: { 'Validar trabajo': [{ job: { ...JOB, payload: { planItem } } }] }, input: [withConfig({ brandName: 'Acme' })] }), /Falta editorial_config\.siteUrl/);
+  assert.throws(() => runCode(generate, 'Preparar contenido aprobado', { nodes: { 'Validar trabajo': [{ job: { ...JOB, payload: { planItem } } }] }, input: [withConfig({ siteUrl: 'https://acme.example' })] }), /Falta editorial_config\.brandName/);
+  const [legacy] = runCode(generate, 'Preparar contenido aprobado', { nodes: { 'Validar trabajo': [{ job: { ...JOB, payload: { planItem } } }] }, input: [withConfig({ site_url: 'https://acme.example', brandName: 'Acme' })] });
+  assert.equal(legacy.json.siteUrl, 'https://acme.example', 'site_url is accepted as an alias');
+  assert.equal(legacy.json.sector, '');
   const [fallback] = runCode(generate, 'Preparar contenido aprobado', { nodes: { 'Validar trabajo': [{ job: { ...JOB, payload: {} } }] }, input: [ctx] });
   assert.equal(fallback.json.title, 'Título del contexto');
   assert.throws(() => runCode(generate, 'Preparar contenido aprobado', { nodes: { 'Validar trabajo': [{ job: { ...JOB, payload: {} } }] }, input: [{ ...ctx, planItems: [] }] }), /No existe el plan item objetivo/);
@@ -464,4 +473,19 @@ test('plan configuration comes only from editorial_config and fails loudly witho
   assert.equal(full.country, 'MX');
   assert.equal(full.weeks_horizon, 6);
   assert.deepEqual(run({ topic: 'Fontanería', siteUrl: 'https://example.com', keywords: 'seo, , sem' }).keywords_list, ['seo', 'sem'], 'legacy comma-separated keywords are still read');
+});
+
+test('the generate workflow is a client-agnostic template driven by editorial_config', () => {
+  const raw = readFileSync(join(workflowRoot, 'inficon-global', 'generate.v1.json'), 'utf8');
+  for (const hardcoded of ['inficonglobal.es', 'Inficon Global', 'marketing digital', 'inficon-generate']) {
+    assert.equal(raw.includes(hardcoded), false, `generate.v1.json must not contain ${hardcoded}`);
+  }
+  const generate = loadWorkflow('inficon-global/generate.v1.json');
+  const site = "$('Preparar contenido aprobado').first().json.siteUrl";
+  assert.equal(nodeNamed(generate, 'Subir imagen a WordPress').parameters.url, `={{ ${site} + '/wp-json/wp/v2/media' }}`);
+  assert.ok(nodeNamed(generate, 'Asignar imagen cabecera').parameters.url.includes(`${site} + '/wp-json/wp/v2/posts/'`));
+  assert.match(nodeNamed(generate, 'Generar imagen cabecera IA').parameters.body, /\.sector \? ' del sector '/);
+  const writer = nodeNamed(generate, 'SEO Content Writer2').parameters.messages.values[0].content;
+  assert.match(writer, /redactor SEO senior de \{\{ \$json\.brandName \}\}\*\*, empresa del sector \*\*\{\{ \$json\.sector \}\}\*\*/);
+  assert.match(writer, /Puedes mencionar a \*\*\{\{ \$json\.brandName \}\}\*\*/);
 });
