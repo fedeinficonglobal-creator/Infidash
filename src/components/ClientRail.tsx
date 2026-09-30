@@ -6,8 +6,15 @@ import { cn } from '../lib/utils.js';
 import { DASHBOARD_PATH, clientPath } from '../lib/routes.js';
 import { clientColor, clientInitials, clientLogoUrl, filterClients } from '../lib/clientAvatar.js';
 
-const railItemClass =
-  'relative size-10 shrink-0 rounded-xl flex items-center justify-center transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2';
+const railTileClass =
+  'relative w-[4.25rem] shrink-0 flex flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary';
+const railTileIdle = 'text-slate-500 hover:bg-white/80 hover:text-slate-800';
+const railTileActive = 'bg-white text-slate-900 shadow-sm';
+const railIconClass = 'size-8 shrink-0 rounded-lg flex items-center justify-center';
+const railLabelClass = 'w-full text-center text-[10px] font-semibold leading-tight line-clamp-2 break-words';
+// Scrolls without a visible scrollbar; the edges fade so it is clear there is more.
+const railScrollClass =
+  '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]';
 
 function ClientAvatar({ client, className }: { client: Client; className?: string }) {
   const logoUrl = clientLogoUrl(client.logo);
@@ -88,12 +95,10 @@ function ClientSearch({ clients }: { clients: Client[] }) {
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => (open ? close() : setOpen(true))}
-        className={cn(
-          railItemClass,
-          open ? 'bg-brand-primary/10 text-brand-primary' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700',
-        )}
+        className={cn(railTileClass, open ? railTileActive : railTileIdle)}
       >
-        <Search className="size-5" />
+        <span className={railIconClass}><Search className="size-5" /></span>
+        <span className={railLabelClass}>Buscar</span>
       </button>
 
       {open && (
@@ -144,23 +149,21 @@ export function ClientRail({ clients, activeClientId }: { clients: Client[]; act
   const isDashboard = !activeClientId && pathname === DASHBOARD_PATH;
 
   return (
-    <nav aria-label="Clientes" className="w-16 shrink-0 h-full bg-slate-50 border-r border-slate-200 flex flex-col items-center py-4 gap-3">
+    <nav aria-label="Clientes" className="w-20 shrink-0 h-full bg-slate-50 border-r border-slate-200 flex flex-col items-center py-3 gap-2">
       <Link
         to={DASHBOARD_PATH}
         aria-label="Dashboard de la agencia"
         title="Dashboard de la agencia"
         aria-current={isDashboard ? 'page' : undefined}
-        className={cn(
-          railItemClass,
-          isDashboard ? 'bg-brand-primary text-white shadow-sm' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700',
-        )}
+        className={cn(railTileClass, isDashboard ? railTileActive : railTileIdle)}
       >
-        <Home className="size-5" />
+        <span className={cn(railIconClass, isDashboard && 'bg-brand-primary text-white')}><Home className="size-5" /></span>
+        <span className={railLabelClass}>Inicio</span>
       </Link>
 
       <div className="w-8 border-t border-slate-200" />
 
-      <ul className="flex-1 min-h-0 w-full overflow-y-auto flex flex-col items-center gap-2 py-1">
+      <ul className={cn('flex-1 min-h-0 w-full overflow-y-auto flex flex-col items-center gap-1 py-3', railScrollClass)}>
         {clients.map((client) => {
           const isActive = client.id === activeClientId;
           return (
@@ -173,14 +176,12 @@ export function ClientRail({ clients, activeClientId }: { clients: Client[]; act
                 aria-label={client.name}
                 title={client.name}
                 aria-current={isActive ? 'page' : undefined}
-                className={cn(
-                  railItemClass,
-                  isActive
-                    ? 'ring-2 ring-brand-primary ring-offset-2 ring-offset-slate-50'
-                    : 'opacity-80 hover:opacity-100 hover:rounded-lg',
-                )}
+                className={cn(railTileClass, isActive ? railTileActive : railTileIdle)}
               >
-                <ClientAvatar client={client} />
+                <span className={cn(railIconClass, 'overflow-hidden', isActive && 'ring-2 ring-brand-primary')}>
+                  <ClientAvatar client={client} className="text-[11px]" />
+                </span>
+                <span className={railLabelClass}>{client.name}</span>
               </Link>
             </li>
           );
