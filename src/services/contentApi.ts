@@ -1,7 +1,7 @@
 export type PlanStatus = 'proposed' | 'approved' | 'generating' | 'review' | 'ready' | 'generation_failed' | 'archived';
 export type ContentStatus = 'draft' | 'review' | 'approved' | 'archived';
 export type PublicationStatus = 'pending' | 'sending' | 'scheduled' | 'published' | 'failed' | 'unknown' | 'cancel_requested' | 'cancelled' | 'draft';
-export type JobKind = 'generate_plan' | 'generate_content' | 'publish' | 'reschedule' | 'cancel' | 'reconcile';
+export type JobKind = 'generate_plan' | 'generate_content' | 'publish' | 'reschedule' | 'cancel' | 'reconcile' | 'generate_rrss_plan' | 'generate_rrss';
 
 export interface ContentSummary {
   planItems: Partial<Record<PlanStatus, number>>;

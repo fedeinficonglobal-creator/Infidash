@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { getEditorialPool, withEditorialTransaction } from './postgres.js';
-import { ContentApiError, JOB_KINDS, encodeCursor, redactSecrets, requestHash, sanitizeError } from './contracts.js';
-import { assertContentTransition, assertPlanTransition, assertPublicationTransition } from './transitions.js';
-import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
+import { ContentApiError, JOB_KINDS, RRSS_FORMATS, RRSS_NETWORKS, encodeCursor, networkFromInstanceKey, normalizeRrssNetworks, normalizeSocialMedia, redactSecrets, requestHash, requireSocialCopy, sanitizeError, type CalendarKind } from './contracts.js';
+import { assertContentTransition, assertPlanTransition, assertPublicationTransition, assertSocialPostTransition } from './transitions.js';
+import type { ContentStatus, PlanItemStatus, PublicationStatus, SocialPostStatus } from './types.js';
 
 type Filters = { clientId?: string; clientIds?: string[]; from?: string; to?: string; status?: string; format?: string; search?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
 
@@ -70,10 +70,91 @@ export function normalizePlanInputs(input: { topic?: unknown; keywords?: unknown
   return { topic, keywords, competitors };
 }
 
+export type RrssPlanInputs = { topic: string; keywords: string[]; networks: string[]; postsPerWeek: number; weeksHorizon: number };
+/** RRSS plan inputs as read back from editorial_config.rrss: postsPerWeek stays null until an admin saves them. */
+export type StoredRrssPlanInputs = Omit<RrssPlanInputs, 'postsPerWeek'> & { postsPerWeek: number | null };
+
+const DEFAULT_RRSS_WEEKS_HORIZON = 4;
+const MAX_RRSS_WEEKS_HORIZON = 12;
+const MAX_RRSS_POSTS_PER_WEEK = 14;
+
+function boundedInteger(value: unknown, min: number, max: number) {
+  return Number.isInteger(value) && Number(value) >= min && Number(value) <= max ? Number(value) : null;
+}
+
+export function normalizeRrssPlanInputs(input: { topic?: unknown; keywords?: unknown; networks?: unknown; postsPerWeek?: unknown; weeksHorizon?: unknown }): RrssPlanInputs {
+  const topic = typeof input.topic === 'string' ? input.topic.trim() : '';
+  if (!topic) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Indica el tema del plan de redes');
+  if (topic.length > MAX_PLAN_TOPIC_LENGTH) throw new ContentApiError(400, 'INVALID_PAYLOAD', `El tema debe tener como máximo ${MAX_PLAN_TOPIC_LENGTH} caracteres`);
+  const keywords = input.keywords === undefined || input.keywords === null ? [] : uniqueCaseInsensitive(requireTextList(input.keywords, 'keywords debe ser una lista de texto'));
+  if (keywords.length > MAX_PLAN_KEYWORDS) throw new ContentApiError(400, 'INVALID_PAYLOAD', `Puedes indicar como máximo ${MAX_PLAN_KEYWORDS} keywords`);
+  if (keywords.some((keyword) => keyword.length > MAX_PLAN_KEYWORD_LENGTH)) throw new ContentApiError(400, 'INVALID_PAYLOAD', `Cada keyword debe tener como máximo ${MAX_PLAN_KEYWORD_LENGTH} caracteres`);
+  const networks = normalizeRrssNetworks(input.networks);
+  if (!networks.length) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Elige al menos una red social');
+  const postsPerWeek = boundedInteger(input.postsPerWeek, 1, MAX_RRSS_POSTS_PER_WEEK);
+  if (postsPerWeek === null) throw new ContentApiError(400, 'INVALID_PAYLOAD', `postsPerWeek debe ser un entero entre 1 y ${MAX_RRSS_POSTS_PER_WEEK}`);
+  const weeksHorizon = input.weeksHorizon === undefined || input.weeksHorizon === null ? DEFAULT_RRSS_WEEKS_HORIZON : boundedInteger(input.weeksHorizon, 1, MAX_RRSS_WEEKS_HORIZON);
+  if (weeksHorizon === null) throw new ContentApiError(400, 'INVALID_PAYLOAD', `weeksHorizon debe ser un entero entre 1 y ${MAX_RRSS_WEEKS_HORIZON}`);
+  return { topic, keywords, networks, postsPerWeek, weeksHorizon };
+}
+
+/** Lenient read of editorial_config.rrss: unknown networks and non-text keywords are dropped, never rejected. */
+function storedRrssPlanInputs(value: unknown): StoredRrssPlanInputs {
+  const config = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return {
+    topic: typeof config.topic === 'string' ? config.topic.trim() : '',
+    keywords: storedList(config.keywords),
+    networks: [...new Set(storedList(config.networks).filter((network) => (RRSS_NETWORKS as readonly string[]).includes(network)))],
+    postsPerWeek: boundedInteger(config.postsPerWeek, 1, MAX_RRSS_POSTS_PER_WEEK),
+    weeksHorizon: boundedInteger(config.weeksHorizon, 1, MAX_RRSS_WEEKS_HORIZON) ?? DEFAULT_RRSS_WEEKS_HORIZON,
+  };
+}
+
 const EDITORIAL_DISABLED_MESSAGE = 'La automatización editorial del cliente está desactivada';
 
 /** Jobs that n8n claims again on its own after a failure; publish/reschedule/cancel only ever run once (see claimJob). */
-const AUTO_RETRY_KINDS = ['generate_plan', 'generate_content', 'reconcile'];
+const AUTO_RETRY_KINDS = ['generate_plan', 'generate_content', 'reconcile', 'generate_rrss_plan', 'generate_rrss'];
+/** Jobs whose target is a calendar created (or reused) for the plan, and whose result is a list of plan items. */
+const PLAN_JOB_KINDS = ['generate_plan', 'generate_rrss_plan'];
+/** Jobs that move a plan item to `generating` and back to `review`/`generation_failed`. */
+const GENERATION_JOB_KINDS = ['generate_content', 'generate_rrss'];
+/** Per-client RRSS calendar that holds manual ideas created outside any AI plan. */
+const RRSS_IDEAS_CALENDAR_TITLE = 'Ideas sueltas';
+const MAX_RRSS_ACCOUNTS = 20;
+
+/** The Postiz accounts a generate_rrss job was created for (older payloads only carry `accounts`). */
+function storedAccountIds(payload: any): string[] {
+  const ids = Array.isArray(payload?.accountIds) ? payload.accountIds : Array.isArray(payload?.accounts) ? payload.accounts.map((account: any) => account?.id) : [];
+  return ids.filter((id: unknown): id is string => typeof id === 'string');
+}
+
+function requireAccountIds(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.length || value.some((id) => typeof id !== 'string' || !id.trim() || id.length > 100)) {
+    throw new ContentApiError(400, 'INVALID_PAYLOAD', 'accountIds debe ser una lista no vacía de cuentas de redes sociales');
+  }
+  const ids = [...new Set((value as string[]).map((id) => id.trim()))];
+  if (ids.length > MAX_RRSS_ACCOUNTS) throw new ContentApiError(400, 'INVALID_PAYLOAD', `accountIds admite como máximo ${MAX_RRSS_ACCOUNTS} cuentas`);
+  return ids;
+}
+
+function socialPostFromRow(row: any) {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    planItemId: row.plan_item_id,
+    accountId: row.account_id,
+    ...(row.account_label !== undefined ? { accountLabel: row.account_label } : {}),
+    network: row.network,
+    copy: row.copy,
+    media: Array.isArray(row.media) ? row.media : [],
+    status: row.status,
+    publicationId: row.publication_id ?? null,
+    generationJobId: row.generation_job_id ?? null,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function revisionFromRow(row: any) {
   return {
@@ -111,22 +192,26 @@ export class EditorialApiRepository {
   constructor(private readonly pool: Pool = getEditorialPool()) {}
 
   async summary(filters: { clientId?: string; clientIds?: string[]; from?: string; to?: string }) {
-    const scoped = (clientColumn: string, dateColumn: string) => {
+    // RRSS ideas, their system content and their publications belong to the Redes Sociales tab, not to the blog summary.
+    const scoped = (clientColumn: string, dateColumn: string, base: string[] = []) => {
       const values: unknown[] = [];
-      const where: string[] = [];
+      const where: string[] = [...base];
       if (filters.clientId) { values.push(filters.clientId); where.push(`${clientColumn} = $${values.length}`); }
       else if (Array.isArray(filters.clientIds)) { values.push(filters.clientIds); where.push(`${clientColumn} = ANY($${values.length})`); }
       if (filters.from) { values.push(filters.from); where.push(`${dateColumn} >= $${values.length}`); }
       if (filters.to) { values.push(filters.to); where.push(`${dateColumn} < $${values.length}`); }
       return { values, sql: where.length ? ` WHERE ${where.join(' AND ')}` : '' };
     };
-    const plansFilter = scoped('p.client_id', 'p.planned_at');
-    const contentsFilter = scoped('ci.client_id', 'p.planned_at');
-    const publicationsFilter = scoped('pub.client_id', 'pub.desired_scheduled_at');
+    const plansFilter = scoped('p.client_id', 'p.planned_at', ["cal.kind='blog'"]);
+    const contentsFilter = scoped('ci.client_id', 'p.planned_at', ["(cal.kind IS NULL OR cal.kind='blog')"]);
+    const publicationsFilter = scoped('pub.client_id', 'pub.desired_scheduled_at', [`NOT EXISTS (SELECT 1 FROM editorial.contents rc
+      JOIN editorial.plan_items rp ON rp.client_id=rc.client_id AND rp.id=rc.plan_item_id
+      JOIN editorial.calendars rcal ON rcal.client_id=rp.client_id AND rcal.id=rp.calendar_id
+      WHERE rc.client_id=pub.client_id AND rc.id=pub.content_id AND rcal.kind='rrss')`]);
     const incidentsFilter = scoped('j.client_id', 'j.created_at');
     const [plans, contents, publications, incidents] = await Promise.all([
-      this.pool.query(`SELECT p.status, count(*)::int count FROM editorial.plan_items p${plansFilter.sql} GROUP BY p.status`, plansFilter.values),
-      this.pool.query(`SELECT ci.status, count(*)::int count FROM editorial.contents ci LEFT JOIN editorial.plan_items p ON p.client_id=ci.client_id AND p.id=ci.plan_item_id${contentsFilter.sql} GROUP BY ci.status`, contentsFilter.values),
+      this.pool.query(`SELECT p.status, count(*)::int count FROM editorial.plan_items p JOIN editorial.calendars cal ON cal.client_id=p.client_id AND cal.id=p.calendar_id${plansFilter.sql} GROUP BY p.status`, plansFilter.values),
+      this.pool.query(`SELECT ci.status, count(*)::int count FROM editorial.contents ci LEFT JOIN editorial.plan_items p ON p.client_id=ci.client_id AND p.id=ci.plan_item_id LEFT JOIN editorial.calendars cal ON cal.client_id=p.client_id AND cal.id=p.calendar_id${contentsFilter.sql} GROUP BY ci.status`, contentsFilter.values),
       this.pool.query(`SELECT pub.status, count(*)::int count FROM editorial.publications pub${publicationsFilter.sql} GROUP BY pub.status`, publicationsFilter.values),
       this.pool.query(`SELECT count(*)::int count FROM editorial.jobs j${incidentsFilter.sql}${incidentsFilter.sql ? ' AND' : ' WHERE'} j.status IN ('failed','unknown')`, incidentsFilter.values),
     ]);
@@ -134,9 +219,15 @@ export class EditorialApiRepository {
     return { planItems: counts(plans.rows), contents: counts(contents.rows), publications: counts(publications.rows), incidents: Number(incidents.rows[0]?.count ?? 0) };
   }
 
-  async calendar(filters: Filters) {
+  /** Blog plan items only: RRSS ideas are listed by listRrssItems. */
+  async calendar(filters: Filters) { return this.planItemPage(filters, 'blog'); }
+
+  /** RRSS ideas with a summary of their social post drafts. */
+  async listRrssItems(filters: Filters) { return this.planItemPage(filters, 'rrss'); }
+
+  private async planItemPage(filters: Filters, kind: CalendarKind) {
     const values: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = [kind === 'rrss' ? "c.kind = 'rrss'" : "c.kind = 'blog'"];
     if (filters.clientId) { values.push(filters.clientId); where.push(`p.client_id = $${values.length}`); }
     else if (Array.isArray(filters.clientIds)) { values.push(filters.clientIds); where.push(`p.client_id = ANY($${values.length})`); }
     if (filters.from) { values.push(filters.from); where.push(`${filters.includeUndated ? '(p.planned_at IS NULL OR ' : ''}p.planned_at >= $${values.length}${filters.includeUndated ? ')' : ''}`); }
@@ -146,15 +237,20 @@ export class EditorialApiRepository {
     if (filters.search) { values.push(`%${filters.search.replace(/[\\%_]/g, '\\$&')}%`); where.push(`(p.title ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.theme,'') ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.keyword_primary,'') ILIKE $${values.length} ESCAPE '\\')`); }
     if (filters.cursor) { values.push(filters.cursor.at, filters.cursor.id); where.push(`(p.created_at, p.id) > ($${values.length - 1}, $${values.length}::uuid)`); }
     values.push(filters.limit + 1);
-    const result = await this.pool.query(
-      `SELECT p.*, c.title calendar_title,
-        ci.id content_id, ci.status content_status, ci.title content_title, ci.version content_version,
+    const columns = kind === 'rrss'
+      ? `COALESCE((SELECT jsonb_agg(jsonb_build_object('id', sp.id, 'accountId', sp.account_id, 'network', sp.network, 'status', sp.status) ORDER BY sp.created_at, sp.id)
+          FROM editorial.social_posts sp WHERE sp.client_id = p.client_id AND sp.plan_item_id = p.id), '[]'::jsonb) social_posts`
+      : `ci.id content_id, ci.status content_status, ci.title content_title, ci.version content_version,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', pub.id, 'status', pub.status, 'desiredScheduledAt', pub.desired_scheduled_at, 'confirmedScheduledAt', pub.confirmed_scheduled_at))
           FROM editorial.contents content_for_publication JOIN editorial.publications pub ON pub.client_id = content_for_publication.client_id AND pub.content_id = content_for_publication.id
-          WHERE content_for_publication.client_id = p.client_id AND content_for_publication.plan_item_id = p.id), '[]'::jsonb) publications
+          WHERE content_for_publication.client_id = p.client_id AND content_for_publication.plan_item_id = p.id), '[]'::jsonb) publications`;
+    const lateral = kind === 'rrss' ? '' : `LEFT JOIN LATERAL (SELECT id, status, title, version FROM editorial.contents WHERE client_id = p.client_id AND plan_item_id = p.id ORDER BY updated_at DESC LIMIT 1) ci ON true`;
+    const result = await this.pool.query(
+      `SELECT p.*, c.title calendar_title,
+        ${columns}
        FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id = p.client_id AND c.id = p.calendar_id
-       LEFT JOIN LATERAL (SELECT id, status, title, version FROM editorial.contents WHERE client_id = p.client_id AND plan_item_id = p.id ORDER BY updated_at DESC LIMIT 1) ci ON true
-       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ${lateral}
+       WHERE ${where.join(' AND ')}
        ORDER BY p.created_at, p.id LIMIT $${values.length}`,
       values,
     );
@@ -165,7 +261,7 @@ export class EditorialApiRepository {
     const values: unknown[] = [clientId];
     const cursorSql = cursor ? (values.push(cursor.at, cursor.id), `AND (created_at, id) > ($2, $3::uuid)`) : '';
     values.push(limit + 1);
-    const result = await this.pool.query(`SELECT * FROM editorial.calendars WHERE client_id = $1 ${cursorSql} ORDER BY created_at, id LIMIT $${values.length}`, values);
+    const result = await this.pool.query(`SELECT * FROM editorial.calendars WHERE client_id = $1 AND kind = 'blog' ${cursorSql} ORDER BY created_at, id LIMIT $${values.length}`, values);
     return page(result.rows as any[], limit);
   }
 
@@ -187,7 +283,11 @@ export class EditorialApiRepository {
     return result.rows[0] ?? null;
   }
 
+  /** Blog plan items only: RRSS ideas are created with createRrssIdea or by a generate_rrss_plan result. */
   async createPlanItem(input: any, actorId: string | null) {
+    const calendar = await this.pool.query('SELECT kind FROM editorial.calendars WHERE client_id=$1 AND id=$2', [input.clientId, input.calendarId]);
+    if (!calendar.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Calendario editorial no encontrado');
+    if ((calendar.rows[0] as any).kind !== 'blog') throw new ContentApiError(409, 'INVALID_TARGET', 'El calendario no pertenece al blog');
     const id = randomUUID();
     const result = await this.pool.query(
       `INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,entities,cta,priority,planned_at,status,source_context,source_key)
@@ -208,8 +308,8 @@ export class EditorialApiRepository {
       const result = await client.query(
         `UPDATE editorial.plan_items SET title=COALESCE($2,title), theme=COALESCE($3,theme), rationale=COALESCE($4,rationale), format=COALESCE($5,format),
           keyword_primary=COALESCE($6,keyword_primary), keywords=COALESCE($7::jsonb,keywords), entities=COALESCE($8::jsonb,entities), cta=COALESCE($9,cta), priority=COALESCE($10,priority),
-          planned_at=CASE WHEN $11::boolean THEN $12::timestamptz ELSE planned_at END, status=COALESCE($13,status), version=version+1, updated_at=now() WHERE id=$1 RETURNING *`,
-        [id,input.title??null,input.theme??null,input.rationale??null,input.format??null,input.keywordPrimary??null,input.keywords===undefined?null:json(input.keywords),input.entities===undefined?null:json(input.entities),input.cta??null,input.priority??null,Object.hasOwn(input,'plannedAt'),input.plannedAt??null,input.status??null],
+          planned_at=CASE WHEN $11::boolean THEN $12::timestamptz ELSE planned_at END, status=COALESCE($13,status), networks=COALESCE($14::jsonb,networks), version=version+1, updated_at=now() WHERE id=$1 RETURNING *`,
+        [id,input.title??null,input.theme??null,input.rationale??null,input.format??null,input.keywordPrimary??null,input.keywords===undefined?null:json(input.keywords),input.entities===undefined?null:json(input.entities),input.cta??null,input.priority??null,Object.hasOwn(input,'plannedAt'),input.plannedAt??null,input.status??null,input.networks===undefined?null:json(input.networks)],
       );
       await this.auditWith(client,row.client_id,'plan_item',id,'plan_item.updated',actorId,input);
       return result.rows[0];
@@ -218,7 +318,7 @@ export class EditorialApiRepository {
 
   /**
    * Admin escape hatch for a plan item stuck in `generating` (job reported `unknown`, crashed or was
-   * orphaned). Every stale generate_content job for the item is frozen so a late n8n result can never
+   * orphaned). Every stale generate_content/generate_rrss job for the item is frozen so a late n8n result can never
    * be claimed or applied again; a live, leased execution must finish or expire first.
    */
   async releaseGeneration(id: string, expectedVersion: number, actorId: string) {
@@ -226,17 +326,17 @@ export class EditorialApiRepository {
       // Lock order matches claimJob (job rows, then plan item) so a concurrent claim cannot deadlock with this release.
       const owner = await client.query('SELECT client_id FROM editorial.plan_items WHERE id=$1', [id]);
       if (!owner.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
-      await client.query(`SELECT id FROM editorial.jobs WHERE client_id=$1 AND kind='generate_content' AND target_id=$2 FOR UPDATE`, [(owner.rows[0] as any).client_id, id]);
+      await client.query(`SELECT id FROM editorial.jobs WHERE client_id=$1 AND (kind='generate_content' OR kind='generate_rrss') AND target_id=$2 FOR UPDATE`, [(owner.rows[0] as any).client_id, id]);
       const current = await client.query('SELECT * FROM editorial.plan_items WHERE id=$1 FOR UPDATE', [id]);
       const row = current.rows[0] as any;
       if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
       if (row.version !== expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada por otra ejecución');
       if (row.status !== 'generating') throw new ContentApiError(409, 'INVALID_TRANSITION', 'Solo se puede marcar como fallida una propuesta en generación');
-      const live = await client.query(`SELECT id FROM editorial.jobs WHERE client_id=$1 AND kind='generate_content' AND target_id=$2 AND status='running' AND locked_until>now() FOR UPDATE`, [row.client_id, id]);
+      const live = await client.query(`SELECT id FROM editorial.jobs WHERE client_id=$1 AND (kind='generate_content' OR kind='generate_rrss') AND target_id=$2 AND status='running' AND locked_until>now() FOR UPDATE`, [row.client_id, id]);
       if (live.rows[0]) throw new ContentApiError(409, 'JOB_IN_PROGRESS', 'Hay una generación en curso; espera a que termine o caduque');
       const released = await client.query(
         `UPDATE editorial.jobs SET status='failed',attempt_count=GREATEST(attempt_count,8),lease_token=NULL,locked_until=NULL,last_error=$3,updated_at=now()
-         WHERE client_id=$1 AND kind='generate_content' AND target_id=$2 AND (status IN ('pending','failed','unknown') OR (status='running' AND (locked_until IS NULL OR locked_until<=now()))) RETURNING id`,
+         WHERE client_id=$1 AND (kind='generate_content' OR kind='generate_rrss') AND target_id=$2 AND (status IN ('pending','failed','unknown') OR (status='running' AND (locked_until IS NULL OR locked_until<=now()))) RETURNING id`,
         [row.client_id, id, 'Liberado manualmente por un administrador'],
       );
       assertPlanTransition(row.status, 'generation_failed');
@@ -335,40 +435,56 @@ export class EditorialApiRepository {
       if(content.status!=='approved' || !content.approved_revision_id) throw new ContentApiError(409,'REVISION_NOT_APPROVED','El contenido debe tener una revisión aprobada');
       const accountResult=await client.query("SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE AND provider='postiz' FOR SHARE",[input.clientId,input.accountId]);
       if(!accountResult.rows[0]) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','La cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
-      const existingJob=await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[input.clientId,input.idempotencyKey]);
-      if(existingJob.rows[0]){
-        const job=existingJob.rows[0] as any;
-        if(job.request_hash!==hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otra programación');
-        const publication=await client.query(`SELECT p.*,a.provider,a.platform,a.label account_label FROM editorial.publications p JOIN editorial.publishing_accounts a ON a.client_id=p.client_id AND a.id=p.account_id WHERE p.client_id=$1 AND p.id=$2`,[input.clientId,job.target_id]);
-        return {publication:publication.rows[0],job,replayed:true};
-      }
-      // A cancelled publication keeps its row (and its UNIQUE occurrence_key) for history, so
-      // rescheduling after a cancel moves to the next free "<key>-<n>" occurrence. Any other
-      // status in the chain (scheduled, failed, published...) still blocks the duplicate.
-      const occupied=await client.query('SELECT id,occurrence_key,status FROM editorial.publications WHERE content_id=$1 AND account_id=$2 FOR UPDATE',[input.contentId,input.accountId]);
-      const chain=(occupied.rows as any[]).filter((row)=>row.occurrence_key===occurrenceKey||new RegExp(`^${occurrenceKey.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}-\\d+$`).test(row.occurrence_key));
-      if(chain.some((row)=>row.status!=='cancelled')) throw new ContentApiError(409,'PUBLICATION_EXISTS','Ya existe una publicación para esa cuenta y ocurrencia');
-      const usedKeys=new Set(chain.map((row)=>row.occurrence_key));
-      let slotKey=occurrenceKey;
-      for(let n=2;usedKeys.has(slotKey);n++) slotKey=`${occurrenceKey}-${n}`;
+      const replay=await this.replayPublicationJob(client,input.clientId,input.idempotencyKey,hash);
+      if(replay) return {...replay,replayed:true};
       const headerImageUrl=(content.seo && typeof content.seo==='object')?(content.seo as any).headerImageUrl??null:null;
       const media=(Array.isArray(input.media)&&input.media.length)?input.media:(headerImageUrl?[{url:headerImageUrl}]:[]);
-      const publicationId=randomUUID();
-      const publicationResult=await client.query(
-        `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at,external_url)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9,$10) RETURNING *`,
-        [publicationId,input.clientId,input.contentId,input.accountId,slotKey,content.approved_revision_id,input.copy??null,json(media),input.desiredScheduledAt,input.externalUrl??null],
-      );
-      const jobId=randomUUID();
-      const jobResult=await client.query(
-        `INSERT INTO editorial.jobs(id,client_id,kind,target_id,idempotency_key,request_hash,payload)
-         VALUES($1,$2,'publish',$3,$4,$5,$6::jsonb) RETURNING *`,
-        [jobId,input.clientId,publicationId,input.idempotencyKey,hash,json(this.publicationPayload(publicationResult.rows[0],accountResult.rows[0]))],
-      );
-      await this.auditWith(client,input.clientId,'publication',publicationId,'publication.queued',actorId,{accountId:input.accountId,desiredScheduledAt:input.desiredScheduledAt,jobId});
-      const account=accountResult.rows[0] as any;
-      return {publication:{...publicationResult.rows[0],provider:account.provider,platform:account.platform,account_label:account.label},job:jobResult.rows[0],replayed:false};
+      const queued=await this.queuePublication(client,{clientId:input.clientId,contentId:input.contentId,contentRevisionId:content.approved_revision_id,account:accountResult.rows[0],occurrenceKey,desiredScheduledAt:input.desiredScheduledAt,externalUrl:input.externalUrl??null,copy:input.copy??null,media,idempotencyKey:input.idempotencyKey,hash},actorId);
+      return {...queued,replayed:false};
     },this.pool);
+  }
+
+  /** The publication and job already queued under this idempotency key, or null when the key is new. */
+  private async replayPublicationJob(client: PoolClient, clientId: string, idempotencyKey: string, hash: string) {
+    const existingJob=await client.query('SELECT * FROM editorial.jobs WHERE client_id=$1 AND idempotency_key=$2 FOR UPDATE',[clientId,idempotencyKey]);
+    const job=existingJob.rows[0] as any;
+    if(!job) return null;
+    if(job.request_hash!==hash) throw new ContentApiError(409,'IDEMPOTENCY_CONFLICT','La clave de idempotencia ya se usó con otra programación');
+    const publication=await client.query(`SELECT p.*,a.provider,a.platform,a.label account_label FROM editorial.publications p JOIN editorial.publishing_accounts a ON a.client_id=p.client_id AND a.id=p.account_id WHERE p.client_id=$1 AND p.id=$2`,[clientId,job.target_id]);
+    return {publication:publication.rows[0],job};
+  }
+
+  /**
+   * Inserts a pending publication plus its publish job (payload built from the database). Shared by
+   * blog and RRSS scheduling; the caller holds the idempotency and publication-slot advisory locks
+   * and has already checked the approved revision and the Postiz account.
+   */
+  private async queuePublication(client: PoolClient, input: { clientId: string; contentId: string; contentRevisionId: string; account: any; occurrenceKey: string; desiredScheduledAt: string; externalUrl: string | null; copy: string | null; media: unknown[]; idempotencyKey: string; hash: string }, actorId: string) {
+    const account=input.account;
+    const occurrenceKey=input.occurrenceKey;
+    // A cancelled publication keeps its row (and its UNIQUE occurrence_key) for history, so
+    // rescheduling after a cancel moves to the next free "<key>-<n>" occurrence. Any other
+    // status in the chain (scheduled, failed, published...) still blocks the duplicate.
+    const occupied=await client.query('SELECT id,occurrence_key,status FROM editorial.publications WHERE content_id=$1 AND account_id=$2 FOR UPDATE',[input.contentId,account.id]);
+    const chain=(occupied.rows as any[]).filter((row)=>row.occurrence_key===occurrenceKey||new RegExp(`^${occurrenceKey.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}-\\d+$`).test(row.occurrence_key));
+    if(chain.some((row)=>row.status!=='cancelled')) throw new ContentApiError(409,'PUBLICATION_EXISTS','Ya existe una publicación para esa cuenta y ocurrencia');
+    const usedKeys=new Set(chain.map((row)=>row.occurrence_key));
+    let slotKey=occurrenceKey;
+    for(let n=2;usedKeys.has(slotKey);n++) slotKey=`${occurrenceKey}-${n}`;
+    const publicationId=randomUUID();
+    const publicationResult=await client.query(
+      `INSERT INTO editorial.publications(id,client_id,content_id,account_id,occurrence_key,content_revision_id,copy,media,status,desired_scheduled_at,external_url)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pending',$9,$10) RETURNING *`,
+      [publicationId,input.clientId,input.contentId,account.id,slotKey,input.contentRevisionId,input.copy,json(input.media),input.desiredScheduledAt,input.externalUrl],
+    );
+    const jobId=randomUUID();
+    const jobResult=await client.query(
+      `INSERT INTO editorial.jobs(id,client_id,kind,target_id,idempotency_key,request_hash,payload)
+       VALUES($1,$2,'publish',$3,$4,$5,$6::jsonb) RETURNING *`,
+      [jobId,input.clientId,publicationId,input.idempotencyKey,input.hash,json(this.publicationPayload(publicationResult.rows[0],account))],
+    );
+    await this.auditWith(client,input.clientId,'publication',publicationId,'publication.queued',actorId,{accountId:account.id,desiredScheduledAt:input.desiredScheduledAt,jobId});
+    return {publication:{...publicationResult.rows[0],provider:account.provider,platform:account.platform,account_label:account.label},job:jobResult.rows[0]};
   }
 
   async createJob(input: any, actorId: string | null) {
@@ -436,6 +552,162 @@ export class EditorialApiRepository {
     return inputs;
   }
 
+  /** The RRSS plan workflow inputs, read from editorial_config.rrss. */
+  async getRrssPlanInputs(clientId: string): Promise<StoredRrssPlanInputs> {
+    const result = await this.pool.query('SELECT editorial_config FROM editorial.client_settings WHERE client_id=$1', [clientId]);
+    if (!result.rows[0]) throw new ContentApiError(409, 'EDITORIAL_DISABLED', EDITORIAL_DISABLED_MESSAGE);
+    return storedRrssPlanInputs((result.rows[0] as any).editorial_config?.rrss);
+  }
+
+  /** Validates the RRSS plan inputs and merges them into editorial_config.rrss, preserving every other key. */
+  async saveRrssPlanInputs(clientId: string, input: { topic?: unknown; keywords?: unknown; networks?: unknown; postsPerWeek?: unknown; weeksHorizon?: unknown }): Promise<RrssPlanInputs> {
+    const inputs = normalizeRrssPlanInputs(input);
+    const result = await this.pool.query(
+      `UPDATE editorial.client_settings SET editorial_config=jsonb_set(COALESCE(editorial_config,'{}'::jsonb),'{rrss}',CASE WHEN jsonb_typeof(editorial_config->'rrss')='object' THEN editorial_config->'rrss' ELSE '{}'::jsonb END || $2::jsonb,true), updated_at=now() WHERE client_id=$1 RETURNING client_id`,
+      [clientId, json(inputs)],
+    );
+    if (!result.rows[0]) throw new ContentApiError(409, 'EDITORIAL_DISABLED', EDITORIAL_DISABLED_MESSAGE);
+    return inputs;
+  }
+
+  /** A manual RRSS idea, kept in the client's "Ideas sueltas" RRSS calendar (created on first use). */
+  async createRrssIdea(input: { clientId: string; title: string; theme?: string | null; rationale?: string | null; format?: string | null; networks?: string[]; cta?: string | null; plannedAt?: string; keywords?: string[]; keywordPrimary?: string | null }, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`rrss-ideas-calendar:${input.clientId}`]);
+      const existing = await client.query(`SELECT id FROM editorial.calendars WHERE client_id=$1 AND kind='rrss' AND title=$2 ORDER BY created_at,id LIMIT 1`, [input.clientId, RRSS_IDEAS_CALENDAR_TITLE]);
+      let calendarId = (existing.rows[0] as any)?.id as string | undefined;
+      if (!calendarId) {
+        calendarId = randomUUID();
+        await client.query(`INSERT INTO editorial.calendars (id,client_id,title,status,kind,created_by) VALUES ($1,$2,$3,'active','rrss',$4)`, [calendarId, input.clientId, RRSS_IDEAS_CALENDAR_TITLE, actorId]);
+        await this.auditWith(client, input.clientId, 'calendar', calendarId, 'calendar.created', actorId, { kind: 'rrss', title: RRSS_IDEAS_CALENDAR_TITLE });
+      }
+      const id = randomUUID();
+      const result = await client.query(
+        `INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,cta,planned_at,networks,status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::jsonb,'proposed') RETURNING *`,
+        [id, input.clientId, calendarId, input.title, input.theme ?? null, input.rationale ?? null, input.format ?? null, input.keywordPrimary ?? null, json(input.keywords ?? []), input.cta ?? null, input.plannedAt ?? null, json(input.networks ?? [])],
+      );
+      await this.auditWith(client, input.clientId, 'plan_item', id, 'plan_item.created', actorId, { kind: 'rrss', calendarId, title: input.title });
+      return result.rows[0];
+    }, this.pool);
+  }
+
+  async getSocialPost(id: string) {
+    const result = await this.pool.query('SELECT * FROM editorial.social_posts WHERE id=$1', [id]);
+    return result.rows[0] ? socialPostFromRow(result.rows[0]) : null;
+  }
+
+  async listSocialPosts(planItemId: string) {
+    const result = await this.pool.query(
+      `SELECT sp.*,a.label account_label FROM editorial.social_posts sp JOIN editorial.publishing_accounts a ON a.client_id=sp.client_id AND a.id=sp.account_id
+       WHERE sp.plan_item_id=$1 ORDER BY sp.created_at,sp.id`, [planItemId],
+    );
+    return result.rows.map(socialPostFromRow);
+  }
+
+  /** Editing a draft (copy and/or media) always leaves it in review, so an approved post must be approved again. */
+  async patchSocialPost(id: string, input: { copy?: string; media?: Array<{ url: string }>; expectedVersion: number }, actorId: string) {
+    if (input.copy === undefined && input.media === undefined) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Indica copy o media');
+    return withEditorialTransaction(async (client) => {
+      const row = await this.lockSocialPost(client, id, input.expectedVersion);
+      assertSocialPostTransition(row.status as SocialPostStatus, 'review');
+      const result = await client.query(
+        `UPDATE editorial.social_posts SET copy=COALESCE($2,copy),media=COALESCE($3::jsonb,media),status='review',version=version+1,updated_at=now() WHERE id=$1 RETURNING *`,
+        [id, input.copy ?? null, input.media === undefined ? null : json(input.media)],
+      );
+      await this.auditWith(client, row.client_id, 'social_post', id, 'social_post.updated', actorId, { previousStatus: row.status, previousVersion: row.version });
+      return socialPostFromRow(result.rows[0]);
+    }, this.pool);
+  }
+
+  async approveSocialPost(id: string, expectedVersion: number | undefined, actorId: string) { return this.setSocialPostStatus(id, 'approved', expectedVersion, actorId); }
+
+  async discardSocialPost(id: string, expectedVersion: number | undefined, actorId: string) { return this.setSocialPostStatus(id, 'discarded', expectedVersion, actorId); }
+
+  private async setSocialPostStatus(id: string, status: SocialPostStatus, expectedVersion: number | undefined, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      const row = await this.lockSocialPost(client, id, expectedVersion);
+      if (row.status === status) throw new ContentApiError(409, 'INVALID_TRANSITION', `El post ya está en estado ${status}`);
+      assertSocialPostTransition(row.status as SocialPostStatus, status);
+      const result = await client.query('UPDATE editorial.social_posts SET status=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *', [id, status]);
+      await this.auditWith(client, row.client_id, 'social_post', id, `social_post.${status}`, actorId, { previousStatus: row.status, previousVersion: row.version });
+      return socialPostFromRow(result.rows[0]);
+    }, this.pool);
+  }
+
+  private async lockSocialPost(client: PoolClient, id: string, expectedVersion: number | undefined) {
+    const locked = await client.query('SELECT * FROM editorial.social_posts WHERE id=$1 FOR UPDATE', [id]);
+    const row = locked.rows[0] as any;
+    if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Post no encontrado');
+    if (expectedVersion !== undefined && row.version !== expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'El post fue modificado por otra ejecución');
+    return row;
+  }
+
+  /**
+   * Schedules an approved draft through the normal publish pipeline: the idea gets one approved
+   * system content (shared by all its posts), and this post becomes a pending publication with its
+   * own copy and media plus a publish job, exactly like a blog publication.
+   */
+  async scheduleSocialPost(id: string, input: { clientId: string; desiredScheduledAt: string; externalUrl?: string | null; expectedVersion: number; idempotencyKey: string }, actorId: string) {
+    const hash = requestHash({ kind: 'publish', socialPostId: id, desiredScheduledAt: input.desiredScheduledAt, externalUrl: input.externalUrl ?? null, expectedVersion: input.expectedVersion });
+    return withEditorialTransaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`job:${input.clientId}:${input.idempotencyKey}`]);
+      await this.requireEnabledClient(client, input.clientId, 'publish');
+      const replay = await this.replayPublicationJob(client, input.clientId, input.idempotencyKey, hash);
+      if (replay) {
+        const post = await client.query('SELECT * FROM editorial.social_posts WHERE client_id=$1 AND publication_id=$2', [input.clientId, (replay.job as any).target_id]);
+        return { socialPost: post.rows[0] ? socialPostFromRow(post.rows[0]) : null, ...replay, replayed: true };
+      }
+      const owner = await client.query('SELECT plan_item_id FROM editorial.social_posts WHERE client_id=$1 AND id=$2', [input.clientId, id]);
+      if (!owner.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Post no encontrado');
+      // Plan item before post: the same lock order as a generate_rrss result, so the two cannot deadlock.
+      const planResult = await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR SHARE', [input.clientId, (owner.rows[0] as any).plan_item_id]);
+      const plan = planResult.rows[0] as any;
+      if (!plan) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      const locked = await client.query('SELECT * FROM editorial.social_posts WHERE client_id=$1 AND id=$2 FOR UPDATE', [input.clientId, id]);
+      const post = locked.rows[0] as any;
+      if (!post) throw new ContentApiError(404, 'NOT_FOUND', 'Post no encontrado');
+      if (post.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'El post fue modificado antes de programarse');
+      if (post.status !== 'approved') throw new ContentApiError(409, 'INVALID_TRANSITION', 'Solo se pueden programar posts aprobados');
+      const content = await this.ensureRrssContent(client, input.clientId, plan, post, actorId);
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`publication:${content.id}:${post.account_id}:primary`]);
+      const accountResult = await client.query("SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE AND provider='postiz' FOR SHARE", [input.clientId, post.account_id]);
+      if (!accountResult.rows[0]) throw new ContentApiError(409, 'ACCOUNT_NOT_AVAILABLE', 'La cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
+      const queued = await this.queuePublication(client, { clientId: input.clientId, contentId: content.id, contentRevisionId: content.approved_revision_id, account: accountResult.rows[0], occurrenceKey: 'primary', desiredScheduledAt: input.desiredScheduledAt, externalUrl: input.externalUrl ?? null, copy: post.copy, media: Array.isArray(post.media) ? post.media : [], idempotencyKey: input.idempotencyKey, hash }, actorId);
+      assertSocialPostTransition(post.status, 'scheduled');
+      const publicationId = (queued.publication as any).id;
+      const updated = await client.query(`UPDATE editorial.social_posts SET status='scheduled',publication_id=$3,version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2 RETURNING *`, [input.clientId, id, publicationId]);
+      await this.auditWith(client, input.clientId, 'social_post', id, 'social_post.scheduled', actorId, { publicationId, jobId: (queued.job as any).id, desiredScheduledAt: input.desiredScheduledAt });
+      return { socialPost: socialPostFromRow(updated.rows[0]), ...queued, replayed: false };
+    }, this.pool);
+  }
+
+  /** The approved system content every publication of an RRSS idea points at, created on the first schedule. */
+  private async ensureRrssContent(client: PoolClient, clientId: string, plan: any, post: any, actorId: string) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`rrss-content:${clientId}:${plan.id}`]);
+    const current = await client.query('SELECT * FROM editorial.contents WHERE client_id=$1 AND plan_item_id=$2 FOR UPDATE', [clientId, plan.id]);
+    const existing = current.rows[0] as any;
+    if (existing) {
+      if (existing.status !== 'approved' || !existing.approved_revision_id) throw new ContentApiError(409, 'REVISION_NOT_APPROVED', 'El contenido de la idea no tiene una revisión aprobada');
+      return existing;
+    }
+    const contentId = randomUUID();
+    const revisionId = randomUUID();
+    const bodyText = typeof plan.rationale === 'string' && plan.rationale.trim() ? plan.rationale : post.copy;
+    const seo = { source: 'rrss' };
+    await client.query(
+      `INSERT INTO editorial.contents (id,client_id,plan_item_id,title,body_text,seo,status,current_revision) VALUES ($1,$2,$3,$4,$5,$6::jsonb,'approved',1)`,
+      [contentId, clientId, plan.id, plan.title, bodyText, json(seo)],
+    );
+    await client.query(
+      `INSERT INTO editorial.content_revisions (id,client_id,content_id,revision_number,content_snapshot,source_references,author_type,author_id) VALUES ($1,$2,$3,1,$4::jsonb,'[]'::jsonb,'system',NULL)`,
+      [revisionId, clientId, contentId, json({ title: plan.title, bodyText, seo })],
+    );
+    const approved = await client.query(`UPDATE editorial.contents SET approved_revision_id=$3,version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2 RETURNING *`, [clientId, contentId, revisionId]);
+    await this.auditWith(client, clientId, 'content', contentId, 'content.created_for_rrss', actorId, { planItemId: plan.id, revisionId });
+    return approved.rows[0] as any;
+  }
+
   private isPublicationJob(kind: string) { return ['publish', 'reschedule', 'cancel', 'reconcile'].includes(kind); }
 
   /**
@@ -443,11 +715,12 @@ export class EditorialApiRepository {
    * otherwise queue two jobs. Active = pending, leased, or failed/expired but still auto-retried by claimJob.
    */
   private async refuseActiveDuplicate(client: PoolClient, input: any) {
-    if (input.kind !== 'generate_plan' && !input.targetId) return;
+    const planKind = PLAN_JOB_KINDS.includes(input.kind);
+    if (!planKind && !input.targetId) return;
     const active = await client.query(
       `SELECT id AS active_job FROM editorial.jobs WHERE client_id=$1 AND kind=$2 AND ($3::uuid IS NULL OR target_id=$3::uuid)
         AND (status='pending' OR (status='running' AND (locked_until>now() OR ($4::boolean AND attempt_count<8))) OR (status='failed' AND $4::boolean AND attempt_count<8)) LIMIT 1`,
-      [input.clientId, input.kind, input.kind === 'generate_plan' ? null : input.targetId, AUTO_RETRY_KINDS.includes(input.kind)],
+      [input.clientId, input.kind, planKind ? null : input.targetId, AUTO_RETRY_KINDS.includes(input.kind)],
     );
     if (active.rows[0]) throw new ContentApiError(409, 'JOB_IN_PROGRESS', 'Ya hay un trabajo igual en curso');
   }
@@ -458,30 +731,54 @@ export class EditorialApiRepository {
    * workflow contract.
    */
   private async prepareJobTarget(client: PoolClient, input: any, actorId: string | null) {
-    if (input.kind !== 'generate_plan') return;
-    const supplied = input.payload?.calendar ?? input.payload?.editorialCalendar ?? {};
+    if (!PLAN_JOB_KINDS.includes(input.kind)) return;
+    const calendarKind: CalendarKind = input.kind === 'generate_rrss_plan' ? 'rrss' : 'blog';
+    // An RRSS plan payload is built only from the database; the blog plan keeps its calendar hints from the UI.
+    const supplied = calendarKind === 'blog' ? (input.payload?.calendar ?? input.payload?.editorialCalendar ?? {}) : {};
     const suppliedStart = dateOnly(supplied.startDate ?? supplied.start_date);
+    let config: any;
+    const editorialConfig = async () => {
+      if (config === undefined) {
+        const settings = await client.query('SELECT editorial_config FROM editorial.client_settings WHERE client_id=$1', [input.clientId]);
+        config = (settings.rows[0] as any)?.editorial_config ?? {};
+      }
+      return config;
+    };
     let periodStart: string;
     if (input.targetId) {
-      const calendar = await client.query('SELECT id,start_date FROM editorial.calendars WHERE client_id=$1 AND id=$2 FOR SHARE', [input.clientId, input.targetId]);
-      if (!calendar.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Calendario editorial no encontrado');
-      periodStart = suppliedStart ?? dateOnly((calendar.rows[0] as any).start_date) ?? nextMonday();
+      const calendar = await client.query('SELECT id,start_date,kind FROM editorial.calendars WHERE client_id=$1 AND id=$2 FOR SHARE', [input.clientId, input.targetId]);
+      const row = calendar.rows[0] as any;
+      if (!row) throw new ContentApiError(404, 'NOT_FOUND', 'Calendario editorial no encontrado');
+      if ((row.kind ?? 'blog') !== calendarKind) throw new ContentApiError(409, 'INVALID_TARGET', calendarKind === 'rrss' ? 'El calendario no es un plan de redes sociales' : 'El calendario no pertenece al blog');
+      periodStart = suppliedStart ?? dateOnly(row.start_date) ?? nextMonday();
     } else {
       // The plan workflow dates each proposal from periodStart (week N, weekday), so a new calendar always has one.
-      const settings = await client.query('SELECT editorial_config FROM editorial.client_settings WHERE client_id=$1', [input.clientId]);
-      const config = (settings.rows[0] as any)?.editorial_config ?? {};
-      const horizon = Number(config.weeksHorizon ?? config.weeks_horizon);
-      const weeks = Number.isInteger(horizon) && horizon > 0 ? Math.min(horizon, 52) : 4;
+      const stored = await editorialConfig();
+      let weeks: number;
+      if (calendarKind === 'rrss') weeks = storedRrssPlanInputs(stored.rrss).weeksHorizon;
+      else {
+        const horizon = Number(stored.weeksHorizon ?? stored.weeks_horizon);
+        weeks = Number.isInteger(horizon) && horizon > 0 ? Math.min(horizon, 52) : 4;
+      }
       periodStart = suppliedStart ?? nextMonday();
       input.targetId = randomUUID();
+      const today = new Date().toISOString().slice(0, 10);
       await client.query(
-        `INSERT INTO editorial.calendars (id,client_id,title,start_date,end_date,status,summary,insights,created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
-        [input.targetId, input.clientId, supplied.title ?? `Calendario editorial ${new Date().toISOString().slice(0, 10)}`,
+        `INSERT INTO editorial.calendars (id,client_id,title,start_date,end_date,status,summary,insights,created_by,kind)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`,
+        [input.targetId, input.clientId, calendarKind === 'rrss' ? `Plan de redes ${today}` : (supplied.title ?? `Calendario editorial ${today}`),
           periodStart, dateOnly(supplied.endDate ?? supplied.end_date) ?? addDays(periodStart, weeks * 7 - 1),
-          supplied.status ?? 'draft', supplied.summary ?? null, json(supplied.insights ?? {}), actorId],
+          supplied.status ?? 'draft', supplied.summary ?? null, json(supplied.insights ?? {}), actorId, calendarKind],
       );
       await this.auditWith(client, input.clientId, 'calendar', input.targetId, 'calendar.created_for_generation', actorId, { jobKind: input.kind });
+    }
+    if (calendarKind === 'rrss') {
+      input.payload = {
+        schemaVersion: 1, periodStart, calendarId: input.targetId, calendar_id: input.targetId,
+        calendar: { id: input.targetId, calendarId: input.targetId, calendar_id: input.targetId },
+        rrss: storedRrssPlanInputs((await editorialConfig()).rrss),
+      };
+      return;
     }
     input.payload = {
       ...(input.payload ?? {}), schemaVersion: 1, periodStart, calendarId: input.targetId, calendar_id: input.targetId,
@@ -540,12 +837,59 @@ export class EditorialApiRepository {
     return this.planItemPayload(result.rows[0]);
   }
 
+  /** Active Postiz accounts of the client among `accountIds`, in the requested order; unknown or inactive ids are left out. */
+  private async rrssAccounts(client: PoolClient, clientId: string, accountIds: string[]) {
+    const result = await client.query(
+      `SELECT id,instance_key,external_account_id,label FROM editorial.publishing_accounts WHERE client_id=$1 AND id::text=ANY($2::text[]) AND active=TRUE AND provider='postiz' FOR SHARE`,
+      [clientId, accountIds],
+    );
+    const byId = new Map((result.rows as any[]).map((row) => [String(row.id), row]));
+    return accountIds.map((id) => byId.get(id)).filter(Boolean) as any[];
+  }
+
+  /** generate_rrss brief: the idea (with its target networks) and the selected accounts, each with the network its copy must fit. */
+  private rrssPayload(row: any, accounts: any[], accountIds: string[]) {
+    return {
+      schemaVersion: 1,
+      planItem: { ...this.planItemPayload(row).planItem, networks: Array.isArray(row.networks) ? row.networks : [] },
+      accountIds,
+      accounts: accounts.map((account) => ({ id: account.id, instanceKey: account.instance_key, network: networkFromInstanceKey(account.instance_key), label: account.label, externalAccountId: account.external_account_id ?? null })),
+    };
+  }
+
+  private async rrssPayloadForJob(client: PoolClient, clientId: string, planItemId: string, accountIds: string[]) {
+    const result = await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2', [clientId, planItemId]);
+    if (!result.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+    return this.rrssPayload(result.rows[0], await this.rrssAccounts(client, clientId, accountIds), accountIds);
+  }
+
   private async validateJobTarget(client: PoolClient, input: any) {
+    if (input.kind === 'generate_rrss') {
+      if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', 'generate_rrss requiere targetId y expectedVersion');
+      const accountIds = requireAccountIds(input.payload?.accountIds);
+      const result = await client.query(
+        `SELECT p.*,c.kind calendar_kind FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id=p.client_id AND c.id=p.calendar_id
+         WHERE p.client_id=$1 AND p.id=$2 FOR UPDATE OF p`, [input.clientId, input.targetId],
+      );
+      const item = result.rows[0] as any;
+      if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      if (item.calendar_kind !== 'rrss') throw new ContentApiError(409, 'INVALID_TARGET', 'Solo se pueden generar posts para ideas de redes sociales');
+      if (item.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La idea fue modificada antes de solicitar la generación');
+      if (item.status === 'generating') throw new ContentApiError(409, 'GENERATION_RELEASE_REQUIRED', 'La generación anterior sigue sin confirmar; usa «Marcar como fallida» antes de generar otros posts');
+      assertPlanTransition(item.status, 'generating');
+      const accounts = await this.rrssAccounts(client, input.clientId, accountIds);
+      if (accounts.length !== accountIds.length) throw new ContentApiError(409, 'ACCOUNT_NOT_AVAILABLE', 'Alguna cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
+      await client.query(`UPDATE editorial.plan_items SET status='generating',version=version+1,updated_at=now() WHERE id=$1`, [input.targetId]);
+      input.payload = this.rrssPayload(item, accounts, accountIds);
+      return;
+    }
     if (input.kind === 'generate_content') {
       if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', 'generate_content requiere targetId y expectedVersion');
       const result = await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE', [input.clientId, input.targetId]);
       const item = result.rows[0] as any;
       if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      const calendar = await client.query('SELECT kind FROM editorial.calendars WHERE client_id=$1 AND id=$2', [input.clientId, item.calendar_id]);
+      if ((calendar.rows[0] as any)?.kind === 'rrss') throw new ContentApiError(409, 'INVALID_TARGET', 'Las ideas de redes sociales se generan como posts, no como artículos');
       if (item.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'La propuesta fue modificada antes de solicitar la generación');
       if (item.status === 'generating') throw new ContentApiError(409, 'GENERATION_RELEASE_REQUIRED', 'La generación anterior sigue sin confirmar; revisa WordPress y usa «Marcar como fallida» antes de generar otro borrador');
       assertPlanTransition(item.status, 'generating');
@@ -607,7 +951,7 @@ export class EditorialApiRepository {
       const result = await client.query('SELECT * FROM editorial.jobs WHERE id=$1 FOR UPDATE', [id]);
       const job = result.rows[0] as any;
       if (!job) throw new ContentApiError(404, 'NOT_FOUND', 'Trabajo no encontrado');
-      if (job.kind !== 'generate_plan') throw new ContentApiError(409, 'RECOVERY_REQUIRES_RECONCILIATION', 'Solo se puede reintentar aquí la generación de planes');
+      if (!PLAN_JOB_KINDS.includes(job.kind)) throw new ContentApiError(409, 'RECOVERY_REQUIRES_RECONCILIATION', 'Solo se puede reintentar aquí la generación de planes');
       const exhausted = Number(job.attempt_count) >= 8 && (job.status === 'failed' || (job.status === 'running' && job.locked_until && new Date(job.locked_until).getTime() <= Date.now()));
       if (!exhausted) throw new ContentApiError(409, 'JOB_NOT_EXHAUSTED', 'El trabajo aún no ha agotado los reintentos');
       await this.requireEnabledClient(client, job.client_id, job.kind);
@@ -626,7 +970,7 @@ export class EditorialApiRepository {
         ORDER BY j.next_attempt_at,j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`,values);
       if(!selected.rows[0]) return null;
       const selectedJob=selected.rows[0] as any;
-      if(selectedJob.kind==='generate_content' && selectedJob.target_id){
+      if(GENERATION_JOB_KINDS.includes(selectedJob.kind) && selectedJob.target_id){
         const plan=await client.query('SELECT status FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[selectedJob.client_id,selectedJob.target_id]);
         const currentStatus=(plan.rows[0] as any)?.status;
         if(currentStatus && currentStatus!=='generating'){
@@ -656,6 +1000,11 @@ export class EditorialApiRepository {
         selectedJob.payload = payload;
         await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
       }
+      if(selectedJob.kind==='generate_rrss' && selectedJob.target_id) {
+        const payload = await this.rrssPayloadForJob(client, selectedJob.client_id, selectedJob.target_id, storedAccountIds(selectedJob.payload));
+        selectedJob.payload = payload;
+        await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
+      }
       const leaseToken=randomUUID();
       const result=await client.query(`UPDATE editorial.jobs SET status='running',attempt_count=attempt_count+1,lease_token=$2,locked_until=now()+make_interval(secs=>$3),execution_id=$4,updated_at=now() WHERE id=$1 RETURNING *`,[selectedJob.id,leaseToken,input.leaseSeconds,input.executionId]);
       return {...result.rows[0],leaseToken};
@@ -680,14 +1029,16 @@ export class EditorialApiRepository {
         return {job,replayed:true};
       }
       if(job.status!=='running' || job.lease_token!==leaseToken || new Date(job.locked_until).getTime()<=Date.now()) throw new ContentApiError(409,'LEASE_LOST','La reserva caducó o pertenece a otra ejecución');
-      if(input.status==='succeeded' && job.kind==='generate_plan' && !Array.isArray(input.planItems)) throw new ContentApiError(400,'INVALID_RESULT','generate_plan requiere planItems');
+      if(input.status==='succeeded' && PLAN_JOB_KINDS.includes(job.kind) && !Array.isArray(input.planItems)) throw new ContentApiError(400,'INVALID_RESULT',`${job.kind} requiere planItems`);
+      if(input.status==='succeeded' && job.kind==='generate_rrss' && (!Array.isArray(input.socialPosts) || !input.socialPosts.length)) throw new ContentApiError(400,'INVALID_RESULT','generate_rrss requiere socialPosts');
       if(input.status==='succeeded' && job.kind==='generate_content' && !input.content) throw new ContentApiError(400,'INVALID_RESULT','generate_content requiere content');
       if(input.status==='succeeded' && ['publish','reschedule','cancel','reconcile'].includes(job.kind) && !input.publication) throw new ContentApiError(400,'INVALID_RESULT',`${job.kind} requiere publication`);
       if(input.planItems) await this.applyPlanResult(client,job,input.planItems);
       if(input.content) await this.applyContentResult(client,job,input.content,serviceId);
       if(input.publication) await this.applyPublicationResult(client,job,input.publication);
+      const socialPosts=input.socialPosts && input.status==='succeeded' ? await this.applySocialPostsResult(client,job,input.socialPosts,serviceId) : null;
       const status=input.status==='succeeded'?'succeeded':input.status==='unknown'?'unknown':'failed';
-      if(status==='failed' && job.kind==='generate_content') {
+      if(status==='failed' && GENERATION_JOB_KINDS.includes(job.kind)) {
         const plan=await client.query('SELECT status FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
         if((plan.rows[0] as any)?.status==='generating') await client.query(`UPDATE editorial.plan_items SET status='generation_failed',version=version+1,updated_at=now() WHERE id=$1`,[job.target_id]);
       }
@@ -703,7 +1054,8 @@ export class EditorialApiRepository {
           }
         }
       }
-      const safeResult=redactSecrets(input.result??{});
+      const reported=input.result && typeof input.result==='object' && !Array.isArray(input.result) ? input.result : {};
+      const safeResult=redactSecrets(socialPosts ? {...reported,socialPosts} : (input.result??{}));
       const safeError=sanitizeError(input.error);
       const result=await client.query(`UPDATE editorial.jobs SET status=$2,result=$3::jsonb,result_hash=$4,last_error=$5,lease_token=NULL,locked_until=NULL,
         next_attempt_at=CASE WHEN $2='failed' THEN now()+make_interval(secs=>LEAST(3600,(30*power(2,LEAST(attempt_count,7)))::int)) ELSE next_attempt_at END,
@@ -714,13 +1066,19 @@ export class EditorialApiRepository {
   }
 
   private async applyPlanResult(client:PoolClient,job:any,items:any[]){
-    if(job.kind!=='generate_plan') throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de plan no corresponde al trabajo');
-    for(const item of items){
+    if(!PLAN_JOB_KINDS.includes(job.kind)) throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de plan no corresponde al trabajo');
+    // RRSS ideas carry their target networks and a social format; the whole plan is validated before any write.
+    const networks=items.map((item,index)=>{
+      if(job.kind!=='generate_rrss_plan') return [];
+      if(item?.format!=null && !(RRSS_FORMATS as readonly string[]).includes(item.format)) throw new ContentApiError(400,'INVALID_RESULT',`planItems[${index}].format debe ser uno de: ${RRSS_FORMATS.join(', ')}`);
+      return item?.networks==null ? [] : normalizeRrssNetworks(item.networks,`planItems[${index}].networks`,'INVALID_RESULT');
+    });
+    for(const [index,item] of items.entries()){
       if (!job.target_id) throw new ContentApiError(409, 'TARGET_MISSING', 'El trabajo de plan no tiene calendario');
       if (item.calendarId && item.calendarId !== job.target_id) throw new ContentApiError(409, 'CALENDAR_MISMATCH', 'El resultado no pertenece al calendario reservado');
-      await client.query(`INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,entities,cta,priority,planned_at,status,source_context,source_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,'proposed',$14::jsonb,$15)
-       ON CONFLICT (client_id,calendar_id,source_key) DO UPDATE SET title=EXCLUDED.title,theme=EXCLUDED.theme,rationale=EXCLUDED.rationale,format=EXCLUDED.format,keyword_primary=EXCLUDED.keyword_primary,keywords=EXCLUDED.keywords,entities=EXCLUDED.entities,cta=EXCLUDED.cta,priority=EXCLUDED.priority,planned_at=EXCLUDED.planned_at,source_context=EXCLUDED.source_context,version=editorial.plan_items.version+1,updated_at=now()`,[item.id??randomUUID(),job.client_id,job.target_id,item.title,item.theme??null,item.rationale??null,item.format??null,item.keywordPrimary??null,json(item.keywords??[]),json(item.entities??[]),item.cta??null,item.priority??null,item.plannedAt??null,json(item.sourceContext),item.sourceKey]);
+      await client.query(`INSERT INTO editorial.plan_items (id,client_id,calendar_id,title,theme,rationale,format,keyword_primary,keywords,entities,cta,priority,planned_at,status,source_context,source_key,networks)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,'proposed',$14::jsonb,$15,$16::jsonb)
+       ON CONFLICT (client_id,calendar_id,source_key) DO UPDATE SET title=EXCLUDED.title,theme=EXCLUDED.theme,rationale=EXCLUDED.rationale,format=EXCLUDED.format,keyword_primary=EXCLUDED.keyword_primary,keywords=EXCLUDED.keywords,entities=EXCLUDED.entities,cta=EXCLUDED.cta,priority=EXCLUDED.priority,planned_at=EXCLUDED.planned_at,source_context=EXCLUDED.source_context,networks=EXCLUDED.networks,version=editorial.plan_items.version+1,updated_at=now()`,[item.id??randomUUID(),job.client_id,job.target_id,item.title,item.theme??null,item.rationale??null,item.format??null,item.keywordPrimary??null,json(item.keywords??[]),json(item.entities??[]),item.cta??null,item.priority??null,item.plannedAt??null,json(item.sourceContext),item.sourceKey,json(networks[index])]);
     }
   }
 
@@ -739,6 +1097,49 @@ export class EditorialApiRepository {
     assertPlanTransition((plan.rows[0] as any).status,'review');
     await client.query(`UPDATE editorial.plan_items SET status='review',version=version+1,updated_at=now() WHERE id=$1`,[job.target_id]);
     await this.auditWith(client,job.client_id,'content',contentId,'content.generated',null,{serviceId,revisionId,revisionNumber});
+  }
+
+  /**
+   * One draft per selected account, upserted on (client, idea, account): regenerating overwrites a
+   * draft in review/approved/discarded back to review, but never a post already scheduled.
+   */
+  private async applySocialPostsResult(client:PoolClient,job:any,posts:unknown,serviceId:string){
+    if(job.kind!=='generate_rrss') throw new ContentApiError(409,'RESULT_KIND_MISMATCH','El resultado de posts no corresponde al trabajo');
+    if(!Array.isArray(posts)) throw new ContentApiError(400,'INVALID_RESULT','socialPosts debe ser una lista');
+    const selected=new Set(storedAccountIds(job.payload));
+    const seen=new Set<string>();
+    const drafts=posts.map((post:any,index)=>{
+      if(!post || typeof post!=='object' || Array.isArray(post) || typeof post.accountId!=='string') throw new ContentApiError(400,'INVALID_RESULT',`socialPosts[${index}] requiere accountId`);
+      if(seen.has(post.accountId)) throw new ContentApiError(400,'INVALID_RESULT',`socialPosts[${index}] repite la cuenta ${post.accountId}`);
+      seen.add(post.accountId);
+      const copy=requireSocialCopy(post.copy,`socialPosts[${index}].copy`,'INVALID_RESULT');
+      const media=post.media==null ? [] : normalizeSocialMedia(post.media,`socialPosts[${index}].media`,'INVALID_RESULT');
+      if(!selected.has(post.accountId)) throw new ContentApiError(409,'ACCOUNT_MISMATCH','El resultado incluye una cuenta que no se seleccionó para este trabajo');
+      return {accountId:post.accountId as string,copy,media};
+    });
+    const plan=await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+    const planRow=plan.rows[0] as any;
+    if(!planRow) throw new ContentApiError(409,'TARGET_MISSING','La idea ya no existe');
+    const accounts=await client.query('SELECT id,instance_key FROM editorial.publishing_accounts WHERE client_id=$1 AND id::text=ANY($2::text[])',[job.client_id,drafts.map((draft)=>draft.accountId)]);
+    const accountById=new Map((accounts.rows as any[]).map((row)=>[String(row.id),row]));
+    const existing=await client.query('SELECT id,account_id,status FROM editorial.social_posts WHERE client_id=$1 AND plan_item_id=$2 FOR UPDATE',[job.client_id,job.target_id]);
+    const scheduled=new Set((existing.rows as any[]).filter((row)=>row.status==='scheduled').map((row)=>String(row.account_id)));
+    const upsertedAccountIds:string[]=[];
+    const skippedScheduledAccountIds:string[]=[];
+    for(const draft of drafts){
+      if(scheduled.has(draft.accountId)){ skippedScheduledAccountIds.push(draft.accountId); continue; }
+      const account=accountById.get(draft.accountId);
+      if(!account) throw new ContentApiError(409,'ACCOUNT_NOT_AVAILABLE','Una cuenta del resultado ya no existe');
+      await client.query(`INSERT INTO editorial.social_posts (id,client_id,plan_item_id,account_id,network,copy,media,status,generation_job_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'review',$8)
+       ON CONFLICT (client_id,plan_item_id,account_id) DO UPDATE SET network=EXCLUDED.network,copy=EXCLUDED.copy,media=EXCLUDED.media,status='review',generation_job_id=EXCLUDED.generation_job_id,version=editorial.social_posts.version+1,updated_at=now()
+       WHERE editorial.social_posts.status<>'scheduled'`,[randomUUID(),job.client_id,job.target_id,draft.accountId,networkFromInstanceKey(account.instance_key),draft.copy,json(draft.media),job.id]);
+      upsertedAccountIds.push(draft.accountId);
+    }
+    assertPlanTransition(planRow.status,'review');
+    await client.query(`UPDATE editorial.plan_items SET status='review',version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`,[job.client_id,job.target_id]);
+    await this.auditWith(client,job.client_id,'plan_item',job.target_id,'social_posts.generated',null,{serviceId,jobId:job.id,upsertedAccountIds,skippedScheduledAccountIds});
+    return {upsertedAccountIds,skippedScheduledAccountIds};
   }
 
   private async applyPublicationResult(client:PoolClient,job:any,item:any){

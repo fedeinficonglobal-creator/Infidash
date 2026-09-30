@@ -6,6 +6,7 @@ import { canRunJob, timestampedIdempotencyKey } from '../../lib/content.js';
 const JOB_LABELS: Record<ContentJob['kind'], string> = {
   generate_plan: 'Generar plan', generate_content: 'Generar contenido', publish: 'Publicar',
   reschedule: 'Reprogramar', cancel: 'Cancelar publicación', reconcile: 'Conciliar publicación',
+  generate_rrss_plan: 'Plan de redes', generate_rrss: 'Posts de redes',
 };
 
 export function EditorialJobsPanel({ clientId }: { clientId: string }) {
