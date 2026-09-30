@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
-import { CLIENT_AVATAR_PALETTE, clientColor, clientInitials, clientLogoUrl, filterClients } from '../src/lib/clientAvatar.js';
+import { CLIENT_AVATAR_PALETTE, clientColor, clientInitials, clientLogoUrl, filterClients, sortClients } from '../src/lib/clientAvatar.js';
 import { clientPath } from '../src/lib/routes.js';
 import { SidebarView } from '../src/components/Sidebar.js';
 import type { Client } from '../src/store/useClientStore.js';
@@ -126,4 +126,18 @@ test('without an active client the home button is current and no client menu is 
   assert.match(html, />Infidash</);
   assert.doesNotMatch(html, /aria-label="Menú de cliente"/);
   assert.doesNotMatch(html, /aria-current="page"[^>]*aria-label="Inficon Global"|aria-label="Inficon Global"[^>]*aria-current="page"/);
+});
+
+test('sortClients orders clients alphabetically in Spanish, ignoring case and accents, without mutating the input', () => {
+  const clients = [{ name: 'tramadg' }, { name: 'Alfran' }, { name: 'Ángel Óptica' }, { name: 'arc gestoria' }, { name: 'C Rocio Vazquez' }, { name: 'ES Dental' }];
+  const original = [...clients];
+  assert.deepEqual(sortClients(clients).map((client) => client.name), ['Alfran', 'Ángel Óptica', 'arc gestoria', 'C Rocio Vazquez', 'ES Dental', 'tramadg']);
+  assert.deepEqual(clients, original, 'the input array is not mutated');
+});
+
+test('the client rail lists clients alphabetically', () => {
+  const clients = [makeClient('c1', 'tramadg', 'tramadg'), makeClient('c2', 'alfran', 'alfran'), makeClient('c3', 'matundy', 'Matundy')];
+  const html = renderSidebar('/', { clients, activeClientId: null, activeTabId: 'overview' });
+  const order = [...html.matchAll(/<a[^>]*aria-label="(alfran|Matundy|tramadg)"/g)].map((match) => match[1]);
+  assert.deepEqual(order, ['alfran', 'Matundy', 'tramadg']);
 });

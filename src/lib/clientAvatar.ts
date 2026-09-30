@@ -45,6 +45,13 @@ export function clientLogoUrl(logo: string | null | undefined) {
   return url;
 }
 
+const clientNameCollator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+
+/** Alphabetical (Spanish) order by name, ignoring case and accents; returns a new array. */
+export function sortClients<T extends { name: string }>(clients: T[]): T[] {
+  return [...clients].sort((a, b) => clientNameCollator.compare(a.name.trim(), b.name.trim()));
+}
+
 /** Case- and accent-insensitive name filter; an empty query returns every client. */
 export function filterClients<T extends { name: string }>(clients: T[], query: string): T[] {
   const needle = normalizeForSearch(query);
