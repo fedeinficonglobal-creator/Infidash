@@ -1,4 +1,4 @@
-import type { ContentStatus, PlanItemStatus, PublicationStatus } from './types.js';
+import type { ContentStatus, PlanItemStatus, PublicationStatus, SocialPostStatus } from './types.js';
 import { ContentApiError } from './contracts.js';
 
 const planTransitions: Record<PlanItemStatus, readonly PlanItemStatus[]> = {
@@ -15,6 +15,10 @@ const publicationTransitions: Record<PublicationStatus, readonly PublicationStat
   unknown: ['sending', 'scheduled', 'published', 'failed', 'cancel_requested', 'cancelled'], cancel_requested: ['cancelled', 'failed', 'unknown'],
   cancelled: [], draft: ['sending', 'published', 'failed', 'cancel_requested'],
 };
+// Scheduled and discarded drafts are final: a scheduled post is managed through its publication.
+const socialPostTransitions: Record<SocialPostStatus, readonly SocialPostStatus[]> = {
+  review: ['approved', 'discarded'], approved: ['review', 'scheduled', 'discarded'], scheduled: [], discarded: [],
+};
 
 export function assertTransition<T extends string>(entity: string, from: T, to: T, map: Record<T, readonly T[]>) {
   if (from === to) return;
@@ -24,3 +28,4 @@ export function assertTransition<T extends string>(entity: string, from: T, to: 
 export const assertPlanTransition = (from: PlanItemStatus, to: PlanItemStatus) => assertTransition('plan_item', from, to, planTransitions);
 export const assertContentTransition = (from: ContentStatus, to: ContentStatus) => assertTransition('content', from, to, contentTransitions);
 export const assertPublicationTransition = (from: PublicationStatus, to: PublicationStatus) => assertTransition('publication', from, to, publicationTransitions);
+export const assertSocialPostTransition = (from: SocialPostStatus, to: SocialPostStatus) => assertTransition('social_post', from, to, socialPostTransitions);

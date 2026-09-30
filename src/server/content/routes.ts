@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { EditorialApiRepository } from './apiRepository.js';
 import { getEditorialPool } from './postgres.js';
 import { authenticateServiceToken, serviceCan, type ServicePrincipal } from './serviceAuth.js';
-import { CALENDAR_STATUSES, CONTENT_STATUSES, ContentApiError, JOB_KINDS, PLAN_STATUSES, PUBLICATION_STATUSES, assertEnum, decodeCursor, optionalString, parseLimit, redactSecrets, requireObject, requirePositiveVersion, requireString, sanitizeError } from './contracts.js';
+import { CALENDAR_STATUSES, CONTENT_STATUSES, ContentApiError, JOB_KINDS, PLAN_STATUSES, PUBLICATION_STATUSES, RRSS_FORMATS, assertEnum, decodeCursor, normalizeRrssNetworks, normalizeSocialMedia, optionalString, parseLimit, redactSecrets, requireObject, requirePositiveVersion, requireSocialCopy, requireString, sanitizeError } from './contracts.js';
 import { canAccessClient } from '../../lib/auth.js';
 
 type HumanSession = { user: { id: string; role: 'admin' | 'viewer'; clientIds: string[] | null } };
@@ -61,6 +61,10 @@ function stringArray(value: unknown, field: string) {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new ContentApiError(400, 'INVALID_PAYLOAD', `${field} debe ser una lista de texto`);
   return value;
+}
+
+function listFilters(query: Record<string, any>) {
+  return { from: asDate(query.from, 'from'), to: asDate(query.to, 'to'), status: optionalString(query.status, 'status', 50) ?? undefined, format: optionalString(query.format, 'format', 100) ?? undefined, search: optionalString(query.search, 'search', 200) ?? undefined, includeUndated: query.includeUndated === 'true', cursor: decodeCursor(query.cursor), limit: parseLimit(query.limit) };
 }
 
 export async function contentRoutes(app: FastifyInstance, options: ContentRoutesOptions) {
@@ -152,7 +156,7 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
 
   app.patch('/api/content/plan-items/:id', route(async (request, reply) => {
     const session=await requireHuman(request,'admin'); const body=requireObject(request.body);
-    const planItem=await repository.patchPlanItem(requireString(paramsOf(request).id,'id',100),{...body,version:requirePositiveVersion(body.version),status:body.status===undefined?undefined:assertEnum(body.status,PLAN_STATUSES,'status'),plannedAt:asDate(body.plannedAt,'plannedAt'),keywords:stringArray(body.keywords,'keywords'),entities:stringArray(body.entities,'entities')},session.user.id);
+    const planItem=await repository.patchPlanItem(requireString(paramsOf(request).id,'id',100),{...body,version:requirePositiveVersion(body.version),status:body.status===undefined?undefined:assertEnum(body.status,PLAN_STATUSES,'status'),plannedAt:asDate(body.plannedAt,'plannedAt'),keywords:stringArray(body.keywords,'keywords'),entities:stringArray(body.entities,'entities'),networks:body.networks===undefined?undefined:normalizeRrssNetworks(body.networks)},session.user.id);
     return reply.send({planItem});
   }));
 
@@ -163,6 +167,89 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     if(!item) throw new ContentApiError(404,'NOT_FOUND','Propuesta no encontrada');
     requireClientAccess(session,(item as any).client_id);
     return reply.send({planItem:await repository.releaseGeneration(id,requirePositiveVersion(body.version),session.user.id)});
+  }));
+
+  app.get('/api/clients/:clientId/rrss/items', route(async (request, reply) => {
+    const session = await requireHuman(request);
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    return reply.send(await repository.listRrssItems({ clientId, ...listFilters(queryOf(request)) }));
+  }));
+
+  app.post('/api/clients/:clientId/rrss/items', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    const body = requireObject(request.body);
+    const planItem = await repository.createRrssIdea({
+      clientId,
+      title: requireString(body.title, 'title'),
+      theme: optionalString(body.theme, 'theme'),
+      rationale: optionalString(body.rationale, 'rationale'),
+      format: body.format === undefined || body.format === null ? null : assertEnum(body.format, RRSS_FORMATS, 'format'),
+      networks: body.networks === undefined ? [] : normalizeRrssNetworks(body.networks),
+      cta: optionalString(body.cta, 'cta'),
+      plannedAt: asDate(body.plannedAt, 'plannedAt'),
+      keywords: stringArray(body.keywords, 'keywords'),
+    }, session.user.id);
+    return reply.code(201).send({ planItem });
+  }));
+
+  app.get('/api/content/plan-items/:id/social-posts', route(async (request, reply) => {
+    const session = await requireHuman(request);
+    const id = requireString(paramsOf(request).id, 'id', 100);
+    const item = await repository.getPlanItem(id);
+    if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+    requireClientAccess(session, (item as any).client_id);
+    return reply.send({ socialPosts: await repository.listSocialPosts(id) });
+  }));
+
+  /** Loads a social post for an admin mutation and checks the session can act on its client. */
+  async function socialPostForAdmin(request: Request) {
+    const session = await requireHuman(request, 'admin');
+    const id = requireString(paramsOf(request).id, 'id', 100);
+    const post = await repository.getSocialPost(id);
+    if (!post) throw new ContentApiError(404, 'NOT_FOUND', 'Post no encontrado');
+    requireClientAccess(session, post.clientId);
+    return { session, id, post };
+  }
+
+  const optionalVersion = (body: Record<string, unknown>) => body.expectedVersion === undefined ? undefined : requirePositiveVersion(body.expectedVersion);
+
+  app.patch('/api/social-posts/:id', route(async (request, reply) => {
+    const { session, id } = await socialPostForAdmin(request);
+    const body = requireObject(request.body);
+    const expectedVersion = requirePositiveVersion(body.expectedVersion);
+    if (body.copy === undefined && body.media === undefined) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Indica copy o media');
+    const input = {
+      ...(body.copy === undefined ? {} : { copy: requireSocialCopy(body.copy) }),
+      ...(body.media === undefined ? {} : { media: normalizeSocialMedia(body.media) }),
+      expectedVersion,
+    };
+    return reply.send({ socialPost: await repository.patchSocialPost(id, input, session.user.id) });
+  }));
+
+  app.post('/api/social-posts/:id/approve', route(async (request, reply) => {
+    const { session, id } = await socialPostForAdmin(request);
+    return reply.send({ socialPost: await repository.approveSocialPost(id, optionalVersion(requireObject(request.body ?? {})), session.user.id) });
+  }));
+
+  app.post('/api/social-posts/:id/discard', route(async (request, reply) => {
+    const { session, id } = await socialPostForAdmin(request);
+    return reply.send({ socialPost: await repository.discardSocialPost(id, optionalVersion(requireObject(request.body ?? {})), session.user.id) });
+  }));
+
+  app.post('/api/social-posts/:id/schedule', route(async (request, reply) => {
+    const { session, id, post } = await socialPostForAdmin(request);
+    const body = requireObject(request.body);
+    const scheduled = await repository.scheduleSocialPost(id, {
+      clientId: post.clientId,
+      desiredScheduledAt: asDate(body.desiredScheduledAt, 'desiredScheduledAt') ?? requireString(body.desiredScheduledAt, 'desiredScheduledAt', 100),
+      externalUrl: optionalHttpUrl(body.externalUrl),
+      expectedVersion: requirePositiveVersion(body.expectedVersion),
+      idempotencyKey: requireString(body.idempotencyKey, 'idempotencyKey', 300),
+    }, session.user.id);
+    return reply.code(scheduled.replayed ? 200 : 202).send(scheduled);
   }));
 
   app.get('/api/content/items/:id', route(async (request, reply) => {
@@ -245,6 +332,21 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     requireClientAccess(session, clientId);
     const body = requireObject(request.body);
     return reply.send(await repository.savePlanInputs(clientId, { topic: body.topic, keywords: body.keywords, competitors: body.competitors }));
+  }));
+
+  app.get('/api/clients/:clientId/rrss-plan-inputs', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    return reply.send(await repository.getRrssPlanInputs(clientId));
+  }));
+
+  app.put('/api/clients/:clientId/rrss-plan-inputs', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const clientId = requireString(paramsOf(request).clientId, 'clientId', 200);
+    requireClientAccess(session, clientId);
+    const body = requireObject(request.body);
+    return reply.send(await repository.saveRrssPlanInputs(clientId, { topic: body.topic, keywords: body.keywords, networks: body.networks, postsPerWeek: body.postsPerWeek, weeksHorizon: body.weeksHorizon }));
   }));
 
   app.get('/api/content/items/:id/publications', route(async (request, reply) => {

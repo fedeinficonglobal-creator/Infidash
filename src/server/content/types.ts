@@ -2,6 +2,7 @@ export type CalendarStatus = 'draft' | 'active' | 'archived';
 export type PlanItemStatus = 'proposed' | 'approved' | 'generating' | 'review' | 'ready' | 'generation_failed' | 'archived';
 export type ContentStatus = 'draft' | 'review' | 'approved' | 'archived';
 export type PublicationStatus = 'pending' | 'sending' | 'scheduled' | 'published' | 'failed' | 'unknown' | 'cancel_requested' | 'cancelled' | 'draft';
+export type SocialPostStatus = 'review' | 'approved' | 'scheduled' | 'discarded';
 
 export interface EditorialCalendar {
   id: string;
