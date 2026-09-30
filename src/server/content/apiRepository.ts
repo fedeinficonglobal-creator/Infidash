@@ -26,6 +26,52 @@ function addDays(day: string, days: number) { const date = new Date(`${day}T00:0
 /** The Monday strictly after today (UTC), so a new plan never starts on a day that is already under way. */
 function nextMonday() { const today = new Date().toISOString().slice(0, 10); const weekday = new Date(`${today}T00:00:00.000Z`).getUTCDay(); return addDays(today, ((8 - weekday) % 7) || 7); }
 
+export type PlanInputs = { topic: string; keywords: string[]; competitors: string[] };
+
+const MAX_PLAN_KEYWORDS = 20;
+const MAX_PLAN_KEYWORD_LENGTH = 100;
+const MAX_PLAN_COMPETITORS = 5;
+const MAX_PLAN_TOPIC_LENGTH = 200;
+
+/** Reads a stored editorial_config list, accepting the legacy comma-separated string form for keywords. */
+function storedList(value: unknown): string[] {
+  const raw = typeof value === 'string' ? value.split(',') : Array.isArray(value) ? value : [];
+  return raw.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
+}
+
+function uniqueCaseInsensitive(values: string[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => { const key = value.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
+}
+
+function requireTextList(value: unknown, message: string) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new ContentApiError(400, 'INVALID_PAYLOAD', message);
+  return (value as string[]).map((item) => item.trim()).filter(Boolean);
+}
+
+/** Bare lowercase hostname for a competitor domain or URL, as the n8n plan workflow scrapes it (e.g. `https://www.Foo.com/a?b` -> `foo.com`). */
+function competitorDomain(value: string) {
+  const domain = value.toLowerCase().replace(/^https?:\/\//, '').split(/[/?#]/, 1)[0].replace(/^www\./, '');
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) throw new ContentApiError(400, 'INVALID_PAYLOAD', `"${value}" no es un dominio válido de competidor`);
+  return domain;
+}
+
+export function normalizePlanInputs(input: { topic?: unknown; keywords?: unknown; competitors?: unknown }): PlanInputs {
+  const topic = typeof input.topic === 'string' ? input.topic.trim() : '';
+  if (!topic) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Indica el tema del plan');
+  if (topic.length > MAX_PLAN_TOPIC_LENGTH) throw new ContentApiError(400, 'INVALID_PAYLOAD', `El tema debe tener como máximo ${MAX_PLAN_TOPIC_LENGTH} caracteres`);
+  const keywords = uniqueCaseInsensitive(requireTextList(input.keywords, 'keywords debe ser una lista de texto'));
+  const competitors = uniqueCaseInsensitive(requireTextList(input.competitors, 'Los competidores deben ser una lista de texto').map(competitorDomain));
+  if (!keywords.length) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Añade al menos una keyword');
+  if (keywords.length > MAX_PLAN_KEYWORDS) throw new ContentApiError(400, 'INVALID_PAYLOAD', `Puedes indicar como máximo ${MAX_PLAN_KEYWORDS} keywords`);
+  if (keywords.some((keyword) => keyword.length > MAX_PLAN_KEYWORD_LENGTH)) throw new ContentApiError(400, 'INVALID_PAYLOAD', `Cada keyword debe tener como máximo ${MAX_PLAN_KEYWORD_LENGTH} caracteres`);
+  if (!competitors.length) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Añade al menos un competidor');
+  if (competitors.length > MAX_PLAN_COMPETITORS) throw new ContentApiError(400, 'INVALID_PAYLOAD', `Puedes indicar como máximo ${MAX_PLAN_COMPETITORS} competidores`);
+  return { topic, keywords, competitors };
+}
+
+const EDITORIAL_DISABLED_MESSAGE = 'La automatización editorial del cliente está desactivada';
+
 /** Jobs that n8n claims again on its own after a failure; publish/reschedule/cancel only ever run once (see claimJob). */
 const AUTO_RETRY_KINDS = ['generate_plan', 'generate_content', 'reconcile'];
 
@@ -349,7 +395,7 @@ export class EditorialApiRepository {
 
   private async requireEnabledClient(client: PoolClient, clientId: string, kind: string) {
     const result=await client.query('SELECT enabled FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
-    if(!result.rows[0] || !(result.rows[0] as any).enabled) throw new ContentApiError(409,'EDITORIAL_DISABLED','La automatización editorial del cliente está desactivada');
+    if(!result.rows[0] || !(result.rows[0] as any).enabled) throw new ContentApiError(409,'EDITORIAL_DISABLED',EDITORIAL_DISABLED_MESSAGE);
     const bindings=await client.query('SELECT workflow_bindings FROM editorial.client_settings WHERE client_id=$1 FOR SHARE',[clientId]);
     // Real client_settings rows always return bindings here. Some repository fakes
     // only implement the enabled lookup; retain their existing contract.
@@ -369,6 +415,25 @@ export class EditorialApiRepository {
       enabled: Boolean(settings?.enabled),
       jobs: Object.fromEntries(JOB_KINDS.map((kind) => [kind, Boolean(settings?.enabled && typeof bindings[kind] === 'string' && bindings[kind].trim())])),
     };
+  }
+
+  /** The plan workflow's topic, keywords and competitors, read from editorial_config (the n8n plan's only source for them). */
+  async getPlanInputs(clientId: string): Promise<PlanInputs> {
+    const result = await this.pool.query('SELECT editorial_config FROM editorial.client_settings WHERE client_id=$1', [clientId]);
+    if (!result.rows[0]) throw new ContentApiError(409, 'EDITORIAL_DISABLED', EDITORIAL_DISABLED_MESSAGE);
+    const config = (result.rows[0] as any).editorial_config ?? {};
+    return { topic: typeof config.topic === 'string' ? config.topic.trim() : '', keywords: storedList(config.keywords), competitors: storedList(config.competitors) };
+  }
+
+  /** Validates, normalizes and merges topic/keywords/competitors into editorial_config, preserving every other key. */
+  async savePlanInputs(clientId: string, input: { topic?: unknown; keywords?: unknown; competitors?: unknown }): Promise<PlanInputs> {
+    const inputs = normalizePlanInputs(input);
+    const result = await this.pool.query(
+      `UPDATE editorial.client_settings SET editorial_config=COALESCE(editorial_config,'{}'::jsonb) || $2::jsonb, updated_at=now() WHERE client_id=$1 RETURNING client_id`,
+      [clientId, json(inputs)],
+    );
+    if (!result.rows[0]) throw new ContentApiError(409, 'EDITORIAL_DISABLED', EDITORIAL_DISABLED_MESSAGE);
+    return inputs;
   }
 
   private isPublicationJob(kind: string) { return ['publish', 'reschedule', 'cancel', 'reconcile'].includes(kind); }

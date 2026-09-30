@@ -45,6 +45,11 @@ export function planItemActions(item: Pick<PlanItem, 'status'>, { admin, readine
 /** Manual retries need a fresh key; the server's JOB_IN_PROGRESS guard is what prevents duplicates. */
 export function timestampedIdempotencyKey(prefix: string, now = Date.now()) { return `${prefix}:${now}`; }
 
+/** One entry per line (and per comma when `commas`), trimmed, blanks dropped; the server validates and de-duplicates. */
+export function splitPlanInputs(text: string, { commas }: { commas: boolean }) {
+  return text.split(commas ? /[\r\n,]+/ : /[\r\n]+/).map((value) => value.trim()).filter(Boolean);
+}
+
 /** Status shown for a plan item: a published or scheduled publication outranks the item's own editorial status. Cancelled, failed or pending publications do not. */
 export function displayStatus(itemStatus: PlanStatus, publications: ReadonlyArray<{ status: string }>): PlanStatus | 'published' | 'scheduled' {
   if (publications.some((publication) => publication.status === 'published')) return 'published';

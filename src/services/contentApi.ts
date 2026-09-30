@@ -210,6 +210,17 @@ export async function getEditorialReadiness(token: string, clientId: string): Pr
   return { enabled: Boolean(readiness?.enabled), jobs: jobs as EditorialReadiness['jobs'] };
 }
 
+/** Plain string arrays: camelize() leaves their values untouched. */
+export interface EditorialPlanInputs { topic: string; keywords: string[]; competitors: string[]; }
+
+export function getEditorialPlanInputs(token: string, clientId: string, signal?: AbortSignal) {
+  return request<EditorialPlanInputs>(`/api/clients/${encodeURIComponent(clientId)}/editorial-plan-inputs`, token, { signal });
+}
+
+export function saveEditorialPlanInputs(token: string, clientId: string, input: EditorialPlanInputs) {
+  return request<EditorialPlanInputs>(`/api/clients/${encodeURIComponent(clientId)}/editorial-plan-inputs`, token, { method: 'PUT', body: JSON.stringify(input) });
+}
+
 export function recoverPlanJob(token: string, id: string) {
   return request<{ job: ContentJob }>(`/api/content/jobs/${encodeURIComponent(id)}/recover`, token, { method: 'POST' });
 }
