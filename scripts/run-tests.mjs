@@ -18,6 +18,7 @@ const databaseFiles = [
   'tests/core-characterization.clients-stats.test.ts',
   'tests/core-characterization.auth.test.ts',
   'tests/core-characterization.leads-integrations.test.ts',
+  'tests/core-characterization.concurrency.test.ts',
 ];
 const apiFiles = ['tests/api-regression.test.ts'];
 const unitFiles = files.filter(file => !databaseFiles.includes(file) && !apiFiles.includes(file));

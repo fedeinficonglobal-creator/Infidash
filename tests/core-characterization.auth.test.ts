@@ -29,7 +29,7 @@ async function countSessions(where: 'user_id' | 'token_hash', value: string) {
 test('createUser normalizes the email, trims the name, never exposes the password hash and scopes clientIds by role', async () => {
   const { createClient, createUser } = await loadDatabase();
   const tag = unique();
-  const client = createClient({ name: `Auth scope ${tag}` });
+  const client = await createClient({ name: `Auth scope ${tag}` });
 
   const viewer = await createUser({ email: `  MiXed-${tag}@Infidash.Local  `, name: '  Padded Name  ', password: PASSWORD, role: 'viewer', clientIds: [client.id] });
   assert.equal(viewer.email, `mixed-${tag}@infidash.local`);
@@ -268,8 +268,8 @@ test('updateUserRole returns null for unknown users and keeps blank names and un
 test('updateUserRole replaces memberships for viewers, treats an empty array as "clear all" and ignores clientIds for admins', async () => {
   const { createClient, getSessionByToken, updateUserRole, authenticateUser } = await loadDatabase();
   const tag = unique();
-  const a = createClient({ name: `Member A ${tag}` });
-  const b = createClient({ name: `Member B ${tag}` });
+  const a = await createClient({ name: `Member A ${tag}` });
+  const b = await createClient({ name: `Member B ${tag}` });
   const { user, email } = await makeUser('viewer', { clientIds: [a.id] });
   const login = await authenticateUser(email, PASSWORD);
   assert.ok(login);
@@ -289,7 +289,7 @@ test('updateUserRole replaces memberships for viewers, treats an empty array as 
 
 test('deleteUser returns the removed user, cascades to sessions and is idempotent', async () => {
   const { authenticateUser, createClient, deleteUser, getSessionByToken, listUsers } = await loadDatabase();
-  const client = createClient({ name: `Delete user ${unique()}` });
+  const client = await createClient({ name: `Delete user ${unique()}` });
   const { user, email } = await makeUser('viewer', { clientIds: [client.id] });
   const login = await authenticateUser(email, PASSWORD);
   assert.ok(login);
@@ -313,8 +313,8 @@ test('deleteUser returns the removed user, cascades to sessions and is idempoten
 
 test('listUsers orders by creation time and reports membership per user (null for admins)', async () => {
   const { createClient, listUsers } = await loadDatabase();
-  const a = createClient({ name: `List users A ${unique()}` });
-  const b = createClient({ name: `List users B ${unique()}` });
+  const a = await createClient({ name: `List users A ${unique()}` });
+  const b = await createClient({ name: `List users B ${unique()}` });
   const first = await makeUser('viewer', { clientIds: [a.id, b.id] });
   const second = await makeUser('admin');
   const third = await makeUser('viewer');

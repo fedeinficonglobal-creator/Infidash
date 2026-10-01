@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 
 test('a new viewer defaults to zero clients, and getSessionByToken reflects granted memberships live', async () => {
   const { authenticateUser, createClient, createUser, getSessionByToken, updateUserRole } = await import('../src/lib/database.js');
-  const clientA = createClient({ name: `Membership A ${Date.now()}` });
-  const clientB = createClient({ name: `Membership B ${Date.now()}` });
+  const clientA = await createClient({ name: `Membership A ${Date.now()}` });
+  const clientB = await createClient({ name: `Membership B ${Date.now()}` });
   const email = `viewer-${Date.now()}@infidash.local`;
 
   const created = await createUser({ email, name: 'Viewer', password: 'temporal-1234', role: 'viewer' });
@@ -27,7 +27,7 @@ test('a new viewer defaults to zero clients, and getSessionByToken reflects gran
 
 test('admins always report clientIds:null and promoting a viewer to admin clears memberships', async () => {
   const { createClient, createUser, updateUserRole } = await import('../src/lib/database.js');
-  const client = createClient({ name: `Membership Promotion ${Date.now()}` });
+  const client = await createClient({ name: `Membership Promotion ${Date.now()}` });
   const viewer = await createUser({ email: `promoted-${Date.now()}@infidash.local`, name: 'Promoted', password: 'temporal-1234', role: 'viewer', clientIds: [client.id] });
   assert.deepEqual(viewer.clientIds, [client.id]);
 
@@ -43,27 +43,27 @@ test('admins always report clientIds:null and promoting a viewer to admin clears
 
 test('listClients/listClientsWithLatestStat/listDailyStats/getDashboardHealthSummary honor an explicit clientIds scope', async () => {
   const { createClient, listClients, listClientsWithLatestStat, listDailyStats, getDashboardHealthSummary, upsertDailyStat } = await import('../src/lib/database.js');
-  const allowed = createClient({ name: `Scope Allowed ${Date.now()}` });
-  const blocked = createClient({ name: `Scope Blocked ${Date.now()}` });
-  upsertDailyStat({ clientId: allowed.id, statDate: '2026-01-01', notes: null, source: 'manual' });
-  upsertDailyStat({ clientId: blocked.id, statDate: '2026-01-01', notes: null, source: 'manual' });
+  const allowed = await createClient({ name: `Scope Allowed ${Date.now()}` });
+  const blocked = await createClient({ name: `Scope Blocked ${Date.now()}` });
+  await upsertDailyStat({ clientId: allowed.id, statDate: '2026-01-01', notes: null, source: 'manual' });
+  await upsertDailyStat({ clientId: blocked.id, statDate: '2026-01-01', notes: null, source: 'manual' });
 
-  const scoped = listClients({ clientIds: [allowed.id] });
+  const scoped = await listClients({ clientIds: [allowed.id] });
   assert.ok(scoped.some((c) => c.id === allowed.id));
   assert.ok(!scoped.some((c) => c.id === blocked.id));
 
-  const scopedWithStats = listClientsWithLatestStat({ clientIds: [allowed.id] });
+  const scopedWithStats = await listClientsWithLatestStat({ clientIds: [allowed.id] });
   assert.deepEqual(scopedWithStats.map((c) => c.id), [allowed.id]);
 
-  const scopedStats = listDailyStats(undefined, { clientIds: [allowed.id] });
+  const scopedStats = await listDailyStats(undefined, { clientIds: [allowed.id] });
   assert.ok(scopedStats.every((stat) => stat.clientId === allowed.id));
 
-  const zeroScope = listClients({ clientIds: [] });
+  const zeroScope = await listClients({ clientIds: [] });
   assert.deepEqual(zeroScope, [], 'an explicit empty allow-list must return nothing, not everything');
 
-  const summary = getDashboardHealthSummary({ clientIds: [allowed.id] });
+  const summary = await getDashboardHealthSummary({ clientIds: [allowed.id] });
   assert.equal(summary.clients, scoped.length);
 
-  const unscoped = listClients();
+  const unscoped = await listClients();
   assert.ok(unscoped.length >= 2, 'omitting clientIds must keep the unrestricted admin behavior');
 });
