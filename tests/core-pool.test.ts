@@ -6,7 +6,9 @@ import {
   coreGet,
   coreRun,
   mapCorePgError,
+  withCoreTransaction,
   type CoreQueryable,
+  type CoreTransactionPool,
 } from '../src/lib/corePool.js';
 
 function fakePool(result: { rows?: unknown[]; rowCount?: number | null } | Error) {
@@ -89,4 +91,96 @@ test('query helpers translate constraint violations from the pool', async () => 
   await assert.rejects(() => coreRun(pool, 'INSERT INTO users VALUES ($1)', ['x']), /duplicate key/i);
   await assert.rejects(() => coreAll(pool, 'SELECT 1'), /duplicate key/i);
   await assert.rejects(() => coreGet(pool, 'SELECT 1'), /duplicate key/i);
+});
+
+function fakeTransactionPool(failOn: { text: string; error: Error } | null = null) {
+  const log: string[] = [];
+  const releases: Array<Error | boolean | undefined> = [];
+  const pool: CoreTransactionPool = {
+    async connect() {
+      return {
+        async query(text: string) {
+          log.push(text);
+          if (failOn && text === failOn.text) throw failOn.error;
+          return { rows: [], rowCount: 0 };
+        },
+        release(error?: Error | boolean) {
+          releases.push(error);
+        },
+      };
+    },
+  };
+  return { pool, log, releases };
+}
+
+test('withCoreTransaction commits on success, returns the callback result and releases the client once', async () => {
+  const { pool, log, releases } = fakeTransactionPool();
+  const result = await withCoreTransaction(async (tx) => {
+    await coreRun(tx, 'INSERT INTO users VALUES ($1)', ['a']);
+    return 'done';
+  }, pool);
+  assert.equal(result, 'done');
+  assert.deepEqual(log, ['BEGIN', 'INSERT INTO users VALUES ($1)', 'COMMIT']);
+  assert.deepEqual(releases, [undefined]);
+});
+
+test('withCoreTransaction rolls back, releases and rethrows when the callback fails', async () => {
+  const { pool, log, releases } = fakeTransactionPool({
+    text: 'INSERT INTO client_memberships VALUES ($1)',
+    error: pgError('23503', 'insert or update on table "client_memberships" violates foreign key constraint "k"'),
+  });
+  await assert.rejects(
+    () => withCoreTransaction(async (tx) => {
+      await coreRun(tx, 'INSERT INTO users VALUES ($1)', ['a']);
+      await coreRun(tx, 'INSERT INTO client_memberships VALUES ($1)', ['x']);
+    }, pool),
+    (error: Error) => /^ERROR: {2}insert or update/.test(error.message) && !/ERROR: {2}ERROR/.test(error.message) && /foreign key/i.test(error.message),
+  );
+  assert.deepEqual(log, ['BEGIN', 'INSERT INTO users VALUES ($1)', 'INSERT INTO client_memberships VALUES ($1)', 'ROLLBACK']);
+  assert.equal(releases.length, 1);
+});
+
+test('withCoreTransaction maps constraint errors raised by the callback itself', async () => {
+  const { pool, log } = fakeTransactionPool();
+  await assert.rejects(
+    () => withCoreTransaction(async () => {
+      throw pgError('23505', 'duplicate key value violates unique constraint "k"');
+    }, pool),
+    /^Error: ERROR: {2}duplicate key/,
+  );
+  assert.deepEqual(log, ['BEGIN', 'ROLLBACK']);
+});
+
+test('withCoreTransaction maps a failing COMMIT, rolls back and releases the client', async () => {
+  const { pool, log, releases } = fakeTransactionPool({
+    text: 'COMMIT',
+    error: pgError('23503', 'deferred foreign key constraint violated'),
+  });
+  await assert.rejects(() => withCoreTransaction(async () => 'x', pool), /foreign key/i);
+  assert.deepEqual(log, ['BEGIN', 'COMMIT', 'ROLLBACK']);
+  assert.equal(releases.length, 1);
+});
+
+test('withCoreTransaction destroys the client when ROLLBACK itself fails and still surfaces the original error', async () => {
+  const { pool, releases } = fakeTransactionPool({ text: 'ROLLBACK', error: new Error('connection lost') });
+  await assert.rejects(
+    () => withCoreTransaction(async () => {
+      throw new Error('original failure');
+    }, pool),
+    /original failure/,
+  );
+  assert.equal(releases.length, 1);
+  assert.ok(releases[0] instanceof Error);
+});
+
+test('withCoreTransaction releases the client when BEGIN fails', async () => {
+  const { pool, log, releases } = fakeTransactionPool({ text: 'BEGIN', error: new Error('cannot begin') });
+  await assert.rejects(() => withCoreTransaction(async () => 'x', pool), /cannot begin/);
+  assert.deepEqual(log, ['BEGIN']);
+  assert.equal(releases.length, 1);
+});
+
+test('mapCorePgError is idempotent for errors it already rewrote', () => {
+  const once = mapCorePgError(pgError('23505', 'duplicate key value', { detail: 'Key (a)=(b) exists.' })) as Error;
+  assert.equal(mapCorePgError(once), once);
 });

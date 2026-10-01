@@ -136,13 +136,15 @@ test('saveClientIntegration upserts per (client, provider), merging config and c
   await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: 'pw-two' } });
   assert.deepEqual(await getIntegrationCredentialsById(first.id), { username: 'api-user', applicationPassword: 'pw-two' });
 
-  // KNOWN BUG: an explicit empty string or undefined for a credential clears it (only an omitted key preserves it).
-  const cleared = await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: '' } });
-  assert.deepEqual(cleared?.secretKeys, ['username']);
-  assert.equal(cleared?.lastError, 'Faltan campos obligatorios: Application Password');
-  await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: 'pw-three' } });
-  const clearedByUndefined = await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: undefined } });
-  assert.deepEqual(clearedByUndefined?.secretKeys, ['username']);
+  // A blank or undefined credential preserves the stored secret (the form submits every field and leaves untouched
+  // ones empty); only a non-blank value replaces it.
+  const keptByEmpty = await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: '' } });
+  assert.deepEqual(keptByEmpty?.secretKeys, ['username', 'applicationPassword']);
+  const keptByBlank = await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: '   ' } });
+  assert.deepEqual(keptByBlank?.secretKeys, ['username', 'applicationPassword']);
+  const keptByUndefined = await saveClientIntegration({ clientId: client.id, provider: 'wordpress', credentials: { applicationPassword: undefined } });
+  assert.deepEqual(keptByUndefined?.secretKeys, ['username', 'applicationPassword']);
+  assert.deepEqual(await getIntegrationCredentialsById(first.id), { username: 'api-user', applicationPassword: 'pw-two' });
 });
 
 test('saveClientIntegration with an id updates that row and ignores the clientId/provider of the input', async () => {
@@ -419,11 +421,14 @@ test('testClientIntegration validates required fields, resets status to pending 
   assert.equal(wooResult?.summary, 'Ventas');
   assert.equal(wooResult?.integration.lastError, 'La configuración está completa, pero este proveedor todavía no dispone de una prueba/sincronización real.');
 
-  // KNOWN BUG: testing a disabled integration flips its status to pending while isActive stays false.
-  await setClientIntegrationActive(incomplete.id, false);
+  // A disabled integration is not probed: its status, error and timestamp stay untouched and it is reported as not ready.
+  const disabled = await setClientIntegrationActive(incomplete.id, false);
+  assert.ok(disabled);
   const disabledResult = await testClientIntegration(incomplete.id);
+  assert.equal(disabledResult?.ready, false);
   assert.equal(disabledResult?.integration.isActive, false);
-  assert.equal(disabledResult?.integration.status, 'pending');
+  assert.equal(disabledResult?.integration.status, 'disabled');
+  assert.deepEqual(disabledResult?.integration, disabled);
 });
 
 test('deleteClientIntegration reports presence and is idempotent', async () => {
@@ -529,13 +534,16 @@ test('insertLead stores exactly one lead when the same delivery id arrives concu
   assert.equal((await listLeadsByClient(client.id, { limit: 50, offset: 0, status: null, source: null })).total, 1);
 });
 
-test('insertLead with an empty-string dedupeKey throws on the second delivery', async () => {
-  const { insertLead } = await loadDatabase();
+test('insertLead treats an empty or whitespace-only dedupeKey as no key, so repeated deliveries are all stored', async () => {
+  const { insertLead, listLeadsByClient } = await loadDatabase();
   const client = await makeClient();
   const wp = await makeWordpress(client.id);
-  assert.equal((await insertLead(leadInput(client.id, wp.id, { dedupeKey: '' }))).duplicate, false);
-  // KNOWN BUG: '' is stored (the partial index only excludes NULL) but the duplicate branch treats it as "no key" and throws.
-  await assert.rejects(() => insertLead(leadInput(client.id, wp.id, { dedupeKey: '' })), /No se pudo guardar el lead/);
+  const first = await insertLead(leadInput(client.id, wp.id, { dedupeKey: '' }));
+  const second = await insertLead(leadInput(client.id, wp.id, { dedupeKey: '' }));
+  const third = await insertLead(leadInput(client.id, wp.id, { dedupeKey: '   ' }));
+  assert.deepEqual([first.duplicate, second.duplicate, third.duplicate], [false, false, false]);
+  assert.equal(new Set([first.lead.id, second.lead.id, third.lead.id]).size, 3);
+  assert.equal((await listLeadsByClient(client.id, { limit: 50, offset: 0, status: null, source: null })).total, 3);
 });
 
 test('insertLead rejects unknown clients and integrations with foreign-key errors', async () => {

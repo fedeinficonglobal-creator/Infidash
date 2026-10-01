@@ -62,17 +62,27 @@ test('createUser rejects duplicate emails (case and whitespace insensitive) and 
   );
 });
 
-test('createUser is not atomic: a failing membership insert leaves the user row behind', async () => {
+test('createUser is atomic: a failing membership insert leaves no user row and the email stays reusable', async () => {
   const { createUser, listUsers } = await loadDatabase();
   const email = `orphan-${unique()}@infidash.local`;
-  // KNOWN BUG: the INSERT INTO users is committed before client_memberships is written, so an unknown client id
-  // throws a foreign-key error but the user already exists (and the email can no longer be reused).
   await assert.rejects(
     () => createUser({ email, name: 'Orphan', password: PASSWORD, role: 'viewer', clientIds: [MISSING_ID] }),
     /foreign key/i,
   );
-  assert.ok((await listUsers()).some((user) => user.email === email));
-  await assert.rejects(() => createUser({ email, name: 'Retry', password: PASSWORD, role: 'viewer' }), /duplicate key/i);
+  assert.ok(!(await listUsers()).some((user) => user.email === email));
+  const retry = await createUser({ email, name: 'Retry', password: PASSWORD, role: 'viewer' });
+  assert.equal(retry.email, email);
+});
+
+test('updateUserRole is atomic: a failing membership replacement keeps the previous memberships and fields', async () => {
+  const { createClient, updateUserRole } = await loadDatabase();
+  const client = await createClient({ name: `Atomic update ${unique()}` });
+  const { user } = await makeUser('viewer', { clientIds: [client.id], name: 'Before' });
+  await assert.rejects(() => updateUserRole(user.id, { name: 'After', clientIds: [MISSING_ID] }), /foreign key/i);
+  const unchanged = await updateUserRole(user.id, {});
+  assert.ok(unchanged);
+  assert.equal(unchanged.name, 'Before');
+  assert.deepEqual(unchanged.clientIds, [client.id]);
 });
 
 test('user text and password survive quotes, backslashes and unicode', async () => {
@@ -299,9 +309,9 @@ test('deleteUser returns the removed user, cascades to sessions and is idempoten
   assert.ok(removed);
   assert.equal(removed.id, user.id);
   assert.equal(removed.email, user.email);
-  // Quirk: clientIds are read after the cascade deleted the memberships, so a viewer always reports [].
+  // Memberships are read before the cascade delete, so the returned user reports the clients it had.
   assert.deepEqual(user.clientIds, [client.id]);
-  assert.deepEqual(removed.clientIds, []);
+  assert.deepEqual(removed.clientIds, [client.id]);
 
   assert.equal(await getSessionByToken(login.token), null);
   assert.equal(await countSessions('user_id', user.id), 0);

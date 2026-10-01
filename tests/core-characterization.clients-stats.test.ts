@@ -61,13 +61,12 @@ test('createClient clamps healthScore to 0..100 and uses 80 for non-finite value
   }
 });
 
-test('createClient returns the unrounded in-memory healthScore while the INTEGER column stores the rounded value', async () => {
+test('createClient returns the persisted (rounded) healthScore, matching what listClients reads', async () => {
   const { createClient, listClients } = await loadDatabase();
-  // KNOWN BUG: the value returned by createClient (55.5) differs from what is persisted and listed (56),
-  // because the result is built from the input record rather than re-read from PostgreSQL.
+  // The INTEGER column rounds 55.5 to 56; the returned record is the persisted row, not the unrounded input.
   const created = await createClient({ name: `Fractional ${unique()}`, healthScore: 55.5 });
-  assert.equal(created.healthScore, 55.5);
-  assert.equal((await listClients({ clientIds: [created.id] }))[0]?.healthScore, 56);
+  assert.equal(created.healthScore, 56);
+  assert.deepEqual((await listClients({ clientIds: [created.id] }))[0], created);
 });
 
 test('createClient merges partial kpiThresholds over the defaults and persists them as JSON', async () => {
