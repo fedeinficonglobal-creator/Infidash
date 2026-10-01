@@ -63,13 +63,15 @@ import {
   updateUserRole,
   upsertDailyStat,
   upsertUxSnapshot,
+  getDatabase,
   type UserRole,
 } from './src/lib/database.js';
 import { canAccessClient } from './src/lib/auth.js';
 import { fetchClaritySnapshots } from './src/lib/claritySync.js';
 import { hasClarityMetric } from './src/lib/clarityAvailability.js';
 import { contentRoutes } from './src/server/content/routes.js';
-import { closeEditorialPool } from './src/server/content/postgres.js';
+import { closeEditorialPool, getEditorialPool } from './src/server/content/postgres.js';
+import { runEditorialMigrations } from './src/server/content/migrations.js';
 import { LoginThrottle } from './src/lib/loginThrottle.js';
 import { redactIntegrationSecrets } from './src/lib/integrationPresentation.js';
 import { fetchWooCommercePurchaseWindow, parseWooRefundPolicy, probeWooCommerceOrders, summarizeCompletedOrderSales } from './src/lib/woocommerce.js';
@@ -83,7 +85,7 @@ import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.
 import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
 import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPdf.js';
 import { reportSmtpConfigured, sendReportEmail } from './src/lib/reportEmail.js';
-import { shouldServeHttp } from './src/lib/serverRuntime.js';
+import { shouldRunEditorialMigrations, shouldServeHttp } from './src/lib/serverRuntime.js';
 import { isOperationalPlanDomain, isPlanPeriod, normalizeOperationalPlanRows } from './src/lib/operationalPlanValidation.js';
 
 const app = fastify({
@@ -1725,15 +1727,21 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 if (shouldServeHttp(process.env)) {
-  void app
-    .listen({ port, host: '0.0.0.0' })
-    .then(() => {
-      console.log(`[infidash] API escuchando en http://127.0.0.1:${port}`);
-    })
-    .catch((error) => {
-      console.error('[infidash] failed to start', error);
-      process.exit(1);
-    });
+  void (async () => {
+    // Apply pending editorial migrations before serving, so new code never runs against an old schema.
+    // A failing migration stops the boot loudly instead of serving 500s.
+    if (shouldRunEditorialMigrations(process.env)) {
+      // The editorial schema references core tables (public.clients, users…), so create those first.
+      getDatabase();
+      const migrations = await runEditorialMigrations(getEditorialPool());
+      if (migrations.applied.length) console.log('[infidash] migraciones editoriales aplicadas', migrations.applied);
+    }
+    await app.listen({ port, host: '0.0.0.0' });
+    console.log(`[infidash] API escuchando en http://127.0.0.1:${port}`);
+  })().catch((error) => {
+    console.error('[infidash] failed to start', error);
+    process.exit(1);
+  });
 }
 
 export { app };
