@@ -4,6 +4,7 @@ import pg from 'pg';
 import { buildPostgresPoolConfig } from '../src/server/content/postgres.js';
 import {
   buildCorePoolConfig,
+  parseTimestamptzAsIso,
   coreTypeParsers,
   coreAll,
   coreGet,
@@ -197,10 +198,31 @@ test('the core pool returns DATE columns as raw YYYY-MM-DD strings and leaves ev
   assert.equal(parseDate('2024-01-31'), '2024-01-31');
   assert.equal(parseDate('0001-01-01'), '0001-01-01');
   assert.equal(parseDate('9999-12-31'), '9999-12-31');
-  for (const oid of [16, 20, 23, 25, 1114, 1184, 1700, 3802]) {
+  for (const oid of [16, 20, 23, 25, 1114, 1700, 3802]) {
     assert.equal(overrides.getTypeParser(oid, 'text'), pg.types.getTypeParser(oid, 'text'), `oid ${oid}`);
   }
   // pg's own DATE parser still yields a Date, and neither the global parsers nor the editorial pool are affected.
   assert.ok(pg.types.getTypeParser(1082, 'text')('2024-01-31') instanceof Date);
   assert.equal(buildPostgresPoolConfig({ DATABASE_URL: 'postgres://x/y' }).types, undefined);
+});
+
+test('the core pool returns TIMESTAMPTZ as the fixed-width UTC ISO string the API always used', () => {
+  const overrides = new pg.TypeOverrides(buildCorePoolConfig({ DATABASE_URL: 'postgres://x/y' }).types);
+  const parse = overrides.getTypeParser(1184, 'text') as unknown as (value: string) => unknown;
+  assert.equal(parse, parseTimestamptzAsIso);
+  // Whatever offset or fraction PostgreSQL prints (it follows the session time zone), the output is canonical UTC.
+  assert.equal(parse('2024-01-31 10:00:00+00'), '2024-01-31T10:00:00.000Z');
+  assert.equal(parse('2024-01-31 12:00:00.123+02'), '2024-01-31T10:00:00.123Z');
+  assert.equal(parse('2024-01-31 05:30:00.5-05'), '2024-01-31T10:30:00.500Z');
+  assert.equal(parse('2024-01-31 10:00:00.123456+00'), '2024-01-31T10:00:00.123Z');
+  assert.equal(parse('2024-01-31 10:00:00.999999+00'), '2024-01-31T10:00:00.999Z');
+  assert.equal(parse('2024-01-31 10:00:00.123+05:30'), '2024-01-31T04:30:00.123Z');
+  // Round trip with what the app writes.
+  const iso = '2030-01-01T00:00:03.007Z';
+  assert.equal(parse('2030-01-01 00:00:03.007+00'), iso);
+  // Values that are not a finite instant never throw while reading a row.
+  assert.equal(parse('infinity'), 'infinity');
+  assert.equal(parse('-infinity'), '-infinity');
+  // The global pg parser (and so the editorial pool) still yields a Date.
+  assert.ok(pg.types.getTypeParser(1184, 'text')('2024-01-31 10:00:00+00') instanceof Date);
 });

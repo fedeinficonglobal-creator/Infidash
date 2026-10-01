@@ -1152,7 +1152,7 @@ export async function authenticateUser(email: string, password: string): Promise
   await coreRun(
     db,
     `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5::timestamptz)`,
     [crypto.randomUUID(), row.id, hashToken(token), nowIso(), expiresAt],
   );
 
@@ -1172,11 +1172,11 @@ export async function revokeAllSessionsForUser(userId: string) {
 /**
  * Deletes every session that has expired at `now` and returns how many rows were removed. Expired sessions are
  * otherwise only deleted when their own token is presented, so abandoned ones would accumulate forever.
- * `expires_at` is always written with toISOString() (fixed-width UTC), so comparing the TEXT values lexicographically
- * equals comparing the instants; `<=` matches getSessionByToken, which treats an expiry equal to now as expired.
+ * `expires_at` is a native TIMESTAMPTZ (idx_sessions_expires_at supports this scan); `<=` matches getSessionByToken,
+ * which treats an expiry equal to now as expired.
  */
 export async function purgeExpiredSessions(now = new Date()): Promise<number> {
-  const result = await coreRun(getCoreDb(), `DELETE FROM sessions WHERE expires_at <= $1`, [now.toISOString()]);
+  const result = await coreRun(getCoreDb(), `DELETE FROM sessions WHERE expires_at <= $1::timestamptz`, [now.toISOString()]);
   return result.changes;
 }
 
@@ -1635,7 +1635,7 @@ export async function insertLead(input: {
     db,
     `INSERT INTO leads (
       id, client_id, integration_id, source, name, email, phone, message, status, dedupe_key, raw_payload_json, received_at, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', $9, $10, $11, $12, $13) ON CONFLICT DO NOTHING`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', $9, $10, $11::timestamptz, $12, $13) ON CONFLICT DO NOTHING`,
     [
       record.id,
       record.client_id,

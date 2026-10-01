@@ -46,7 +46,13 @@ async function assertCoreSchema(db: Queryable, schema: string, options: { baseli
   for (const [table, expected] of Object.entries(EXPECTED_COLUMNS)) {
     for (const [column, dataType] of expected) {
       // 0006 converts daily_stats.stat_date from the baseline's TEXT to a native DATE.
-      const expectedType = table === 'daily_stats' && column === 'stat_date' && !options.baselineOnly ? 'date' : dataType;
+      // 0007 converts sessions.expires_at and leads.received_at to TIMESTAMPTZ.
+      const converted = !options.baselineOnly && (
+        (table === 'daily_stats' && column === 'stat_date' && 'date')
+        || (table === 'sessions' && column === 'expires_at' && 'timestamp with time zone')
+        || (table === 'leads' && column === 'received_at' && 'timestamp with time zone')
+      );
+      const expectedType = converted || dataType;
       assert.equal(actual.get(`${table}.${column}`), expectedType, `${table}.${column}`);
     }
   }
@@ -61,6 +67,8 @@ async function assertCoreSchema(db: Queryable, schema: string, options: { baseli
   for (const name of EXPECTED_INDEXES) {
     assert.ok(indexNames.has(name), `missing index ${name}`);
   }
+  // 0007 adds the index that supports the hourly expired-session purge.
+  assert.equal(indexNames.has('idx_sessions_expires_at'), !options.baselineOnly, 'idx_sessions_expires_at exists only after 0007');
 }
 
 test('the core migration is applied by the runner, twice, and creates every core table, column and index', async () => {
@@ -77,8 +85,8 @@ test('the core migration is applied by the runner, twice, and creates every core
 
     const schema = (await pool.query('SELECT current_schema() AS schema')).rows[0].schema;
     await assertCoreSchema(pool, schema, { baselineOnly: false });
-    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql', '0006_core_daily_stats_date.sql')`);
-    assert.equal(registry.rows.length, 3);
+    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql', '0006_core_daily_stats_date.sql', '0007_core_timestamptz_sessions_leads.sql')`);
+    assert.equal(registry.rows.length, 4);
   } finally {
     await closeCorePool();
   }
@@ -215,5 +223,130 @@ test('the core pool reads a DATE column back as a YYYY-MM-DD string, never a Dat
     assert.deepEqual(rows[0], { day: '2024-01-31', first_day: '0001-01-01', param_day: '2024-02-29' });
   } finally {
     await closeCorePool();
+  }
+});
+
+test('0007 converts sessions.expires_at and leads.received_at to TIMESTAMPTZ: garbage sessions deleted, leads kept with a fallback, indexes kept, idempotent', async () => {
+  const { getCorePool, closeCorePool } = await import('../src/lib/corePool.js');
+  const baseline = await readFile(path.join(migrationsDirectory, '0004_core_baseline.sql'), 'utf8');
+  const migration = await readFile(path.join(migrationsDirectory, '0007_core_timestamptz_sessions_leads.sql'), 'utf8');
+  const schema = `core_timestamptz_test_${process.pid}`;
+  const client = await getCorePool().connect();
+  const columnType = async (table: string, column: string) =>
+    (await client.query(`SELECT data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3`, [schema, table, column])).rows[0].data_type;
+  const insertLead = (id: string, receivedAt: string, createdAt: string) =>
+    client.query(
+      `INSERT INTO leads (id, client_id, source, status, raw_payload_json, received_at, created_at, updated_at) VALUES ($1, 'c', 'wordpress', 'new', '{}', $2, $3, $3)`,
+      [id, receivedAt, createdAt],
+    );
+  const insertSession = (id: string, expiresAt: string) =>
+    client.query(`INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES ($1, 'u', $2, '2024-01-01T00:00:00.000Z', $3)`, [id, `hash-${id}`, expiresAt]);
+  try {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}`);
+    await client.query(baseline);
+    assert.equal(await columnType('sessions', 'expires_at'), 'text');
+    assert.equal(await columnType('leads', 'received_at'), 'text');
+
+    await client.query(`INSERT INTO users (id, email, name, password_hash, role, created_at, updated_at) VALUES ('u', 'u@x.test', 'U', 'h', 'admin', '2024-01-01', '2024-01-01')`);
+    await client.query(`INSERT INTO clients (id, name, slug, created_at, updated_at) VALUES ('c', 'C', 'c', '2024-01-01', '2024-01-01')`);
+
+    await insertSession('s-live', '2030-01-01T00:00:00.000Z');
+    await insertSession('s-offset', '2030-06-01 10:00:00+02');
+    await insertSession('s-garbage', 'soon');
+    await insertSession('s-impossible', '2030-02-30T00:00:00.000Z');
+    await insertSession('s-empty', '');
+    await insertSession('s-special', 'infinity');
+
+    // l1 and l2 share an instant (id is the tiebreaker); lg1 and lg2 carry unparseable received_at values.
+    await insertLead('l1', '2024-03-01T10:00:00.000Z', '2024-03-01T10:00:00.000Z');
+    await insertLead('l2', '2024-03-01T10:00:00.000Z', '2024-03-01T10:00:00.000Z');
+    await insertLead('l3', '2024-03-02T09:00:00.000Z', '2024-03-02T09:00:00.000Z');
+    await insertLead('l4', '2024-02-01 10:00:00+02', '2024-02-01T08:00:00.000Z');
+    await insertLead('lg1', 'garbage', '2024-01-15T08:00:00.000Z');
+    await insertLead('lg2', '2024-02-30T00:00:00Z', 'also garbage');
+
+    // Order of the canonical ISO rows under the old TEXT comparison.
+    const orderBefore = (await client.query(`SELECT id FROM leads WHERE id IN ('l1', 'l2', 'l3') ORDER BY received_at DESC, id DESC`)).rows.map((row) => row.id);
+    assert.deepEqual(orderBefore, ['l3', 'l2', 'l1']);
+
+    await client.query(migration);
+
+    assert.equal(await columnType('sessions', 'expires_at'), 'timestamp with time zone');
+    assert.equal(await columnType('leads', 'received_at'), 'timestamp with time zone');
+    for (const [table, column] of [['sessions', 'expires_at_ts'], ['leads', 'received_at_ts']]) {
+      const helper = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3`, [schema, table, column]);
+      assert.equal(helper.rowCount, 0, `the temporary helper column ${table}.${column} is gone`);
+    }
+
+    // Unreadable sessions are deleted; readable ones keep their instant (read back through the core pool parser).
+    const sessions = await client.query(`SELECT id, expires_at FROM sessions ORDER BY id`);
+    assert.deepEqual(sessions.rows, [
+      { id: 's-live', expires_at: '2030-01-01T00:00:00.000Z' },
+      { id: 's-offset', expires_at: '2030-06-01T08:00:00.000Z' },
+    ]);
+
+    // No lead is ever deleted; unparseable dates fall back to created_at, then to now(), with the original kept.
+    const leads = await client.query(`SELECT id, received_at FROM leads ORDER BY id`);
+    assert.equal(leads.rows.length, 6);
+    const byId = new Map<string, string>(leads.rows.map((row) => [row.id, row.received_at]));
+    assert.equal(byId.get('l1'), '2024-03-01T10:00:00.000Z');
+    assert.equal(byId.get('l4'), '2024-02-01T08:00:00.000Z');
+    assert.equal(byId.get('lg1'), '2024-01-15T08:00:00.000Z');
+    assert.ok(Math.abs(Date.parse(byId.get('lg2') as string) - Date.now()) < 10 * 60_000, 'lg2 falls back to now()');
+
+    const fallbacks = await client.query(`SELECT lead_id, original_received_at, replacement_received_at FROM leads_received_at_fallbacks ORDER BY lead_id`);
+    assert.deepEqual(fallbacks.rows.map((row) => [row.lead_id, row.original_received_at]), [['lg1', 'garbage'], ['lg2', '2024-02-30T00:00:00Z']]);
+    assert.equal(fallbacks.rows[0].replacement_received_at, '2024-01-15T08:00:00.000Z');
+    assert.equal(fallbacks.rows[1].replacement_received_at, byId.get('lg2'));
+
+    // The listing order of the untouched rows is unchanged, and the full order is newest first with id as tiebreaker.
+    const orderAfter = (await client.query(`SELECT id FROM leads WHERE id IN ('l1', 'l2', 'l3') ORDER BY received_at DESC, id DESC`)).rows.map((row) => row.id);
+    assert.deepEqual(orderAfter, orderBefore);
+    const fullOrder = (await client.query(`SELECT id FROM leads ORDER BY received_at DESC, id DESC`)).rows.map((row) => row.id);
+    assert.deepEqual(fullOrder, ['lg2', 'l3', 'l2', 'l1', 'l4', 'lg1']);
+
+    // The listing index survived the type change and the purge index exists.
+    const indexes = await client.query(`SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename IN ('leads', 'sessions')`, [schema]);
+    const definition = (name: string) => indexes.rows.find((row) => row.indexname === name)?.indexdef as string | undefined;
+    assert.match(definition('idx_leads_client_received_id') ?? '', /\(client_id, received_at DESC, id DESC\)/);
+    assert.match(definition('idx_sessions_expires_at') ?? '', /\(expires_at\)/);
+
+    // Native comparisons work with ISO strings bound as timestamptz.
+    const expired = await client.query(`SELECT count(*)::int AS total FROM sessions WHERE expires_at <= $1::timestamptz`, ['2030-03-01T00:00:00.000Z']);
+    assert.equal(expired.rows[0].total, 1);
+
+    // Rerunning is a no-op: nothing is deleted, moved or converted a second time.
+    await client.query(migration);
+    assert.equal((await client.query(`SELECT count(*)::int AS total FROM sessions`)).rows[0].total, 2);
+    assert.equal((await client.query(`SELECT count(*)::int AS total FROM leads`)).rows[0].total, 6);
+    assert.equal((await client.query(`SELECT count(*)::int AS total FROM leads_received_at_fallbacks`)).rows[0].total, 2);
+    assert.equal(await columnType('sessions', 'expires_at'), 'timestamp with time zone');
+  } finally {
+    try {
+      await client.query('SET search_path TO DEFAULT');
+      await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally {
+      client.release();
+      await closeCorePool();
+    }
+  }
+});
+
+test('the core pool reads a TIMESTAMPTZ column back as a fixed-width UTC ISO string in any session time zone', async () => {
+  const { getCorePool, closeCorePool } = await import('../src/lib/corePool.js');
+  const client = await getCorePool().connect();
+  try {
+    await client.query(`SET TIME ZONE 'Europe/Madrid'`);
+    const { rows } = await client.query(`SELECT TIMESTAMPTZ '2024-07-01 12:00:00.123456+02' AS summer, $1::timestamptz AS param`, ['2030-01-01T00:00:03.007Z']);
+    assert.deepEqual(rows[0], { summer: '2024-07-01T10:00:00.123Z', param: '2030-01-01T00:00:03.007Z' });
+  } finally {
+    try {
+      await client.query('RESET TIME ZONE');
+    } finally {
+      client.release();
+      await closeCorePool();
+    }
   }
 });
