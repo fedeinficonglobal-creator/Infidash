@@ -17,6 +17,7 @@ Infidash es un dashboard para agencias con autenticación local y persistencia e
 - `npm run test` — suite de regresión
 - `npm run clean` — borra `dist/` y `server.js` (no toca `data/`)
 - `npm run db:migrate:editorial` — aplica migraciones editoriales pendientes con lock y checksum
+- Esquema de base de datos: todo cambio de esquema, también el del núcleo (`public`), va en `db/migrations/NNNN_*.sql` (las migraciones del núcleo se llaman `NNNN_core_*.sql` y se aplican siempre antes que las editoriales). `0004_core_baseline.sql` congela el esquema núcleo existente y es idempotente (`IF NOT EXISTS` / bloques `DO`), así que los despliegues existentes no necesitan ningún paso manual: se aplica solo al arrancar, sin efecto si el esquema ya existe. Ya no hay DDL en `src/lib/database.ts`; los datos semilla y el backfill de membresías siguen en código.
 - `npm run content:import` — valida en dry-run un export de Content Hub; requiere `--apply` para escribir
 
 ## Variables de entorno

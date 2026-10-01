@@ -33,9 +33,33 @@ async function ensureMigrationRegistry(client: PoolClient) {
   `);
 }
 
-export async function runEditorialMigrations(
+// Core (public schema) migrations are named NNNN_core_*.sql. They must exist before any editorial migration because
+// the editorial schema references public.clients/users/..., so they are always applied first, in version order.
+const CORE_MIGRATION_PATTERN = /^\d{4}_core_/;
+
+export function isCoreMigration(version: string) {
+  return CORE_MIGRATION_PATTERN.test(version);
+}
+
+/** Core migrations first, then the rest, each group in version order. */
+export function orderMigrations(versions: string[]) {
+  return [...versions.filter(isCoreMigration), ...versions.filter((version) => !isCoreMigration(version))];
+}
+
+/** Applies only the core (public schema) migrations. Used by initializeCoreDatabase() before seeding. */
+export function runCoreMigrations(pool: Pool, directory?: string): Promise<MigrationResult> {
+  return runMigrations(pool, directory, isCoreMigration);
+}
+
+/** Applies every pending migration, core ones first. */
+export function runEditorialMigrations(pool: Pool, directory?: string): Promise<MigrationResult> {
+  return runMigrations(pool, directory, () => true);
+}
+
+async function runMigrations(
   pool: Pool,
   directory = path.resolve(process.cwd(), 'db', 'migrations'),
+  include: (version: string) => boolean,
 ): Promise<MigrationResult> {
   const client = await pool.connect();
   const result: MigrationResult = { applied: [], alreadyApplied: [] };
@@ -44,7 +68,7 @@ export async function runEditorialMigrations(
     await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_ID]);
     await ensureMigrationRegistry(client);
 
-    for (const version of await discoverMigrations(directory)) {
+    for (const version of orderMigrations(await discoverMigrations(directory)).filter(include)) {
       const sql = await fs.readFile(path.join(directory, version), 'utf8');
       const checksum = checksumMigration(sql);
       const existing = await client.query<{ checksum: string }>(
