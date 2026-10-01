@@ -1848,15 +1848,6 @@ async function getClientById(clientId: string, db: CoreQueryable = getCoreDb()) 
   return row ? rowToClient(row) : null;
 }
 
-/**
- * Synchronous psql-shim lookup, kept only for the monthly KPI functions that have not moved to the async
- * pool yet and cannot await. Remove it together with the last of them.
- */
-function getClientByIdShim(clientId: string) {
-  const row = getDatabase().prepare(`SELECT * FROM clients WHERE id = ?`).get(clientId) as any;
-  return row ? rowToClient(row) : null;
-}
-
 async function getIntegrationRowById(id: string, db: CoreQueryable) {
   const row = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [id]);
   return row ?? null;
@@ -2575,33 +2566,32 @@ export async function saveRrssChannel(input: RrssChannelInput, db: CoreQueryable
   return rowToRrssChannel(created);
 }
 
-export function listMonthlyKpis(clientId: string, monthKey?: string) {
+export async function listMonthlyKpis(clientId: string, monthKey?: string, db: CoreQueryable = getCoreDb()) {
   const rows = monthKey
-    ? getDatabase().prepare(`SELECT * FROM monthly_kpis WHERE client_id = ? AND month_key = ? ORDER BY department_key ASC, metric_key ASC`).all(clientId, monthKey)
-    : getDatabase().prepare(`SELECT * FROM monthly_kpis WHERE client_id = ? ORDER BY month_key DESC, department_key ASC, metric_key ASC`).all(clientId);
-  return (rows as any[]).map(rowToMonthlyKpi);
+    ? await coreAll(db, `SELECT * FROM monthly_kpis WHERE client_id = $1 AND month_key = $2 ORDER BY department_key ASC, metric_key ASC`, [clientId, monthKey])
+    : await coreAll(db, `SELECT * FROM monthly_kpis WHERE client_id = $1 ORDER BY month_key DESC, department_key ASC, metric_key ASC`, [clientId]);
+  return rows.map(rowToMonthlyKpi);
 }
 
-export function saveMonthlyKpi(input: MonthlyKpiInput) {
-  const db = getDatabase();
-  const client = getClientByIdShim(input.clientId);
+export async function saveMonthlyKpi(input: MonthlyKpiInput, db: CoreQueryable = getCoreDb()) {
+  const client = await getClientById(input.clientId, db);
   if (!client) {
     return null;
   }
   nextMonthKey(input.monthKey);
-  if (getMonthlyKpiCycleRow(input.clientId, input.monthKey)?.closed_at) {
+  if ((await getMonthlyKpiCycleRow(input.clientId, input.monthKey, db))?.closed_at) {
     throw new UserFacingError('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
   }
 
   const timestamp = nowIso();
   const existing = input.id
-    ? (db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(input.id) as any)
-    : (db.prepare(`SELECT * FROM monthly_kpis WHERE client_id = ? AND department_key = ? AND metric_key = ? AND month_key = ?`).get(
+    ? await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [input.id])
+    : await coreGet(db, `SELECT * FROM monthly_kpis WHERE client_id = $1 AND department_key = $2 AND metric_key = $3 AND month_key = $4`, [
         input.clientId,
         input.departmentKey,
         input.metricKey,
         input.monthKey,
-      ) as any);
+      ]);
 
   if (existing?.client_id !== undefined && existing.client_id !== input.clientId) {
     throw new UserFacingError('El KPI no pertenece a este cliente');
@@ -2616,13 +2606,13 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
     department_key: input.departmentKey,
     metric_key: input.metricKey.trim(),
     month_key: input.monthKey.trim(),
-    target_value: typeof input.targetValue === 'number' ? input.targetValue : null,
+    target_value: typeof input.targetValue === 'number' ? finiteOrNull(input.targetValue) : null,
     target_text: input.targetText ?? null,
-    actual_value: typeof input.actualValue === 'number' ? input.actualValue : null,
+    actual_value: typeof input.actualValue === 'number' ? finiteOrNull(input.actualValue) : null,
     actual_text: input.actualText ?? null,
     status: input.status ?? existing?.status ?? 'unknown',
-    difference_value: typeof input.differenceValue === 'number' ? input.differenceValue : null,
-    difference_pct: typeof input.differencePct === 'number' ? input.differencePct : null,
+    difference_value: typeof input.differenceValue === 'number' ? finiteOrNull(input.differenceValue) : null,
+    difference_pct: typeof input.differencePct === 'number' ? finiteOrNull(input.differencePct) : null,
     notes: input.notes ?? null,
     closed_at: existing?.closed_at ?? null,
     created_by_user_id: input.createdByUserId ?? existing?.created_by_user_id ?? null,
@@ -2631,100 +2621,109 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
     updated_at: timestamp,
   };
 
+  // Both writes are single statements whose WHERE re-checks the closed state, so a close that lands between the
+  // checks above and the write still wins (0 changed rows -> the same Spanish errors as before).
   if (existing) {
-    const update = db.prepare(
+    const update = await coreRun(
+      db,
       `UPDATE monthly_kpis
-       SET department_key = ?, metric_key = ?, month_key = ?, target_value = ?, target_text = ?, actual_value = ?, actual_text = ?, status = ?, difference_value = ?, difference_pct = ?, notes = ?, closed_at = ?, created_by_user_id = ?, updated_by_user_id = ?, updated_at = ?
-       WHERE id = ? AND closed_at IS NULL AND NOT EXISTS (
-         SELECT 1 FROM monthly_kpi_cycles WHERE client_id = ? AND month_key = ? AND closed_at IS NOT NULL
-       )`
-    ).run(
-      record.department_key,
-      record.metric_key,
-      record.month_key,
-      record.target_value,
-      record.target_text,
-      record.actual_value,
-      record.actual_text,
-      record.status,
-      record.difference_value,
-      record.difference_pct,
-      record.notes,
-      record.closed_at,
-      record.created_by_user_id,
-      record.updated_by_user_id,
-      record.updated_at,
-      record.id,
-      record.client_id,
-      record.month_key,
+       SET department_key = $1, metric_key = $2, month_key = $3, target_value = $4, target_text = $5, actual_value = $6, actual_text = $7, status = $8, difference_value = $9, difference_pct = $10, notes = $11, closed_at = $12, created_by_user_id = $13, updated_by_user_id = $14, updated_at = $15
+       WHERE id = $16 AND closed_at IS NULL AND NOT EXISTS (
+         SELECT 1 FROM monthly_kpi_cycles WHERE client_id = $17 AND month_key = $18 AND closed_at IS NOT NULL
+       )`,
+      [
+        record.department_key,
+        record.metric_key,
+        record.month_key,
+        record.target_value,
+        record.target_text,
+        record.actual_value,
+        record.actual_text,
+        record.status,
+        record.difference_value,
+        record.difference_pct,
+        record.notes,
+        record.closed_at,
+        record.created_by_user_id,
+        record.updated_by_user_id,
+        record.updated_at,
+        record.id,
+        record.client_id,
+        record.month_key,
+      ],
     );
     if (update.changes === 0) throw new UserFacingError('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
   } else {
-    const insert = db.prepare(
+    // INSERT ... SELECT gives the parameters no column to infer their type from, hence the explicit casts.
+    const insert = await coreRun(
+      db,
       `INSERT INTO monthly_kpis (
         id, client_id, department_key, metric_key, month_key, target_value, target_text, actual_value, actual_text, status,
         difference_value, difference_pct, notes, closed_at, created_by_user_id, updated_by_user_id, created_at, updated_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        WHERE NOT EXISTS (SELECT 1 FROM monthly_kpi_cycles WHERE client_id = ? AND month_key = ? AND closed_at IS NOT NULL)`
-    ).run(
-      record.id,
-      record.client_id,
-      record.department_key,
-      record.metric_key,
-      record.month_key,
-      record.target_value,
-      record.target_text,
-      record.actual_value,
-      record.actual_text,
-      record.status,
-      record.difference_value,
-      record.difference_pct,
-      record.notes,
-      record.closed_at,
-      record.created_by_user_id,
-      record.updated_by_user_id,
-      record.created_at,
-      record.updated_at,
-      record.client_id,
-      record.month_key,
+      ) SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::real, $7::text, $8::real, $9::text, $10::text,
+          $11::real, $12::real, $13::text, $14::text, $15::text, $16::text, $17::text, $18::text
+        WHERE NOT EXISTS (SELECT 1 FROM monthly_kpi_cycles WHERE client_id = $19 AND month_key = $20 AND closed_at IS NOT NULL)`,
+      [
+        record.id,
+        record.client_id,
+        record.department_key,
+        record.metric_key,
+        record.month_key,
+        record.target_value,
+        record.target_text,
+        record.actual_value,
+        record.actual_text,
+        record.status,
+        record.difference_value,
+        record.difference_pct,
+        record.notes,
+        record.closed_at,
+        record.created_by_user_id,
+        record.updated_by_user_id,
+        record.created_at,
+        record.updated_at,
+        record.client_id,
+        record.month_key,
+      ],
     );
     if (insert.changes === 0) throw new UserFacingError('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
   }
 
-  const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(record.id) as any;
+  const saved = await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [record.id]);
   return rowToMonthlyKpi(saved);
 }
 
-export function closeMonthlyKpi(id: string, closedAt = nowIso(), actorUserId: string | null = null) {
-  const db = getDatabase();
-  const existing = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+export async function closeMonthlyKpi(id: string, closedAt = nowIso(), actorUserId: string | null = null, db: CoreQueryable = getCoreDb()) {
+  const existing = await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [id]);
   if (!existing) {
     return null;
   }
   if (existing.closed_at) return rowToMonthlyKpi(existing);
   const timestamp = nowIso();
-  db.prepare(`WITH changed AS (
-    UPDATE monthly_kpis SET closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL RETURNING *
-  ) INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
-    SELECT ?, id, client_id, month_key, 'closed', ?, NULL, ?, row_to_json(changed)::text FROM changed`)
-    .run(closedAt, timestamp, id, crypto.randomUUID(), actorUserId, timestamp);
-  const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  // One statement (UPDATE + audit INSERT in a CTE) is atomic by itself, so no explicit transaction is needed.
+  await coreRun(
+    db,
+    `WITH changed AS (
+      UPDATE monthly_kpis SET closed_at = $1, updated_at = $2 WHERE id = $3 AND closed_at IS NULL RETURNING *
+    ) INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+      SELECT $4::text, id, client_id, month_key, 'closed', $5::text, NULL, $6::text, row_to_json(changed)::text FROM changed`,
+    [closedAt, timestamp, id, crypto.randomUUID(), actorUserId, timestamp],
+  );
+  const saved = await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [id]);
   return rowToMonthlyKpi(saved);
 }
 
-export function getMonthlyKpiById(id: string) {
-  const row = getDatabase().prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+export async function getMonthlyKpiById(id: string, db: CoreQueryable = getCoreDb()) {
+  const row = await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [id]);
   return row ? rowToMonthlyKpi(row) : null;
 }
 
-function getMonthlyKpiCycleRow(clientId: string, monthKey: string) {
-  return getDatabase().prepare(`SELECT * FROM monthly_kpi_cycles WHERE client_id = ? AND month_key = ?`)
-    .get(clientId, monthKey) as any;
+async function getMonthlyKpiCycleRow(clientId: string, monthKey: string, db: CoreQueryable) {
+  return await coreGet(db, `SELECT * FROM monthly_kpi_cycles WHERE client_id = $1 AND month_key = $2`, [clientId, monthKey]);
 }
 
-export function listMonthlyKpiCycles(clientId: string) {
-  const rows = getDatabase().prepare(`SELECT * FROM monthly_kpi_cycles WHERE client_id = ? ORDER BY month_key DESC`)
-    .all(clientId) as any[];
+export async function listMonthlyKpiCycles(clientId: string, db: CoreQueryable = getCoreDb()) {
+  const rows = await coreAll(db, `SELECT * FROM monthly_kpi_cycles WHERE client_id = $1 ORDER BY month_key DESC`, [clientId]);
   return rows.map((row) => ({
     clientId: row.client_id as string,
     monthKey: row.month_key as string,
@@ -2736,120 +2735,127 @@ export function listMonthlyKpiCycles(clientId: string) {
   }));
 }
 
-function transitionMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string | null, at: Date, allowReclose: boolean) {
+async function transitionMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string | null, at: Date, allowReclose: boolean, db: CoreQueryable) {
   const nextMonth = nextMonthKey(monthKey);
   const timestamp = at.toISOString();
   const closeToken = crypto.randomUUID();
-  const db = getDatabase();
-  db.prepare(`WITH cycle AS (
-    INSERT INTO monthly_kpi_cycles (client_id, month_key, closed_at, closed_by_user_id, close_token, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (client_id, month_key) DO UPDATE SET
-      closed_at = EXCLUDED.closed_at, closed_by_user_id = EXCLUDED.closed_by_user_id,
-      close_token = EXCLUDED.close_token, reopened_at = NULL, reopened_by_user_id = NULL,
-      reopen_reason = NULL, updated_at = EXCLUDED.updated_at
-    WHERE monthly_kpi_cycles.closed_at IS NULL AND ? = 1
-    RETURNING client_id, month_key, closed_at
-  ), closed_rows AS (
-    UPDATE monthly_kpis m SET closed_at = cycle.closed_at, updated_at = cycle.closed_at
-    FROM cycle WHERE m.client_id = cycle.client_id AND m.month_key = cycle.month_key AND m.closed_at IS NULL
-    RETURNING m.*
-  ), audit_rows AS (
-    INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
-    SELECT gen_random_uuid()::text, id, client_id, month_key, 'closed', ?, NULL, ?, row_to_json(closed_rows)::text
-    FROM closed_rows
-  ), next_rows AS (
-    INSERT INTO monthly_kpis (id, client_id, department_key, metric_key, month_key, target_value, target_text,
-      actual_value, actual_text, status, difference_value, difference_pct, notes, closed_at,
-      created_by_user_id, updated_by_user_id, created_at, updated_at)
-    SELECT gen_random_uuid()::text, m.client_id, m.department_key, m.metric_key, ?, m.target_value, m.target_text,
-      NULL, NULL, 'unknown', NULL, NULL, NULL, NULL, NULL, NULL, ?, ?
-    FROM monthly_kpis m JOIN cycle ON m.client_id = cycle.client_id AND m.month_key = cycle.month_key
-    ON CONFLICT (client_id, department_key, metric_key, month_key) DO NOTHING
-  ) SELECT COUNT(*) FROM cycle`)
-    .run(clientId, monthKey, timestamp, actorUserId, closeToken, timestamp, timestamp,
-      allowReclose ? 1 : 0, actorUserId, timestamp, nextMonth, timestamp, timestamp);
-  return getMonthlyKpiCycleRow(clientId, monthKey)?.close_token === closeToken;
+  // A single data-modifying CTE statement: the cycle upsert, the KPI close, the audit rows and the next-month rows
+  // commit or fail together, and ON CONFLICT ... WHERE closed_at IS NULL makes concurrent closers lose atomically.
+  await coreRun(
+    db,
+    `WITH cycle AS (
+      INSERT INTO monthly_kpi_cycles (client_id, month_key, closed_at, closed_by_user_id, close_token, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $3, $3)
+      ON CONFLICT (client_id, month_key) DO UPDATE SET
+        closed_at = EXCLUDED.closed_at, closed_by_user_id = EXCLUDED.closed_by_user_id,
+        close_token = EXCLUDED.close_token, reopened_at = NULL, reopened_by_user_id = NULL,
+        reopen_reason = NULL, updated_at = EXCLUDED.updated_at
+      WHERE monthly_kpi_cycles.closed_at IS NULL AND $6::boolean
+      RETURNING client_id, month_key, closed_at
+    ), closed_rows AS (
+      UPDATE monthly_kpis m SET closed_at = cycle.closed_at, updated_at = cycle.closed_at
+      FROM cycle WHERE m.client_id = cycle.client_id AND m.month_key = cycle.month_key AND m.closed_at IS NULL
+      RETURNING m.*
+    ), audit_rows AS (
+      INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+      SELECT gen_random_uuid()::text, id, client_id, month_key, 'closed', $4::text, NULL, $3::text, row_to_json(closed_rows)::text
+      FROM closed_rows
+    ), next_rows AS (
+      INSERT INTO monthly_kpis (id, client_id, department_key, metric_key, month_key, target_value, target_text,
+        actual_value, actual_text, status, difference_value, difference_pct, notes, closed_at,
+        created_by_user_id, updated_by_user_id, created_at, updated_at)
+      SELECT gen_random_uuid()::text, m.client_id, m.department_key, m.metric_key, $7::text, m.target_value, m.target_text,
+        NULL, NULL, 'unknown', NULL, NULL, NULL, NULL, NULL, NULL, $3::text, $3::text
+      FROM monthly_kpis m JOIN cycle ON m.client_id = cycle.client_id AND m.month_key = cycle.month_key
+      ON CONFLICT (client_id, department_key, metric_key, month_key) DO NOTHING
+    ) SELECT COUNT(*) FROM cycle`,
+    [clientId, monthKey, timestamp, actorUserId, closeToken, allowReclose, nextMonth],
+  );
+  return (await getMonthlyKpiCycleRow(clientId, monthKey, db))?.close_token === closeToken;
 }
 
-export function closeMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, at = new Date()) {
-  if (!getClientByIdShim(clientId)) return null;
-  if (listMonthlyKpis(clientId, monthKey).length === 0) return null;
-  transitionMonthlyKpiCycle(clientId, monthKey, actorUserId, at, true);
-  return listMonthlyKpiCycles(clientId).find((cycle) => cycle.monthKey === monthKey) ?? null;
+export async function closeMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, at = new Date(), db: CoreQueryable = getCoreDb()) {
+  if (!await getClientById(clientId, db)) return null;
+  if ((await listMonthlyKpis(clientId, monthKey, db)).length === 0) return null;
+  await transitionMonthlyKpiCycle(clientId, monthKey, actorUserId, at, true, db);
+  return (await listMonthlyKpiCycles(clientId, db)).find((cycle) => cycle.monthKey === monthKey) ?? null;
 }
 
-export function reopenMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, reason: string) {
+export async function reopenMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, reason: string, db: CoreQueryable = getCoreDb()) {
   const normalizedReason = reason.trim();
   if (!normalizedReason || normalizedReason.length > 500) throw new UserFacingError('La reapertura requiere un motivo de hasta 500 caracteres');
-  const current = getMonthlyKpiCycleRow(clientId, monthKey);
+  const current = await getMonthlyKpiCycleRow(clientId, monthKey, db);
   if (current && !current.closed_at) throw new UserFacingError('El ciclo ya está abierto');
-  if (!current && !listMonthlyKpis(clientId, monthKey).some((kpi) => kpi.closedAt)) return null;
+  if (!current && !(await listMonthlyKpis(clientId, monthKey, db)).some((kpi) => kpi.closedAt)) return null;
   const timestamp = nowIso();
-  getDatabase().prepare(`WITH cycle AS (
-    INSERT INTO monthly_kpi_cycles (client_id, month_key, closed_at, closed_by_user_id, close_token,
-      reopened_at, reopened_by_user_id, reopen_reason, created_at, updated_at)
-    VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)
-    ON CONFLICT (client_id, month_key) DO UPDATE SET closed_at = NULL,
-      reopened_at = EXCLUDED.reopened_at, reopened_by_user_id = EXCLUDED.reopened_by_user_id,
-      reopen_reason = EXCLUDED.reopen_reason, updated_at = EXCLUDED.updated_at
-    WHERE monthly_kpi_cycles.closed_at IS NOT NULL
-    RETURNING client_id, month_key
-  ), opened_rows AS (
-    UPDATE monthly_kpis m SET closed_at = NULL, updated_at = ? FROM cycle
-    WHERE m.client_id = cycle.client_id AND m.month_key = cycle.month_key AND m.closed_at IS NOT NULL
-    RETURNING m.*
-  ), audit_rows AS (
-    INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
-    SELECT gen_random_uuid()::text, id, client_id, month_key, 'reopened', ?, ?, ?, row_to_json(opened_rows)::text
-    FROM opened_rows
-  ) SELECT COUNT(*) FROM cycle`)
-    .run(clientId, monthKey, timestamp, actorUserId, normalizedReason, timestamp, timestamp, timestamp,
-      actorUserId, normalizedReason, timestamp);
-  return listMonthlyKpiCycles(clientId).find((cycle) => cycle.monthKey === monthKey) ?? null;
+  // Single data-modifying CTE statement, atomic like the close transition above.
+  await coreRun(
+    db,
+    `WITH cycle AS (
+      INSERT INTO monthly_kpi_cycles (client_id, month_key, closed_at, closed_by_user_id, close_token,
+        reopened_at, reopened_by_user_id, reopen_reason, created_at, updated_at)
+      VALUES ($1, $2, NULL, NULL, NULL, $3, $4, $5, $3, $3)
+      ON CONFLICT (client_id, month_key) DO UPDATE SET closed_at = NULL,
+        reopened_at = EXCLUDED.reopened_at, reopened_by_user_id = EXCLUDED.reopened_by_user_id,
+        reopen_reason = EXCLUDED.reopen_reason, updated_at = EXCLUDED.updated_at
+      WHERE monthly_kpi_cycles.closed_at IS NOT NULL
+      RETURNING client_id, month_key
+    ), opened_rows AS (
+      UPDATE monthly_kpis m SET closed_at = NULL, updated_at = $3 FROM cycle
+      WHERE m.client_id = cycle.client_id AND m.month_key = cycle.month_key AND m.closed_at IS NOT NULL
+      RETURNING m.*
+    ), audit_rows AS (
+      INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+      SELECT gen_random_uuid()::text, id, client_id, month_key, 'reopened', $4::text, $5::text, $3::text, row_to_json(opened_rows)::text
+      FROM opened_rows
+    ) SELECT COUNT(*) FROM cycle`,
+    [clientId, monthKey, timestamp, actorUserId, normalizedReason],
+  );
+  return (await listMonthlyKpiCycles(clientId, db)).find((cycle) => cycle.monthKey === monthKey) ?? null;
 }
 
-export function closeDueMonthlyKpiCycles(now = new Date(), onlyClientId?: string) {
+export async function closeDueMonthlyKpiCycles(now = new Date(), onlyClientId?: string, db: CoreQueryable = getCoreDb()) {
   const dueMonth = dueMonthlyKpiMonth(now);
-  const db = getDatabase();
   let closed = 0;
   let candidate: { client_id: string; month_key: string } | undefined;
-  const findCandidate = () => db.prepare(`SELECT m.client_id, m.month_key FROM monthly_kpis m
-    WHERE m.month_key <= ? AND m.month_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
-      AND (? IS NULL OR m.client_id = ?)
+  const findCandidate = () => coreGet<{ client_id: string; month_key: string }>(db, `SELECT m.client_id, m.month_key FROM monthly_kpis m
+    WHERE m.month_key <= $1 AND m.month_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
+      AND ($2::text IS NULL OR m.client_id = $2)
       AND NOT EXISTS (SELECT 1 FROM monthly_kpi_cycles c WHERE c.client_id = m.client_id AND c.month_key = m.month_key)
-    GROUP BY m.client_id, m.month_key ORDER BY m.month_key ASC, m.client_id ASC LIMIT 1`)
-    .get(dueMonth, onlyClientId ?? null, onlyClientId ?? null) as { client_id: string; month_key: string } | undefined;
-  // The adapter starts a psql process for each candidate. Bound each scheduler
-  // tick so a long historical catch-up does not monopolize the API process.
+    GROUP BY m.client_id, m.month_key ORDER BY m.month_key ASC, m.client_id ASC LIMIT 1`,
+    [dueMonth, onlyClientId ?? null]);
+  // Bound each scheduler tick so a long historical catch-up does not monopolize the API process.
   for (let processed = 0; processed < 10; processed += 1) {
-    candidate = findCandidate();
+    candidate = await findCandidate();
     if (!candidate) break;
-    if (transitionMonthlyKpiCycle(candidate.client_id, candidate.month_key, null, now, false)) closed += 1;
+    if (await transitionMonthlyKpiCycle(candidate.client_id, candidate.month_key, null, now, false, db)) closed += 1;
   }
-  return { dueMonth, closed, pending: Boolean(findCandidate()) };
+  return { dueMonth, closed, pending: Boolean(await findCandidate()) };
 }
 
-export function reopenMonthlyKpi(id: string, actorUserId: string, reason: string) {
+export async function reopenMonthlyKpi(id: string, actorUserId: string, reason: string, db: CoreQueryable = getCoreDb()) {
   const normalizedReason = reason.trim();
   if (!normalizedReason || normalizedReason.length > 500) throw new UserFacingError('La reapertura requiere un motivo de hasta 500 caracteres');
-  const db = getDatabase();
-  const existing = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  const existing = await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [id]);
   if (!existing) return null;
   if (!existing.closed_at) throw new UserFacingError('El KPI ya está abierto');
   const timestamp = nowIso();
-  db.prepare(`WITH changed AS (
-    UPDATE monthly_kpis SET closed_at = NULL, updated_at = ? WHERE id = ? AND closed_at IS NOT NULL RETURNING *
-  ) INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
-    SELECT ?, id, client_id, month_key, 'reopened', ?, ?, ?, row_to_json(changed)::text FROM changed`)
-    .run(timestamp, id, crypto.randomUUID(), actorUserId, normalizedReason, timestamp);
-  const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
+  // One statement (UPDATE + audit INSERT in a CTE) is atomic by itself, so no explicit transaction is needed.
+  await coreRun(
+    db,
+    `WITH changed AS (
+      UPDATE monthly_kpis SET closed_at = NULL, updated_at = $1 WHERE id = $2 AND closed_at IS NOT NULL RETURNING *
+    ) INSERT INTO monthly_kpi_events (id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json)
+      SELECT $3::text, id, client_id, month_key, 'reopened', $4::text, $5::text, $6::text, row_to_json(changed)::text FROM changed`,
+    [timestamp, id, crypto.randomUUID(), actorUserId, normalizedReason, timestamp],
+  );
+  const saved = await coreGet(db, `SELECT * FROM monthly_kpis WHERE id = $1`, [id]);
   return rowToMonthlyKpi(saved);
 }
 
-export function listMonthlyKpiEvents(id: string) {
-  return getDatabase().prepare(`SELECT id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json
-    FROM monthly_kpi_events WHERE kpi_id = ? ORDER BY occurred_at DESC, id DESC`).all(id) as Array<Record<string, unknown>>;
+export async function listMonthlyKpiEvents(id: string, db: CoreQueryable = getCoreDb()) {
+  return await coreAll<Record<string, unknown>>(db, `SELECT id, kpi_id, client_id, month_key, action, actor_user_id, reason, occurred_at, snapshot_json
+    FROM monthly_kpi_events WHERE kpi_id = $1 ORDER BY occurred_at DESC, id DESC`, [id]);
 }
 
 export async function getDailyStatById(id: string, db: CoreQueryable = getCoreDb()) {

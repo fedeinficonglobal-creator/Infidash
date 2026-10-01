@@ -98,3 +98,31 @@ test('parallel operational plan saves with the same version let exactly one writ
   assert.equal(updated.filter(Boolean).length, 1);
   assert.equal((await getOperationalPlan(client.id, 'web', '2026-06')).version, 2);
 });
+
+test('parallel closeMonthlyKpiCycle of the same client and month closes once and writes one event per KPI', async () => {
+  const { closeMonthlyKpiCycle, createClient, listMonthlyKpiEvents, listMonthlyKpis, saveMonthlyKpi } = await loadDatabase();
+  const client = await createClient({ name: `Concurrent KPI close ${unique()}` });
+  const first = await saveMonthlyKpi({ clientId: client.id, departmentKey: 'web', metricKey: 'sessions', monthKey: '2026-03', targetValue: 10 });
+  const second = await saveMonthlyKpi({ clientId: client.id, departmentKey: 'rrss', metricKey: 'followers', monthKey: '2026-03' });
+  assert.ok(first && second);
+
+  const cycles = await Promise.all([
+    closeMonthlyKpiCycle(client.id, '2026-03', 'actor-a', new Date('2026-03-26T10:00:00.000Z')),
+    closeMonthlyKpiCycle(client.id, '2026-03', 'actor-b', new Date('2026-03-26T11:00:00.000Z')),
+    closeMonthlyKpiCycle(client.id, '2026-03', 'actor-c', new Date('2026-03-26T12:00:00.000Z')),
+  ]);
+
+  assert.ok(cycles.every((cycle) => cycle !== null));
+  const winner = cycles[0]!;
+  assert.ok(['actor-a', 'actor-b', 'actor-c'].includes(winner.closedByUserId ?? ''));
+  assert.ok(cycles.every((cycle) => cycle!.closedAt === winner.closedAt && cycle!.closedByUserId === winner.closedByUserId), 'every caller sees the one close that won');
+
+  for (const kpi of [first, second]) {
+    const events = await listMonthlyKpiEvents(kpi.id);
+    assert.equal(events.length, 1, 'exactly one closed event per KPI');
+    assert.equal(events[0].action, 'closed');
+    assert.equal(events[0].actor_user_id, winner.closedByUserId);
+  }
+  assert.ok((await listMonthlyKpis(client.id, '2026-03')).every((kpi) => kpi.closedAt === winner.closedAt));
+  assert.equal((await listMonthlyKpis(client.id, '2026-04')).length, 2, 'next month is prepared exactly once per metric');
+});

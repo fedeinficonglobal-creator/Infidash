@@ -72,7 +72,7 @@ test('RRSS channels and monthly KPIs round trip through the database layer', asy
   assert.equal(channelList.length, 1);
   assert.equal(channelList[0]?.id, channel.id);
 
-  const kpi = saveMonthlyKpi({
+  const kpi = await saveMonthlyKpi({
     clientId: client.id,
     departmentKey: 'rrss',
     metricKey: 'instagram_followers',
@@ -90,28 +90,28 @@ test('RRSS channels and monthly KPIs round trip through the database layer', asy
   assert.equal(kpi.status, 'warning');
   assert.equal(kpi.closedAt, null);
 
-  const listBeforeClose = listMonthlyKpis(client.id, '2026-05');
+  const listBeforeClose = await listMonthlyKpis(client.id, '2026-05');
   assert.equal(listBeforeClose.length, 1);
   assert.equal(listBeforeClose[0]?.id, kpi.id);
 
-  const closed = closeMonthlyKpi(kpi.id);
+  const closed = await closeMonthlyKpi(kpi.id);
   assert.equal(closed?.id, kpi.id);
   assert.ok(closed?.closedAt);
   assert.equal(closed?.status, 'warning');
-  assert.equal(closeMonthlyKpi(kpi.id)?.closedAt, closed?.closedAt, 'manual close must be idempotent');
-  assert.throws(() => saveMonthlyKpi({
+  assert.equal((await closeMonthlyKpi(kpi.id))?.closedAt, closed?.closedAt, 'manual close must be idempotent');
+  await assert.rejects(async () => saveMonthlyKpi({
     id: kpi.id, clientId: client.id, departmentKey: 'rrss', metricKey: 'instagram_followers',
     monthKey: '2026-05', actualText: '999 seguidores',
   }), /cerrado/i);
-  const reopened = reopenMonthlyKpi(kpi.id, 'admin-test', 'Corrección de datos');
+  const reopened = await reopenMonthlyKpi(kpi.id, 'admin-test', 'Corrección de datos');
   assert.equal(reopened?.closedAt, null);
-  const events = listMonthlyKpiEvents(kpi.id);
+  const events = await listMonthlyKpiEvents(kpi.id);
   assert.deepEqual(events.map((event) => event.action).sort(), ['closed', 'reopened']);
   assert.equal(events.find((event) => event.action === 'reopened')?.reason, 'Corrección de datos');
-  assert.equal(saveMonthlyKpi({
+  assert.equal((await saveMonthlyKpi({
     id: kpi.id, clientId: client.id, departmentKey: 'rrss', metricKey: 'instagram_followers',
     monthKey: '2026-05', actualText: '500 seguidores',
-  })?.actualText, '500 seguidores');
+  }))?.actualText, '500 seguidores');
 });
 
 test('Madrid day-25 cycle close catches up once, freezes values, prepares next month, and respects admin reopen', async () => {
@@ -120,28 +120,28 @@ test('Madrid day-25 cycle close catches up once, freezes values, prepares next m
     listMonthlyKpis, reopenMonthlyKpiCycle, saveMonthlyKpi,
   } = await import('../src/lib/database.js');
   const client = await createClient({ name: `Ciclo KPI ${Date.now()}` });
-  const row = saveMonthlyKpi({
+  const row = await saveMonthlyKpi({
     clientId: client.id, departmentKey: 'web', metricKey: 'sessions', monthKey: '2026-09',
     targetValue: 1000, actualValue: 900, status: 'warning', notes: 'Dato septiembre',
   });
   assert.ok(row);
-  assert.equal(closeDueMonthlyKpiCycles(new Date('2026-09-24T21:59:59.999Z'), client.id).closed, 0);
-  assert.equal(closeDueMonthlyKpiCycles(new Date('2026-09-24T22:00:00.000Z'), client.id).closed, 1);
-  assert.equal(listMonthlyKpis(client.id, '2026-09')[0]?.closedAt !== null, true);
-  const october = listMonthlyKpis(client.id, '2026-10');
+  assert.equal((await closeDueMonthlyKpiCycles(new Date('2026-09-24T21:59:59.999Z'), client.id)).closed, 0);
+  assert.equal((await closeDueMonthlyKpiCycles(new Date('2026-09-24T22:00:00.000Z'), client.id)).closed, 1);
+  assert.equal((await listMonthlyKpis(client.id, '2026-09'))[0]?.closedAt !== null, true);
+  const october = await listMonthlyKpis(client.id, '2026-10');
   assert.equal(october.length, 1);
   assert.equal(october[0]?.targetValue, 1000);
   assert.equal(october[0]?.actualValue, null);
   assert.equal(october[0]?.status, 'unknown');
-  assert.throws(() => saveMonthlyKpi({
+  await assert.rejects(async () => saveMonthlyKpi({
     clientId: client.id, departmentKey: 'rrss', metricKey: 'followers', monthKey: '2026-09',
   }), /cerrado/i);
-  assert.equal(closeDueMonthlyKpiCycles(new Date('2026-09-25T10:00:00Z'), client.id).closed, 0);
-  assert.equal(listMonthlyKpiCycles(client.id).filter((cycle) => cycle.monthKey === '2026-09').length, 1);
-  reopenMonthlyKpiCycle(client.id, '2026-09', 'admin-test', 'Corrección de septiembre');
-  assert.equal(listMonthlyKpis(client.id, '2026-09')[0]?.closedAt, null);
-  assert.equal(closeDueMonthlyKpiCycles(new Date('2026-09-26T10:00:00Z'), client.id).closed, 0);
-  assert.equal(listMonthlyKpis(client.id, '2026-09')[0]?.closedAt, null);
-  closeMonthlyKpiCycle(client.id, '2026-09', 'admin-test', new Date('2026-09-26T12:00:00Z'));
-  assert.ok(listMonthlyKpis(client.id, '2026-09')[0]?.closedAt);
+  assert.equal((await closeDueMonthlyKpiCycles(new Date('2026-09-25T10:00:00Z'), client.id)).closed, 0);
+  assert.equal((await listMonthlyKpiCycles(client.id)).filter((cycle) => cycle.monthKey === '2026-09').length, 1);
+  await reopenMonthlyKpiCycle(client.id, '2026-09', 'admin-test', 'Corrección de septiembre');
+  assert.equal((await listMonthlyKpis(client.id, '2026-09'))[0]?.closedAt, null);
+  assert.equal((await closeDueMonthlyKpiCycles(new Date('2026-09-26T10:00:00Z'), client.id)).closed, 0);
+  assert.equal((await listMonthlyKpis(client.id, '2026-09'))[0]?.closedAt, null);
+  await closeMonthlyKpiCycle(client.id, '2026-09', 'admin-test', new Date('2026-09-26T12:00:00Z'));
+  assert.ok((await listMonthlyKpis(client.id, '2026-09'))[0]?.closedAt);
 });

@@ -1202,9 +1202,9 @@ function startMonthlyKpiCloseScheduler() {
   const schedule = (delay: number) => {
     globalState.__infidashMonthlyCloseTimer = setTimeout(run, Math.max(1, delay));
   };
-  const run = () => {
+  const run = async () => {
     try {
-      const result = closeDueMonthlyKpiCycles(new Date());
+      const result = await closeDueMonthlyKpiCycles(new Date());
       if (result.pending) {
         schedule(10_000);
         return;
@@ -1488,7 +1488,7 @@ app.get('/api/clients/:clientId/monthly-kpis', async (req: AnyFastifyRequest, re
   }
 
   const monthKey = typeof (req.query as any).monthKey === 'string' && (req.query as any).monthKey.trim() ? (req.query as any).monthKey : undefined;
-  return reply.send({ kpis: listMonthlyKpis((req.params as any).clientId, monthKey) });
+  return reply.send({ kpis: await listMonthlyKpis((req.params as any).clientId, monthKey) });
 });
 
 app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1582,7 +1582,7 @@ app.get('/api/clients/:clientId/monthly-kpi-cycles', async (req: AnyFastifyReque
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
-  return reply.send({ cycles: listMonthlyKpiCycles(clientId) });
+  return reply.send({ cycles: await listMonthlyKpiCycles(clientId) });
 });
 
 app.post('/api/clients/:clientId/monthly-kpis', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1599,7 +1599,7 @@ app.post('/api/clients/:clientId/monthly-kpis', async (req: AnyFastifyRequest, r
 
   let kpi;
   try {
-    kpi = saveMonthlyKpi({
+    kpi = await saveMonthlyKpi({
     clientId: (req.params as any).clientId,
     departmentKey: normalizedDepartmentKey,
     metricKey,
@@ -1633,14 +1633,14 @@ app.put('/api/monthly-kpis/:id', async (req: AnyFastifyRequest, reply: FastifyRe
     return;
   }
 
-  const current = getMonthlyKpiById((req.params as any).id);
+  const current = await getMonthlyKpiById((req.params as any).id);
   if (!current) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
   if (typeof (req.body as any)?.clientId === 'string' && (req.body as any).clientId !== current.clientId) {
     return sendError(reply, 400, 'El KPI no pertenece a ese cliente', 'INVALID_PAYLOAD');
   }
   let kpi;
   try {
-    kpi = saveMonthlyKpi({
+    kpi = await saveMonthlyKpi({
     id: (req.params as any).id,
     clientId: current.clientId,
     departmentKey: ((req.body as any)?.departmentKey === 'web' || (req.body as any)?.departmentKey === 'rrss' ? (req.body as any).departmentKey : (req.body as any)?.departmentKey === 'publicidad' ? (req.body as any).departmentKey : current?.departmentKey ?? 'publicidad') as any,
@@ -1675,12 +1675,12 @@ app.post('/api/monthly-kpis/:id/close', async (req: AnyFastifyRequest, reply: Fa
     return;
   }
 
-  const existing = getMonthlyKpiById((req.params as any).id);
+  const existing = await getMonthlyKpiById((req.params as any).id);
   if (!existing) {
     return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
   }
-  closeMonthlyKpiCycle(existing.clientId, existing.monthKey, session.user.id);
-  return reply.send({ kpi: getMonthlyKpiById(existing.id) });
+  await closeMonthlyKpiCycle(existing.clientId, existing.monthKey, session.user.id);
+  return reply.send({ kpi: await getMonthlyKpiById(existing.id) });
 });
 
 app.post('/api/monthly-kpis/:id/reopen', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1691,11 +1691,11 @@ app.post('/api/monthly-kpis/:id/reopen', async (req: AnyFastifyRequest, reply: F
     return sendError(reply, 400, 'La reapertura requiere un motivo de hasta 500 caracteres', 'INVALID_PAYLOAD');
   }
   try {
-    const existing = getMonthlyKpiById(String((req.params as any).id));
+    const existing = await getMonthlyKpiById(String((req.params as any).id));
     if (!existing) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
-    const cycle = reopenMonthlyKpiCycle(existing.clientId, existing.monthKey, session.user.id, reason);
+    const cycle = await reopenMonthlyKpiCycle(existing.clientId, existing.monthKey, session.user.id, reason);
     if (!cycle) return sendError(reply, 409, 'El ciclo no está cerrado', 'MONTHLY_KPI_CONFLICT');
-    return reply.send({ kpi: getMonthlyKpiById(existing.id) });
+    return reply.send({ kpi: await getMonthlyKpiById(existing.id) });
   } catch (error) {
     return sendCaughtError(reply, error, { status: 409, fallback: 'No se pudo reabrir el KPI', code: 'MONTHLY_KPI_CONFLICT' });
   }
@@ -1704,8 +1704,8 @@ app.post('/api/monthly-kpis/:id/reopen', async (req: AnyFastifyRequest, reply: F
 app.get('/api/monthly-kpis/:id/events', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!await requireSession(req, reply, ['admin'])) return;
   const id = String((req.params as any).id);
-  if (!getMonthlyKpiById(id)) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
-  return reply.send({ events: listMonthlyKpiEvents(id) });
+  if (!await getMonthlyKpiById(id)) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
+  return reply.send({ events: await listMonthlyKpiEvents(id) });
 });
 
 app.post('/api/admin/backup', async (req: AnyFastifyRequest, reply: FastifyReply) => {
