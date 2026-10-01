@@ -96,6 +96,7 @@ import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPd
 import { deliverReportEmail, reportSmtpConfigured } from './src/lib/reportEmail.js';
 import { registerErrorHandling } from './src/lib/errorHandling.js';
 import { publicErrorMessage, UserFacingError } from './src/lib/userFacingError.js';
+import { INVALID_STAT_DATE_MESSAGE, isCanonicalStatDate } from './src/lib/statDate.js';
 import { shouldRunEditorialMigrations, shouldServeHttp } from './src/lib/serverRuntime.js';
 import { isOperationalPlanDomain, isPlanPeriod, normalizeOperationalPlanRows } from './src/lib/operationalPlanValidation.js';
 
@@ -1307,6 +1308,10 @@ app.post('/api/daily-stats', async (req: AnyFastifyRequest, reply: FastifyReply)
   const { clientId, statDate, notes, source } = (req.body ?? {}) as any;
   if (typeof clientId !== 'string' || typeof statDate !== 'string') {
     return sendError(reply, 400, 'clientId y statDate son obligatorios', 'INVALID_PAYLOAD');
+  }
+  // daily_stats.stat_date is a native DATE: only a real calendar day in canonical YYYY-MM-DD form is stored.
+  if (!isCanonicalStatDate(statDate)) {
+    return sendError(reply, 400, INVALID_STAT_DATE_MESSAGE, 'INVALID_PAYLOAD');
   }
 
   const stat = await upsertDailyStat({

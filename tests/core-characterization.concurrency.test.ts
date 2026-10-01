@@ -21,18 +21,21 @@ test('parallel upserts of the same client and day never fail and leave exactly o
   assert.ok([1, 2, 3, 4, 5, 6, 7, 8].includes(rows[0].revenue), 'the surviving revenue comes from one of the writers');
 });
 
-test('parallel upserts only collide on the exact (client, stat_date) text', async () => {
+test('parallel upserts only collide on the same (client, calendar day); other days stay distinct rows', async () => {
   const { createClient, listDailyStats, upsertDailyStat } = await loadDatabase();
   const client = await createClient({ name: `Concurrent dates ${unique()}` });
 
   await Promise.all([
     upsertDailyStat({ clientId: client.id, statDate: '2024-01-31', revenue: 1 }),
     upsertDailyStat({ clientId: client.id, statDate: '2024-01-31', revenue: 2 }),
-    upsertDailyStat({ clientId: client.id, statDate: '2024-01-31T00:00:00Z', revenue: 3 }),
-    upsertDailyStat({ clientId: client.id, statDate: '2024-01-31T00:00:00Z', revenue: 4 }),
+    upsertDailyStat({ clientId: client.id, statDate: '2024-02-01', revenue: 3 }),
+    upsertDailyStat({ clientId: client.id, statDate: '2024-02-01', revenue: 4 }),
   ]);
 
-  assert.deepEqual((await listDailyStats(client.id)).map((stat) => stat.statDate).sort(), ['2024-01-31', '2024-01-31T00:00:00Z']);
+  // Flipped (W3.3): the second key used to be the text spelling '2024-01-31T00:00:00Z' of the same day, which was a
+  // distinct row. That spelling is now rejected (see the clients-stats suite), so the distinct key is the next day.
+  assert.deepEqual((await listDailyStats(client.id)).map((stat) => stat.statDate).sort(), ['2024-01-31', '2024-02-01']);
+  await assert.rejects(() => upsertDailyStat({ clientId: client.id, statDate: '2024-01-31T00:00:00Z', revenue: 5 }), /AAAA-MM-DD/);
 });
 
 test('the grouped 30-day revenue window equals summing listDailyStats per client', async () => {
@@ -43,7 +46,7 @@ test('the grouped 30-day revenue window equals summing listDailyStats per client
   const empty = await createClient({ name: `Window none ${unique()}` });
   for (const [client, statDate, revenue] of [
     [a, '2026-09-23', 0.1], [a, '2026-09-01', 20.25], [a, '2026-08-25', 5], [a, '2026-08-24', 1000], [a, '2026-09-24', 999],
-    [a, '2026-09-23T00:00:00Z', 7], [b, '2026-09-10', 3.5],
+    [a, '2026-09-22', 7], [b, '2026-09-10', 3.5],
   ] as const) {
     await upsertDailyStat({ clientId: client.id, statDate, revenue });
   }

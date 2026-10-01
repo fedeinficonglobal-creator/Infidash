@@ -1,4 +1,4 @@
-import { Pool, type PoolConfig } from 'pg';
+import { Pool, types as pgTypes, type PoolConfig } from 'pg';
 import { buildPostgresPoolConfig } from '../server/content/postgres.js';
 
 // Async, fully parameterized access to the core (public schema) tables. It shares the connection string, SSL and
@@ -12,6 +12,21 @@ export interface CoreQueryable {
 
 let corePool: Pool | null = null;
 
+const PG_DATE_OID = 1082;
+
+/**
+ * pg turns DATE into a JavaScript Date at local midnight, which shifts the day across time zones. The whole API
+ * contract uses plain 'YYYY-MM-DD' strings (daily_stats.stat_date is the only DATE column), so the core pool hands
+ * DATE values back as the raw text PostgreSQL sends. Scoped to this pool through the per-client `types` option: the
+ * editorial pool and the global pg parsers are untouched, and every other type keeps its default parser.
+ */
+export const coreTypeParsers = {
+  getTypeParser(oid: number, format?: 'text' | 'binary') {
+    if (oid === PG_DATE_OID) return (value: string) => value;
+    return pgTypes.getTypeParser(oid, format as 'text');
+  },
+} as NonNullable<PoolConfig['types']>;
+
 export function buildCorePoolConfig(env: NodeJS.ProcessEnv = process.env): PoolConfig {
   const base = buildPostgresPoolConfig(env);
   const configuredMax = Number(env.CORE_DB_POOL_MAX);
@@ -21,6 +36,7 @@ export function buildCorePoolConfig(env: NodeJS.ProcessEnv = process.env): PoolC
     application_name: env.CORE_DB_APPLICATION_NAME?.trim() || 'infidash-core',
     // Idle clients must not keep scripts and test processes alive after the last query.
     allowExitOnIdle: true,
+    types: coreTypeParsers,
   };
 }
 

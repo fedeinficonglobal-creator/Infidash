@@ -45,7 +45,9 @@ async function assertCoreSchema(db: Queryable, schema: string, options: { baseli
   const actual = new Map<string, string>(columns.rows.map((row) => [`${row.table_name}.${row.column_name}`, row.data_type]));
   for (const [table, expected] of Object.entries(EXPECTED_COLUMNS)) {
     for (const [column, dataType] of expected) {
-      assert.equal(actual.get(`${table}.${column}`), dataType, `${table}.${column}`);
+      // 0006 converts daily_stats.stat_date from the baseline's TEXT to a native DATE.
+      const expectedType = table === 'daily_stats' && column === 'stat_date' && !options.baselineOnly ? 'date' : dataType;
+      assert.equal(actual.get(`${table}.${column}`), expectedType, `${table}.${column}`);
     }
   }
 
@@ -75,8 +77,8 @@ test('the core migration is applied by the runner, twice, and creates every core
 
     const schema = (await pool.query('SELECT current_schema() AS schema')).rows[0].schema;
     await assertCoreSchema(pool, schema, { baselineOnly: false });
-    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql')`);
-    assert.equal(registry.rows.length, 2);
+    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql', '0006_core_daily_stats_date.sql')`);
+    assert.equal(registry.rows.length, 3);
   } finally {
     await closeCorePool();
   }
@@ -109,5 +111,109 @@ test('the baseline SQL builds the full schema on an empty schema and is a no-op 
       client.release();
       await closeCorePool();
     }
+  }
+});
+
+const STAT_COLUMNS = 'id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at';
+
+test('0006 converts daily_stats.stat_date to DATE: one row per day (latest update), invalid values quarantined, idempotent', async () => {
+  const { getCorePool, closeCorePool } = await import('../src/lib/corePool.js');
+  const baseline = await readFile(path.join(migrationsDirectory, '0004_core_baseline.sql'), 'utf8');
+  const migration = await readFile(path.join(migrationsDirectory, '0006_core_daily_stats_date.sql'), 'utf8');
+  const schema = `core_stat_date_test_${process.pid}`;
+  const client = await getCorePool().connect();
+  const statDateType = async () =>
+    (await client.query(`SELECT data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'daily_stats' AND column_name = 'stat_date'`, [schema])).rows[0].data_type;
+  const insertStat = (id: string, clientId: string, statDate: string, revenue: number, updatedAt: string) =>
+    client.query(
+      `INSERT INTO daily_stats (${STAT_COLUMNS}) VALUES ($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, $5, 'manual', '2024-01-01T00:00:00.000Z', $6)`,
+      [id, clientId, statDate, revenue, `note ${id}`, updatedAt],
+    );
+  try {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}`);
+    await client.query(baseline);
+    assert.equal(await statDateType(), 'text');
+
+    for (const id of ['a', 'b']) {
+      await client.query(`INSERT INTO clients (id, name, slug, created_at, updated_at) VALUES ($1, $1, $1, '2024-01-01', '2024-01-01')`, [id]);
+    }
+    // Client a, 2024-01-31 spelled three ways: the timestamp spelling was updated last and must survive.
+    await insertStat('a-plain', 'a', '2024-01-31', 1, '2024-02-01T10:00:00.000Z');
+    await insertStat('a-zulu', 'a', '2024-01-31T00:00:00Z', 2, '2024-03-01T10:00:00.000Z');
+    await insertStat('a-space', 'a', ' 2024-01-31 10:00:00+02', 3, '2024-02-15T10:00:00.000Z');
+    // The same day for another client is NOT a duplicate.
+    await insertStat('b-plain', 'b', '2024-01-31', 4, '2024-02-01T10:00:00.000Z');
+    // A normal single row (leap day).
+    await insertStat('a-feb', 'a', '2024-02-29', 5, '2024-02-29T10:00:00.000Z');
+    // Unparseable or ambiguous values are quarantined verbatim, never converted or lost.
+    await insertStat('a-garbage', 'a', 'not-a-date', 6, '2024-02-01T10:00:00.000Z');
+    await insertStat('a-impossible', 'a', '2024-02-30', 7, '2024-02-01T10:00:00.000Z');
+    await insertStat('b-slashes', 'b', '31/01/2024', 8, '2024-02-01T10:00:00.000Z');
+    await insertStat('b-empty', 'b', '', 9, '2024-02-01T10:00:00.000Z');
+
+    await client.query(migration);
+
+    assert.equal(await statDateType(), 'date');
+    const helper = await client.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'daily_stats' AND column_name = 'stat_date_canonical'`, [schema]);
+    assert.equal(helper.rowCount, 0, 'the temporary helper column is gone');
+
+    const kept = await client.query(`SELECT id, client_id, stat_date::text AS stat_date FROM daily_stats ORDER BY id`);
+    assert.deepEqual(kept.rows, [
+      { id: 'a-feb', client_id: 'a', stat_date: '2024-02-29' },
+      { id: 'a-zulu', client_id: 'a', stat_date: '2024-01-31' },
+      { id: 'b-plain', client_id: 'b', stat_date: '2024-01-31' },
+    ]);
+
+    const quarantine = await client.query(`SELECT id, stat_date, revenue, notes, quarantined_at IS NOT NULL AS stamped FROM daily_stats_invalid_dates ORDER BY id`);
+    assert.deepEqual(quarantine.rows, [
+      { id: 'a-garbage', stat_date: 'not-a-date', revenue: 6, notes: 'note a-garbage', stamped: true },
+      { id: 'a-impossible', stat_date: '2024-02-30', revenue: 7, notes: 'note a-impossible', stamped: true },
+      { id: 'b-empty', stat_date: '', revenue: 9, notes: 'note b-empty', stamped: true },
+      { id: 'b-slashes', stat_date: '31/01/2024', revenue: 8, notes: 'note b-slashes', stamped: true },
+    ]);
+
+    // UNIQUE(client_id, stat_date) still exists over the DATE column and ON CONFLICT can infer it.
+    const unique = await client.query(
+      `SELECT pg_get_indexdef(i.indexrelid) AS definition FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+       WHERE n.nspname = $1 AND t.relname = 'daily_stats' AND i.indisunique AND NOT i.indisprimary`,
+      [schema],
+    );
+    assert.equal(unique.rows.length, 1);
+    assert.match(unique.rows[0].definition, /\(client_id, stat_date\)/);
+    await client.query(
+      `INSERT INTO daily_stats (${STAT_COLUMNS}) VALUES ('a-new', 'a', '2024-01-31', 10, 0, 0, 0, 0, 0, 0, NULL, 'manual', 'x', 'x')
+       ON CONFLICT (client_id, stat_date) DO UPDATE SET revenue = EXCLUDED.revenue`,
+    );
+    assert.equal((await client.query(`SELECT revenue FROM daily_stats WHERE client_id = 'a' AND stat_date = DATE '2024-01-31'`)).rows[0].revenue, 10);
+    await assert.rejects(
+      () => client.query(`INSERT INTO daily_stats (${STAT_COLUMNS}) VALUES ('a-bad', 'a', '2024-02-30', 0, 0, 0, 0, 0, 0, 0, NULL, 'manual', 'x', 'x')`),
+      /out of range/i,
+    );
+
+    // Rerunning is a no-op: nothing is moved, deleted or converted a second time.
+    await client.query(migration);
+    assert.equal((await client.query(`SELECT count(*)::int AS total FROM daily_stats`)).rows[0].total, 3);
+    assert.equal((await client.query(`SELECT count(*)::int AS total FROM daily_stats_invalid_dates`)).rows[0].total, 4);
+    assert.equal(await statDateType(), 'date');
+  } finally {
+    try {
+      await client.query('SET search_path TO DEFAULT');
+      await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally {
+      client.release();
+      await closeCorePool();
+    }
+  }
+});
+
+test('the core pool reads a DATE column back as a YYYY-MM-DD string, never a Date', async () => {
+  const { getCorePool, closeCorePool } = await import('../src/lib/corePool.js');
+  try {
+    const { rows } = await getCorePool().query(`SELECT DATE '2024-01-31' AS day, DATE '0001-01-01' AS first_day, $1::date AS param_day`, ['2024-02-29']);
+    assert.deepEqual(rows[0], { day: '2024-01-31', first_day: '0001-01-01', param_day: '2024-02-29' });
+  } finally {
+    await closeCorePool();
   }
 });
