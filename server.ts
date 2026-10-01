@@ -40,7 +40,7 @@ import {
   revokeSessionByToken,
   insertLead,
   listClients,
-  listClientsWithLatestStat,
+  listClientsWithRevenueWindow,
   listDailyStats,
   listLeadsByClient,
   listUxSnapshots,
@@ -87,7 +87,6 @@ import { validateWooCommerceSnapshot, wooCommerceSourceKey } from './src/lib/woo
 import { createGa4AccessTokenProvider, fetchGa4TrafficReport, parseGa4ServiceAccount, probeGa4Property } from './src/lib/ga4.js';
 import { createGoogleAdsAccessTokenProvider, fetchGoogleAdsCampaignReport, probeGoogleAdsAccount } from './src/lib/googleAds.js';
 import { isValidInclusiveDateRange } from './src/lib/dateRange.js';
-import { sumRevenueWindow } from './src/lib/dashboardMetrics.js';
 import { parseLeadQuery } from './src/lib/leadQuery.js';
 import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
 import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
@@ -528,10 +527,7 @@ app.get('/api/clients', async (req: AnyFastifyRequest, reply: FastifyReply) => {
 
   const endDate = new Date().toISOString().slice(0, 10);
   const scope = session.user.role === 'admin' ? undefined : session.user.clientIds ?? [];
-  const clients = listClientsWithLatestStat({ clientIds: scope }).map((client) => ({
-    ...client,
-    revenue30d: sumRevenueWindow(listDailyStats(client.id), endDate, 30),
-  }));
+  const clients = await listClientsWithRevenueWindow({ clientIds: scope }, endDate, 30);
   return reply.send({ clients });
 });
 
@@ -541,7 +537,7 @@ app.get('/api/clients/:slug', async (req: AnyFastifyRequest, reply: FastifyReply
     return;
   }
 
-  const client = getClientBySlug((req.params as any).slug) as any;
+  const client = (await getClientBySlug((req.params as any).slug)) as any;
   if (!client) {
     return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   }
@@ -558,7 +554,7 @@ app.get('/api/clients/:clientId/dashboard', async (req: AnyFastifyRequest, reply
     return;
   }
 
-  const client = getClientBySlug((req.params as any).clientId) ?? listClients().find((item) => item.id === (req.params as any).clientId) ?? null;
+  const client = (await getClientBySlug((req.params as any).clientId)) ?? (await listClients()).find((item) => item.id === (req.params as any).clientId) ?? null;
   if (!client) {
     return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   }
@@ -566,7 +562,7 @@ app.get('/api/clients/:clientId/dashboard', async (req: AnyFastifyRequest, reply
     return;
   }
 
-  const dailyStats = listDailyStats(client.id);
+  const dailyStats = await listDailyStats(client.id);
   const uxSnapshots = listUxSnapshots(client.id);
   const latestUxSnapshot = getLatestUxSnapshot(client.id);
 
@@ -589,7 +585,7 @@ app.post('/api/clients', async (req: AnyFastifyRequest, reply: FastifyReply) => 
     return sendError(reply, 400, 'name es obligatorio', 'INVALID_PAYLOAD');
   }
 
-  const client = createClient({
+  const client = await createClient({
     name,
     industry: typeof industry === 'string' && industry.trim() ? industry : null,
     logoUrl: typeof logoUrl === 'string' && logoUrl.trim() ? logoUrl : null,
@@ -619,7 +615,7 @@ app.patch('/api/clients/:clientId', async (req: AnyFastifyRequest, reply: Fastif
     return sendError(reply, 400, 'Payload de cliente inválido', 'INVALID_PAYLOAD');
   }
 
-  const client = updateClient(clientId, {
+  const client = await updateClient(clientId, {
     name: typeof name === 'string' && name.trim() ? name : undefined,
     industry: industry === undefined ? undefined : (typeof industry === 'string' && industry.trim() ? industry : null),
     logoUrl: logoUrl === undefined ? undefined : (typeof logoUrl === 'string' && logoUrl.trim() ? logoUrl : null),
@@ -640,7 +636,7 @@ app.delete('/api/clients/:clientId', async (req: AnyFastifyRequest, reply: Fasti
     return;
   }
 
-  const deleted = deleteClient((req.params as any).clientId);
+  const deleted = await deleteClient((req.params as any).clientId);
   if (!deleted) {
     return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   }
@@ -1252,10 +1248,10 @@ app.get('/api/daily-stats', async (req: AnyFastifyRequest, reply: FastifyReply) 
     if (!requireClientAccess(reply, session, clientId)) {
       return;
     }
-    return reply.send({ stats: listDailyStats(clientId) });
+    return reply.send({ stats: await listDailyStats(clientId) });
   }
   const scope = session.user.role === 'admin' ? undefined : session.user.clientIds ?? [];
-  return reply.send({ stats: listDailyStats(undefined, { clientIds: scope }) });
+  return reply.send({ stats: await listDailyStats(undefined, { clientIds: scope }) });
 });
 
 app.get('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1264,7 +1260,7 @@ app.get('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: FastifyRep
     return;
   }
 
-  const stat = getDailyStatById((req.params as any).id);
+  const stat = await getDailyStatById((req.params as any).id);
   if (!stat) {
     return sendError(reply, 404, 'Estadística no encontrada', 'NOT_FOUND');
   }
@@ -1286,7 +1282,7 @@ app.post('/api/daily-stats', async (req: AnyFastifyRequest, reply: FastifyReply)
     return sendError(reply, 400, 'clientId y statDate son obligatorios', 'INVALID_PAYLOAD');
   }
 
-  const stat = upsertDailyStat({
+  const stat = await upsertDailyStat({
     clientId,
     statDate,
     revenue: parseNumber((req.body as any)?.revenue),
@@ -1309,12 +1305,12 @@ app.put('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: FastifyRep
     return;
   }
 
-  const existing = getDailyStatById((req.params as any).id) as any;
+  const existing = (await getDailyStatById((req.params as any).id)) as any;
   if (!existing) {
     return sendError(reply, 404, 'Estadística no encontrada', 'NOT_FOUND');
   }
 
-  const stat = upsertDailyStat({
+  const stat = await upsertDailyStat({
     clientId: existing.clientId,
     statDate: existing.statDate,
     revenue: parseNumber((req.body as any)?.revenue, existing.revenue),
@@ -1337,7 +1333,7 @@ app.delete('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: Fastify
     return;
   }
 
-  const removed = deleteDailyStat((req.params as any).id);
+  const removed = await deleteDailyStat((req.params as any).id);
   if (!removed) {
     return sendError(reply, 404, 'Estadística no encontrada', 'NOT_FOUND');
   }
@@ -1398,7 +1394,7 @@ app.get('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFasti
   const periodKey = (req.query as any)?.period;
   if (!isOperationalPlanDomain(domain) || !isPlanPeriod(periodKey)) return sendError(reply, 400, 'Dominio o periodo inválido', 'INVALID_PAYLOAD');
   if (!requireClientAccess(reply, session, clientId)) return;
-  if (!getClientByIdRecord(clientId)) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  if (!(await getClientByIdRecord(clientId))) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   return reply.send({ plan: getOperationalPlan(clientId, domain, periodKey) });
 });
 
@@ -1411,7 +1407,7 @@ app.put('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFasti
     return sendError(reply, 400, 'Dominio, periodo o versión inválidos', 'INVALID_PAYLOAD');
   }
   if (!requireClientAccess(reply, session, clientId)) return;
-  if (!getClientByIdRecord(clientId)) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
+  if (!(await getClientByIdRecord(clientId))) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   const normalizedRows = normalizeOperationalPlanRows(domain, rows);
   if (!normalizedRows) return sendError(reply, 400, 'Filas del plan inválidas o demasiado numerosas', 'INVALID_PAYLOAD');
   const saved = saveOperationalPlan({ clientId, domain, periodKey, version, rows: normalizedRows });
@@ -1497,14 +1493,14 @@ app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyReques
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
-  const client = getClientByIdRecord(clientId);
+  const client = await getClientByIdRecord(clientId);
   if (!client) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   const from = (req.query as any)?.from;
   const to = (req.query as any)?.to;
   if (typeof from !== 'string' || typeof to !== 'string') return sendError(reply, 400, 'from y to son obligatorios', 'INVALID_PERIOD');
   try {
     summarizeDailyStats([], from, to);
-    const stats = listDailyStats(clientId).filter((stat) => stat.statDate >= from && stat.statDate <= to);
+    const stats = (await listDailyStats(clientId)).filter((stat) => stat.statDate >= from && stat.statDate <= to);
     const pdf = await buildDailyStatsPdf({ clientName: client.name, from, to, generatedAt: new Date().toISOString(), stats });
     return reply.header('Cache-Control', 'private, no-store')
       .header('Content-Disposition', `attachment; filename="infidash-${from}-${to}.pdf"`)
@@ -1533,12 +1529,12 @@ app.post('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, re
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
-  const client = getClientByIdRecord(clientId);
+  const client = await getClientByIdRecord(clientId);
   if (!client) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   const { from, to } = (req.body ?? {}) as any;
   try {
     summarizeDailyStats([], from, to);
-    const stats = listDailyStats(clientId).filter((stat) => stat.statDate >= from && stat.statDate <= to);
+    const stats = (await listDailyStats(clientId)).filter((stat) => stat.statDate >= from && stat.statDate <= to);
     const pdf = await buildDailyStatsPdf({ clientName: client.name, from, to, generatedAt: new Date().toISOString(), stats });
     return reply.code(201).send({ run: saveReportRun({ clientId, from, to, createdByUserId: session.user.id, pdf }) });
   } catch (error) {
@@ -1565,7 +1561,7 @@ app.post('/api/clients/:clientId/report-runs/:id/send', async (req: AnyFastifyRe
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
   const run = getReportRun(clientId, String((req.params as any).id));
-  const client = getClientByIdRecord(clientId);
+  const client = await getClientByIdRecord(clientId);
   if (!run || !client) return sendError(reply, 404, 'Informe no encontrado', 'NOT_FOUND');
   const recipient = (req.body as any)?.recipient;
   if (typeof recipient !== 'string' || recipient.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return sendError(reply, 400, 'Correo destinatario no válido', 'INVALID_RECIPIENT');
@@ -1732,8 +1728,8 @@ app.get('/api/dashboard/summary', async (req: AnyFastifyRequest, reply: FastifyR
 
   const scope = session.user.role === 'admin' ? undefined : session.user.clientIds ?? [];
   return reply.send({
-    summary: getDashboardHealthSummary({ clientIds: scope }),
-    clients: listClients({ clientIds: scope }),
+    summary: await getDashboardHealthSummary({ clientIds: scope }),
+    clients: await listClients({ clientIds: scope }),
   });
 });
 

@@ -14,7 +14,7 @@ const WEBHOOK_SECRET = /^[0-9a-f]{48}$/;
 
 async function makeClient(label = 'Integrations') {
   const { createClient } = await loadDatabase();
-  return createClient({ name: `${label} ${unique()}` });
+  return await createClient({ name: `${label} ${unique()}` });
 }
 
 async function makeWordpress(clientId: string, overrides: { config?: Record<string, unknown>; credentials?: Record<string, unknown> } = {}) {
@@ -265,8 +265,8 @@ test('integration alias exports delegate to the primary functions', async () => 
   assert.equal(inspectClientIntegration(wp.id)?.ready, true);
   assert.equal(testIntegrationById(wp.id)?.ready, true);
   assert.equal(testClientIntegration(wp.id)?.ready, true);
-  assert.equal(getClientByIdStrict(client.id)?.id, client.id);
-  assert.equal(getClientByIdLoose(client.slug)?.id, client.id);
+  assert.equal((await getClientByIdStrict(client.id))?.id, client.id);
+  assert.equal((await getClientByIdLoose(client.slug))?.id, client.id);
   assert.equal(removeClientIntegration(wp.id), true);
   assert.equal(removeClientIntegration(wp.id), false);
 });

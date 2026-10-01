@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 
 test('lead pagination reaches records beyond 200 and counts filtered rows without exposing raw payloads', async () => {
   const { createClient, getDatabase, listLeadsByClient } = await import('../src/lib/database.js');
-  const client = createClient({ name: `Leads paginados ${Date.now()}` });
+  const client = await createClient({ name: `Leads paginados ${Date.now()}` });
   const values = Array.from({ length: 205 }, (_, index) =>
     `('${randomUUID()}', '${client.id}', 'WordPress', 'Lead ${index}', 'new', '{"private":"hidden"}', '2026-05-18T12:00:00.000Z', '2026-05-18T12:00:00.000Z', '2026-05-18T12:00:00.000Z')`
   ).join(',');
@@ -21,7 +21,7 @@ test('lead pagination reaches records beyond 200 and counts filtered rows withou
 
 test('lead delivery identity is atomically unique within an integration', async () => {
   const { createClient, deleteClientIntegration, insertLead, listLeadsByClient, saveClientIntegration } = await import('../src/lib/database.js');
-  const client = createClient({ name: `Lead entrega ${Date.now()}` });
+  const client = await createClient({ name: `Lead entrega ${Date.now()}` });
   const integration = saveClientIntegration({ clientId: client.id, provider: 'wordpress', config: { siteUrl: 'https://example.test' } });
   assert.ok(integration);
   const input = {
@@ -49,7 +49,7 @@ test('RRSS channels and monthly KPIs round trip through the database layer', asy
     saveRrssChannel,
   } = await import('../src/lib/database.js');
 
-  const client = createClient({
+  const client = await createClient({
     name: `Cliente modelo ${Date.now()}`,
     industry: 'Servicios',
     healthScore: 75,
@@ -119,7 +119,7 @@ test('Madrid day-25 cycle close catches up once, freezes values, prepares next m
     closeDueMonthlyKpiCycles, closeMonthlyKpiCycle, createClient, listMonthlyKpiCycles,
     listMonthlyKpis, reopenMonthlyKpiCycle, saveMonthlyKpi,
   } = await import('../src/lib/database.js');
-  const client = createClient({ name: `Ciclo KPI ${Date.now()}` });
+  const client = await createClient({ name: `Ciclo KPI ${Date.now()}` });
   const row = saveMonthlyKpi({
     clientId: client.id, departmentKey: 'web', metricKey: 'sessions', monthKey: '2026-09',
     targetValue: 1000, actualValue: 900, status: 'warning', notes: 'Dato septiembre',

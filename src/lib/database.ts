@@ -9,6 +9,7 @@ import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.j
 import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
+import { sumRevenueWindow } from './dashboardMetrics.js';
 import { dueMonthlyKpiMonth, nextMonthKey } from './monthlyCloseClock.js';
 import { parseWooRefundPolicy } from './woocommerce.js';
 import type { WooCommerceOrderSummary } from './woocommerce.js';
@@ -1745,19 +1746,20 @@ export async function getSessionByToken(token: string) {
   } as AuthenticatedSession;
 }
 
-function clientIdsInClause(clientIds: string[]) {
-  return clientIds.length ? `(${clientIds.map((id) => escapeSqlLiteral(id)).join(',')})` : '(NULL)';
+/** Optional allow-list bound as one text[] parameter. Callers only append the predicate when a scope is set. */
+function scopeParam(scope: string[] | null | undefined) {
+  return scope ? [scope] : [];
 }
 
-export function listClients(options?: { clientIds?: string[] | null }) {
+export async function listClients(options?: { clientIds?: string[] | null }, db: CoreQueryable = getCoreDb()) {
   const scope = options?.clientIds;
-  const where = scope ? `WHERE id IN ${clientIdsInClause(scope)}` : '';
-  const rows = getDatabase().prepare(`SELECT * FROM clients ${where} ORDER BY name ASC`).all();
+  const where = scope ? `WHERE id = ANY($1::text[])` : '';
+  const rows = await coreAll(db, `SELECT * FROM clients ${where} ORDER BY name ASC`, scopeParam(scope));
   return rows.map(rowToClient);
 }
 
-export function getClientBySlug(slug: string) {
-  const row = getDatabase().prepare(`SELECT * FROM clients WHERE slug = ?`).get(slug) as any;
+export async function getClientBySlug(slug: string, db: CoreQueryable = getCoreDb()) {
+  const row = await coreGet(db, `SELECT * FROM clients WHERE slug = $1`, [slug]);
   return row ? rowToClient(row) : null;
 }
 
@@ -1773,8 +1775,8 @@ function buildClientSlug(name: string) {
   return `${slugBase || 'client'}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export function createClient(input: { name: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
-  const db = getDatabase();
+export async function createClient(input: { name: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
+  const db = getCoreDb();
   const timestamp = nowIso();
   const slug = buildClientSlug(input.name);
   const record = {
@@ -1789,17 +1791,21 @@ export function createClient(input: { name: string; industry?: string | null; lo
     updated_at: timestamp,
   };
 
-  db.prepare(
+  // health_score is an INTEGER column: the ::numeric cast keeps PostgreSQL's assignment rounding (55.5 -> 56) that the
+  // inlined numeric literal used to get, instead of failing on the text parameter "55.5".
+  await coreRun(
+    db,
     `INSERT INTO clients (id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
-     VALUES (@id, @name, @slug, @logo_url, @industry, @health_score, @kpi_thresholds_json, @created_at, @updated_at)`
-  ).run(record);
+     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9)`,
+    [record.id, record.name, record.slug, record.logo_url, record.industry, record.health_score, record.kpi_thresholds_json, record.created_at, record.updated_at],
+  );
 
   return rowToClient(record);
 }
 
-export function updateClient(clientId: string, input: { name?: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
-  const db = getDatabase();
-  const existing = getClientById(clientId);
+export async function updateClient(clientId: string, input: { name?: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
+  const db = getCoreDb();
+  const existing = await getClientById(clientId, db);
   if (!existing) {
     return null;
   }
@@ -1812,32 +1818,41 @@ export function updateClient(clientId: string, input: { name?: string; industry?
   const timestamp = nowIso();
   const slug = nextName === existing.name ? existing.slug : buildClientSlug(nextName);
 
-  db.prepare(
+  await coreRun(
+    db,
     `UPDATE clients
-     SET name = ?, slug = ?, logo_url = ?, industry = ?, health_score = ?, kpi_thresholds_json = ?, updated_at = ?
-     WHERE id = ?`
-  ).run(
-    nextName,
-    slug,
-    nextLogoUrl ?? null,
-    nextIndustry ?? null,
-    nextHealthScore,
-    JSON.stringify(nextThresholds),
-    timestamp,
-    clientId,
+     SET name = $1, slug = $2, logo_url = $3, industry = $4, health_score = $5::numeric, kpi_thresholds_json = $6, updated_at = $7
+     WHERE id = $8`,
+    [
+      nextName,
+      slug,
+      nextLogoUrl ?? null,
+      nextIndustry ?? null,
+      nextHealthScore,
+      JSON.stringify(nextThresholds),
+      timestamp,
+      clientId,
+    ],
   );
 
-  return getClientById(clientId);
+  return getClientById(clientId, db);
 }
 
-export function deleteClient(clientId: string) {
-  const db = getDatabase();
-  const exists = db.prepare(`SELECT 1 FROM clients WHERE id = ?`).get(clientId);
-  db.prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
-  return Boolean(exists);
+export async function deleteClient(clientId: string) {
+  const result = await coreRun(getCoreDb(), `DELETE FROM clients WHERE id = $1`, [clientId]);
+  return result.changes > 0;
 }
 
-function getClientById(clientId: string) {
+async function getClientById(clientId: string, db: CoreQueryable = getCoreDb()) {
+  const row = await coreGet(db, `SELECT * FROM clients WHERE id = $1`, [clientId]);
+  return row ? rowToClient(row) : null;
+}
+
+/**
+ * Synchronous psql-shim lookup, kept only for the integration/UX/RRSS/KPI functions that have not moved to the async
+ * pool yet and cannot await. Remove it together with the last of them.
+ */
+function getClientByIdShim(clientId: string) {
   const row = getDatabase().prepare(`SELECT * FROM clients WHERE id = ?`).get(clientId) as any;
   return row ? rowToClient(row) : null;
 }
@@ -1875,7 +1890,7 @@ export function saveClientIntegration(input: IntegrationInput) {
   const existing = existingById ?? existingByProvider;
   const clientId = existing?.client_id ?? input.clientId;
   const provider = (existing?.provider ?? input.provider) as IntegrationProvider;
-  const client = getClientById(clientId);
+  const client = getClientByIdShim(clientId);
   if (!client) {
     return null;
   }
@@ -2252,7 +2267,7 @@ export function getIntegrationById(id: string) {
   return row ? rowToIntegration(row) : null;
 }
 
-export function getClientByIdRecord(clientId: string) {
+export async function getClientByIdRecord(clientId: string) {
   return getClientById(clientId);
 }
 
@@ -2275,8 +2290,8 @@ export function setClientIntegrationStatus(id: string, status: IntegrationStatus
   return row ? rowToIntegration(row) : null;
 }
 
-export function getClientByIdOrSlug(value: string) {
-  return getClientById(value) ?? getClientBySlug(value);
+export async function getClientByIdOrSlug(value: string) {
+  return (await getClientById(value)) ?? getClientBySlug(value);
 }
 
 export function getIntegrationProviderLabel(provider: IntegrationProvider) {
@@ -2304,12 +2319,12 @@ export function inspectClientIntegration(id: string) {
   return testClientIntegration(id);
 }
 
-export function getClientByIdStrict(clientId: string) {
+export async function getClientByIdStrict(clientId: string) {
   return getClientById(clientId);
 }
 
-export function getClientByIdLoose(value: string) {
-  return getClientById(value) ?? getClientBySlug(value);
+export async function getClientByIdLoose(value: string) {
+  return (await getClientById(value)) ?? getClientBySlug(value);
 }
 
 export function listIntegrationsForClient(clientId: string) {
@@ -2324,14 +2339,14 @@ export function testIntegrationById(id: string) {
   return testClientIntegration(id);
 }
 
-export function listDailyStats(clientId?: string, options?: { clientIds?: string[] | null }) {
+export async function listDailyStats(clientId?: string, options?: { clientIds?: string[] | null }, db: CoreQueryable = getCoreDb()) {
   if (clientId) {
-    const rows = getDatabase().prepare(`SELECT * FROM daily_stats WHERE client_id = ? ORDER BY stat_date DESC, created_at DESC`).all(clientId);
+    const rows = await coreAll(db, `SELECT * FROM daily_stats WHERE client_id = $1 ORDER BY stat_date DESC, created_at DESC`, [clientId]);
     return rows.map(rowToDailyStat);
   }
   const scope = options?.clientIds;
-  const where = scope ? `WHERE client_id IN ${clientIdsInClause(scope)}` : '';
-  const rows = getDatabase().prepare(`SELECT * FROM daily_stats ${where} ORDER BY stat_date DESC, created_at DESC`).all();
+  const where = scope ? `WHERE client_id = ANY($1::text[])` : '';
+  const rows = await coreAll(db, `SELECT * FROM daily_stats ${where} ORDER BY stat_date DESC, created_at DESC`, scopeParam(scope));
   return rows.map(rowToDailyStat);
 }
 
@@ -2458,7 +2473,7 @@ export function updateIntegrationSyncState(
 
 export function upsertUxSnapshot(input: ClarityUxSnapshotInput) {
   const db = getDatabase();
-  const client = getClientById(input.clientId);
+  const client = getClientByIdShim(input.clientId);
   if (!client) {
     return null;
   }
@@ -2542,7 +2557,7 @@ export function listRrssChannels(clientId: string) {
 
 export function saveRrssChannel(input: RrssChannelInput) {
   const db = getDatabase();
-  const client = getClientById(input.clientId);
+  const client = getClientByIdShim(input.clientId);
   if (!client) {
     return null;
   }
@@ -2608,7 +2623,7 @@ export function listMonthlyKpis(clientId: string, monthKey?: string) {
 
 export function saveMonthlyKpi(input: MonthlyKpiInput) {
   const db = getDatabase();
-  const client = getClientById(input.clientId);
+  const client = getClientByIdShim(input.clientId);
   if (!client) {
     return null;
   }
@@ -2797,7 +2812,7 @@ function transitionMonthlyKpiCycle(clientId: string, monthKey: string, actorUser
 }
 
 export function closeMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, at = new Date()) {
-  if (!getClientById(clientId)) return null;
+  if (!getClientByIdShim(clientId)) return null;
   if (listMonthlyKpis(clientId, monthKey).length === 0) return null;
   transitionMonthlyKpiCycle(clientId, monthKey, actorUserId, at, true);
   return listMonthlyKpiCycles(clientId).find((cycle) => cycle.monthKey === monthKey) ?? null;
@@ -2876,12 +2891,21 @@ export function listMonthlyKpiEvents(id: string) {
     FROM monthly_kpi_events WHERE kpi_id = ? ORDER BY occurred_at DESC, id DESC`).all(id) as Array<Record<string, unknown>>;
 }
 
-export function getDailyStatById(id: string) {
-  const row = getDatabase().prepare(`SELECT * FROM daily_stats WHERE id = ?`).get(id) as any;
+export async function getDailyStatById(id: string, db: CoreQueryable = getCoreDb()) {
+  const row = await coreGet(db, `SELECT * FROM daily_stats WHERE id = $1`, [id]);
   return row ? rowToDailyStat(row) : null;
 }
 
-export function upsertDailyStat(input: {
+/** The old SQL inliner wrote non-finite numbers as NULL; keep that so NOT NULL still rejects them. */
+function finiteOrNull(value: number) {
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Single atomic INSERT ... ON CONFLICT on the UNIQUE(client_id, stat_date) index, so two concurrent writers of the same
+ * day cannot race between a lookup and an insert. stat_date is compared as free-form text, exactly like the old lookup.
+ */
+export async function upsertDailyStat(input: {
   clientId: string;
   statDate: string;
   revenue?: number;
@@ -2893,91 +2917,83 @@ export function upsertDailyStat(input: {
   traffic?: number;
   notes?: string | null;
   source?: string;
-}) {
-  const db = getDatabase();
+}, db: CoreQueryable = getCoreDb()) {
   const timestamp = nowIso();
-  const existing = db.prepare(`SELECT id FROM daily_stats WHERE client_id = ? AND stat_date = ?`).get(input.clientId, input.statDate) as { id: string } | undefined;
-
-  if (existing) {
-    db.prepare(
-      `UPDATE daily_stats
-       SET revenue = ?, roas = ?, clicks = ?, conversions = ?, cpa = ?, leads = ?, traffic = ?, notes = ?, source = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(
-      input.revenue ?? 0,
-      input.roas ?? 0,
-      input.clicks ?? 0,
-      input.conversions ?? 0,
-      input.cpa ?? 0,
-      input.leads ?? 0,
-      input.traffic ?? 0,
+  // The ::numeric casts reproduce the assignment casts of the former inlined numeric literals: INTEGER columns round
+  // fractional values (12.7 -> 13) and out-of-range values still fail, instead of PostgreSQL rejecting "12.7" as text.
+  const row = await coreGet(
+    db,
+    `INSERT INTO daily_stats (
+       id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11, $12, $13, $13)
+     ON CONFLICT (client_id, stat_date) DO UPDATE SET
+       revenue = EXCLUDED.revenue,
+       roas = EXCLUDED.roas,
+       clicks = EXCLUDED.clicks,
+       conversions = EXCLUDED.conversions,
+       cpa = EXCLUDED.cpa,
+       leads = EXCLUDED.leads,
+       traffic = EXCLUDED.traffic,
+       notes = EXCLUDED.notes,
+       source = EXCLUDED.source,
+       updated_at = EXCLUDED.updated_at
+     RETURNING *`,
+    [
+      crypto.randomUUID(),
+      input.clientId,
+      input.statDate,
+      finiteOrNull(input.revenue ?? 0),
+      finiteOrNull(input.roas ?? 0),
+      finiteOrNull(input.clicks ?? 0),
+      finiteOrNull(input.conversions ?? 0),
+      finiteOrNull(input.cpa ?? 0),
+      finiteOrNull(input.leads ?? 0),
+      finiteOrNull(input.traffic ?? 0),
       input.notes ?? null,
       input.source ?? 'manual',
       timestamp,
-      existing.id,
-    );
-
-    return getDailyStatById(existing.id);
-  }
-
-  const id = crypto.randomUUID();
-  db.prepare(
-    `INSERT INTO daily_stats (
-      id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.clientId,
-    input.statDate,
-    input.revenue ?? 0,
-    input.roas ?? 0,
-    input.clicks ?? 0,
-    input.conversions ?? 0,
-    input.cpa ?? 0,
-    input.leads ?? 0,
-    input.traffic ?? 0,
-    input.notes ?? null,
-    input.source ?? 'manual',
-    timestamp,
-    timestamp,
+    ],
   );
 
-  return getDailyStatById(id);
+  return row ? rowToDailyStat(row) : null;
 }
 
-export function deleteDailyStat(id: string) {
-  const db = getDatabase();
-  const result = db.prepare(`DELETE FROM daily_stats WHERE id = ?`).run(id);
+export async function deleteDailyStat(id: string) {
+  const result = await coreRun(getCoreDb(), `DELETE FROM daily_stats WHERE id = $1`, [id]);
   return result.changes > 0;
 }
 
-export function getDashboardHealthSummary(options?: { clientIds?: string[] | null }) {
-  const db = getDatabase();
+export async function getDashboardHealthSummary(options?: { clientIds?: string[] | null }) {
+  const db = getCoreDb();
   const scope = options?.clientIds;
-  const clientsWhere = scope ? `WHERE id IN ${clientIdsInClause(scope)}` : '';
-  const statsWhere = scope ? `WHERE client_id IN ${clientIdsInClause(scope)}` : '';
-  const totalUsers = db.prepare(`SELECT COUNT(*) as total FROM users`).get() as { total: number };
-  const totalClients = db.prepare(`SELECT COUNT(*) as total FROM clients ${clientsWhere}`).get() as { total: number };
-  const totalStats = db.prepare(`SELECT COUNT(*) as total FROM daily_stats ${statsWhere}`).get() as { total: number };
+  const clientsWhere = scope ? `WHERE id = ANY($1::text[])` : '';
+  const statsWhere = scope ? `WHERE client_id = ANY($1::text[])` : '';
+  // COUNT(*) is bigint, which pg returns as a string; ::int keeps the numbers the API has always returned.
+  const totalUsers = await coreGet<{ total: number }>(db, `SELECT COUNT(*)::int AS total FROM users`);
+  const totalClients = await coreGet<{ total: number }>(db, `SELECT COUNT(*)::int AS total FROM clients ${clientsWhere}`, scopeParam(scope));
+  const totalStats = await coreGet<{ total: number }>(db, `SELECT COUNT(*)::int AS total FROM daily_stats ${statsWhere}`, scopeParam(scope));
   return {
-    users: totalUsers.total,
-    clients: totalClients.total,
-    dailyStats: totalStats.total,
+    users: totalUsers!.total,
+    clients: totalClients!.total,
+    dailyStats: totalStats!.total,
   };
 }
 
-export function listClientsWithLatestStat(options?: { clientIds?: string[] | null }) {
-  const clients = listClients(options);
-  const clientsWithStats = clients.map((client) => {
-    const latestStat = getDatabase().prepare(
-      `SELECT * FROM daily_stats WHERE client_id = ? ORDER BY stat_date DESC, created_at DESC LIMIT 1`
-    ).get(client.id) as any;
-
-    return {
-      ...client,
-      latestStat: latestStat ? rowToDailyStat(latestStat) : null,
-    };
-  });
+export async function listClientsWithLatestStat(options?: { clientIds?: string[] | null }, db: CoreQueryable = getCoreDb()) {
+  const clients = await listClients(options, db);
+  const scope = options?.clientIds;
+  // One query for every client's newest stat (same ordering as the former per-client LIMIT 1 lookups).
+  const latestRows = await coreAll(
+    db,
+    `SELECT DISTINCT ON (client_id) * FROM daily_stats ${scope ? 'WHERE client_id = ANY($1::text[])' : ''}
+     ORDER BY client_id, stat_date DESC, created_at DESC`,
+    scopeParam(scope),
+  );
+  const latestByClient = new Map(latestRows.map((row) => [row.client_id as string, rowToDailyStat(row)]));
+  const clientsWithStats = clients.map((client) => ({
+    ...client,
+    latestStat: latestByClient.get(client.id) ?? null,
+  }));
 
   return clientsWithStats.sort((a, b) => {
     const aHasStat = a.latestStat ? 0 : 1;
@@ -2990,4 +3006,55 @@ export function listClientsWithLatestStat(options?: { clientIds?: string[] | nul
     const bDate = b.latestStat?.statDate ?? b.updatedAt ?? b.createdAt;
     return bDate.localeCompare(aDate);
   });
+}
+
+/**
+ * Revenue per client inside the inclusive [end - days + 1, end] window, computed with ONE grouped query (replaces a
+ * listDailyStats call per client). Revenues are aggregated in listDailyStats order and summed in JavaScript so the
+ * totals are bit-identical to sumRevenueWindow over the same rows. Clients without rows are absent from the map.
+ */
+export async function getRevenueWindowsByClient(
+  options: { clientIds?: string[] | null } | undefined,
+  endDate: string,
+  days = 30,
+  db: CoreQueryable = getCoreDb(),
+) {
+  const { startDate } = sumRevenueWindow([], endDate, days);
+  const scope = options?.clientIds;
+  // COLLATE "C" makes the free-form stat_date text compare code-unit-wise, like the JavaScript comparison it replaces.
+  const rows = await coreAll<{ client_id: string; revenues: Array<number | string> }>(
+    db,
+    `SELECT client_id, array_agg(revenue ORDER BY stat_date DESC, created_at DESC) AS revenues
+     FROM daily_stats
+     WHERE stat_date COLLATE "C" >= $1 AND stat_date COLLATE "C" <= $2 ${scope ? 'AND client_id = ANY($3::text[])' : ''}
+     GROUP BY client_id`,
+    [startDate, endDate, ...scopeParam(scope)],
+  );
+  const windows = new Map<string, ReturnType<typeof sumRevenueWindow>>();
+  for (const row of rows) {
+    const revenues = row.revenues.map(Number);
+    windows.set(row.client_id, {
+      total: revenues.reduce((total, revenue) => total + revenue, 0),
+      count: revenues.length,
+      startDate,
+      endDate,
+    });
+  }
+  return windows;
+}
+
+/** Clients with their newest stat and 30-day revenue window in a constant number of queries (no per-client lookups). */
+export async function listClientsWithRevenueWindow(
+  options: { clientIds?: string[] | null } | undefined,
+  endDate: string,
+  days = 30,
+  db: CoreQueryable = getCoreDb(),
+) {
+  const clients = await listClientsWithLatestStat(options, db);
+  const windows = await getRevenueWindowsByClient(options, endDate, days, db);
+  const empty = sumRevenueWindow([], endDate, days);
+  return clients.map((client) => ({
+    ...client,
+    revenue30d: windows.get(client.id) ?? empty,
+  }));
 }
