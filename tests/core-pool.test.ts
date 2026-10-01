@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import pg from 'pg';
+import { buildPostgresPoolConfig } from '../src/server/content/postgres.js';
 import {
   buildCorePoolConfig,
+  coreTypeParsers,
   coreAll,
   coreGet,
   coreRun,
@@ -183,4 +186,21 @@ test('withCoreTransaction releases the client when BEGIN fails', async () => {
 test('mapCorePgError is idempotent for errors it already rewrote', () => {
   const once = mapCorePgError(pgError('23505', 'duplicate key value', { detail: 'Key (a)=(b) exists.' })) as Error;
   assert.equal(mapCorePgError(once), once);
+});
+
+test('the core pool returns DATE columns as raw YYYY-MM-DD strings and leaves every other type on its default parser', () => {
+  const config = buildCorePoolConfig({ DATABASE_URL: 'postgres://x/y' });
+  assert.equal(config.types, coreTypeParsers);
+  // Same wiring pg's Client uses for the per-connection `types` option.
+  const overrides = new pg.TypeOverrides(config.types);
+  const parseDate = overrides.getTypeParser(1082, 'text') as unknown as (value: string) => unknown;
+  assert.equal(parseDate('2024-01-31'), '2024-01-31');
+  assert.equal(parseDate('0001-01-01'), '0001-01-01');
+  assert.equal(parseDate('9999-12-31'), '9999-12-31');
+  for (const oid of [16, 20, 23, 25, 1114, 1184, 1700, 3802]) {
+    assert.equal(overrides.getTypeParser(oid, 'text'), pg.types.getTypeParser(oid, 'text'), `oid ${oid}`);
+  }
+  // pg's own DATE parser still yields a Date, and neither the global parsers nor the editorial pool are affected.
+  assert.ok(pg.types.getTypeParser(1082, 'text')('2024-01-31') instanceof Date);
+  assert.equal(buildPostgresPoolConfig({ DATABASE_URL: 'postgres://x/y' }).types, undefined);
 });

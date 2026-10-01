@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { UserFacingError } from './userFacingError.js';
+import { assertCanonicalStatDate, isCanonicalStatDate } from './statDate.js';
 import { runCoreMigrations } from '../server/content/migrations.js';
 import { coreAll, coreGet, coreRun, getCorePool, withCoreTransaction, type CoreQueryable } from './corePool.js';
 import { createBackupFile, type BackupResult } from './databaseBackup.js';
@@ -501,14 +502,16 @@ async function importLegacySqliteData(db: CoreQueryable) {
   for (const row of dump.daily_stats ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
-    if (!clientId) {
+    // stat_date is a DATE now: keep the calendar day of legacy timestamps and skip rows without a usable day.
+    const statDate = String(row.stat_date ?? '').trim().slice(0, 10);
+    if (!clientId || !isCanonicalStatDate(statDate)) {
       continue;
     }
 
     await coreRun(db, insertDailyStat, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
-      String(row.stat_date ?? '').trim(),
+      statDate,
       Number(row.revenue ?? 0),
       Number(row.roas ?? 0),
       Number(row.clicks ?? 0),
@@ -2369,7 +2372,8 @@ function finiteOrNull(value: number) {
 
 /**
  * Single atomic INSERT ... ON CONFLICT on the UNIQUE(client_id, stat_date) index, so two concurrent writers of the same
- * day cannot race between a lookup and an insert. stat_date is compared as free-form text, exactly like the old lookup.
+ * day cannot race between a lookup and an insert. stat_date is a native DATE: only a real calendar day written as
+ * YYYY-MM-DD is accepted (UserFacingError otherwise), so one day can never be stored under two spellings.
  */
 export async function upsertDailyStat(input: {
   clientId: string;
@@ -2384,14 +2388,16 @@ export async function upsertDailyStat(input: {
   notes?: string | null;
   source?: string;
 }, db: CoreQueryable = getCoreDb()) {
+  const statDate = assertCanonicalStatDate(input.statDate);
   const timestamp = nowIso();
+  // $3::date is explicit: the column is DATE and the pool hands it back as the same YYYY-MM-DD string.
   // The ::numeric casts reproduce the assignment casts of the former inlined numeric literals: INTEGER columns round
   // fractional values (12.7 -> 13) and out-of-range values still fail, instead of PostgreSQL rejecting "12.7" as text.
   const row = await coreGet(
     db,
     `INSERT INTO daily_stats (
        id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at
-     ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11, $12, $13, $13)
+     ) VALUES ($1, $2, $3::date, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11, $12, $13, $13)
      ON CONFLICT (client_id, stat_date) DO UPDATE SET
        revenue = EXCLUDED.revenue,
        roas = EXCLUDED.roas,
@@ -2407,7 +2413,7 @@ export async function upsertDailyStat(input: {
     [
       crypto.randomUUID(),
       input.clientId,
-      input.statDate,
+      statDate,
       finiteOrNull(input.revenue ?? 0),
       finiteOrNull(input.roas ?? 0),
       finiteOrNull(input.clicks ?? 0),
@@ -2487,12 +2493,12 @@ export async function getRevenueWindowsByClient(
 ) {
   const { startDate } = sumRevenueWindow([], endDate, days);
   const scope = options?.clientIds;
-  // COLLATE "C" makes the free-form stat_date text compare code-unit-wise, like the JavaScript comparison it replaces.
+  // stat_date is a native DATE, so the window bounds compare as dates (no collation involved).
   const rows = await coreAll<{ client_id: string; revenues: Array<number | string> }>(
     db,
     `SELECT client_id, array_agg(revenue ORDER BY stat_date DESC, created_at DESC) AS revenues
      FROM daily_stats
-     WHERE stat_date COLLATE "C" >= $1 AND stat_date COLLATE "C" <= $2 ${scope ? 'AND client_id = ANY($3::text[])' : ''}
+     WHERE stat_date >= $1::date AND stat_date <= $2::date ${scope ? 'AND client_id = ANY($3::text[])' : ''}
      GROUP BY client_id`,
     [startDate, endDate, ...scopeParam(scope)],
   );

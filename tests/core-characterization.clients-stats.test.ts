@@ -1,6 +1,7 @@
 import './helpers/isolated-harness-required.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { UserFacingError } from '../src/lib/userFacingError.js';
 
 // Characterization tests for the core data layer (src/lib/database.ts): clients, daily stats,
 // dashboard aggregates and SQL-literal edge cases. They pin CURRENT behavior so the psql shim can be
@@ -316,7 +317,7 @@ test('daily stats for different days or different clients never collide', async 
   assert.equal((await listDailyStats(clientB.id)).length, 1);
 });
 
-test('stat_date is free-form text: no validation, no normalization, text ordering', async () => {
+test('stat_date is a native DATE: only canonical calendar days are accepted, one row per day, date ordering', async () => {
   const { listDailyStats, upsertDailyStat } = await loadDatabase();
   const client = await makeClient('Stat dates');
   const dates = ['2024-01-31', '2024-02-29', '2024-03-01', '2023-12-31', '2024-02-01', '0001-01-01', '9999-12-31'];
@@ -325,12 +326,21 @@ test('stat_date is free-form text: no validation, no normalization, text orderin
   // stat_date DESC.
   assert.deepEqual((await listDailyStats(client.id)).map((stat) => stat.statDate), [...dates].sort().reverse());
 
-  // KNOWN BUG: nothing validates the date; garbage and non-canonical spellings of the same day are stored as distinct rows.
-  const garbage = await upsertDailyStat({ clientId: client.id, statDate: 'not-a-date' });
-  assert.equal(garbage?.statDate, 'not-a-date');
-  const sameDayOtherSpelling = await upsertDailyStat({ clientId: client.id, statDate: '2024-01-31T00:00:00Z' });
-  assert.notEqual(sameDayOtherSpelling?.id, (await listDailyStats(client.id)).find((stat) => stat.statDate === '2024-01-31')?.id);
-  assert.equal((await listDailyStats(client.id)).length, dates.length + 2);
+  // FIXED (was the last pinned KNOWN BUG, W3.3): garbage, impossible days and non-canonical spellings of a day are
+  // rejected with a Spanish user-facing message, so one day can no longer be stored as several distinct rows.
+  for (const statDate of ['not-a-date', '2024-02-30', '2024-01-31T00:00:00Z', ' 2024-01-31', '2024/01/31', '']) {
+    await assert.rejects(
+      () => upsertDailyStat({ clientId: client.id, statDate }),
+      (error: unknown) => error instanceof UserFacingError && error.message === 'La fecha debe tener el formato AAAA-MM-DD',
+      statDate,
+    );
+  }
+  // The canonical spelling of an existing day updates that row instead of creating another one.
+  const existing = (await listDailyStats(client.id)).find((stat) => stat.statDate === '2024-01-31');
+  const again = await upsertDailyStat({ clientId: client.id, statDate: '2024-01-31', revenue: 42 });
+  assert.equal(again?.id, existing?.id);
+  assert.equal(again?.revenue, 42);
+  assert.equal((await listDailyStats(client.id)).length, dates.length);
 });
 
 test('upsertDailyStat rejects unknown clients and NaN numbers with database errors', async () => {

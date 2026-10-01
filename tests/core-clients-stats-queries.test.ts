@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { CoreQueryable } from '../src/lib/corePool.js';
 import { listClientsWithRevenueWindow, upsertDailyStat } from '../src/lib/database.js';
+import { UserFacingError } from '../src/lib/userFacingError.js';
 
 // Unit tests (no PostgreSQL needed) for the pooled clients/daily-stats queries. They drive the data layer with a
 // fake CoreQueryable that answers by SQL shape and records every call.
@@ -109,8 +110,9 @@ test('scope ids and window bounds are bound as parameters, never inlined into th
   assert.ok(windowCall);
   assert.ok(windowCall.values?.includes('2026-08-25') && windowCall.values?.includes('2026-09-23'));
   assert.match(windowCall.text, /GROUP BY client_id/i);
-  // stat_date is free-form text: the window must compare byte-wise like JavaScript does.
-  assert.match(windowCall.text, /COLLATE "C"/);
+  // stat_date is a native DATE: the window compares as dates, with no text collation left.
+  assert.match(windowCall.text, /stat_date >= \$1::date AND stat_date <= \$2::date/);
+  assert.doesNotMatch(windowCall.text, /COLLATE/i);
 });
 
 test('upsertDailyStat is one atomic INSERT ... ON CONFLICT statement, not a select followed by insert/update', async () => {
@@ -130,4 +132,24 @@ test('upsertDailyStat is one atomic INSERT ... ON CONFLICT statement, not a sele
   // Non-finite numbers are bound as NULL (the old inliner did the same), so NOT NULL still rejects them.
   assert.ok(calls[0].values?.includes(null));
   assert.ok(!calls[0].values?.some((value) => typeof value === 'number' && Number.isNaN(value)));
+});
+
+test('upsertDailyStat rejects non-canonical dates before touching the database and binds the date as ::date', async () => {
+  const calls: unknown[] = [];
+  const db: CoreQueryable = {
+    async query(text, values) {
+      calls.push({ text, values });
+      return { rows: [statRow(1, '2024-01-31')], rowCount: 1 };
+    },
+  };
+  for (const statDate of ['2024-02-30', 'not-a-date', '2024-01-31T00:00:00Z', ' 2024-01-31', '', '31/01/2024']) {
+    await assert.rejects(
+      () => upsertDailyStat({ clientId: 'client-1', statDate }, db),
+      (error: unknown) => error instanceof UserFacingError && error.message === 'La fecha debe tener el formato AAAA-MM-DD',
+      statDate,
+    );
+  }
+  assert.equal(calls.length, 0);
+  await upsertDailyStat({ clientId: 'client-1', statDate: '2024-01-31' }, db);
+  assert.match((calls[0] as { text: string }).text, /VALUES \(\$1, \$2, \$3::date,/);
 });
