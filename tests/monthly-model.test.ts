@@ -55,7 +55,7 @@ test('RRSS channels and monthly KPIs round trip through the database layer', asy
     healthScore: 75,
   });
 
-  const channel = saveRrssChannel({
+  const channel = await saveRrssChannel({
     clientId: client.id,
     platformKey: 'instagram',
     label: 'Instagram',
@@ -68,7 +68,7 @@ test('RRSS channels and monthly KPIs round trip through the database layer', asy
   assert.equal(channel.label, 'Instagram');
   assert.equal(channel.isActive, true);
 
-  const channelList = listRrssChannels(client.id);
+  const channelList = await listRrssChannels(client.id);
   assert.equal(channelList.length, 1);
   assert.equal(channelList[0]?.id, channel.id);
 
