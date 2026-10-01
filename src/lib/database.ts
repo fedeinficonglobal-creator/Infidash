@@ -2174,11 +2174,16 @@ export function testIntegrationById(id: string, db: CoreQueryable = getCoreDb())
 }
 
 export async function listDailyStats(clientId?: string, options?: { clientIds?: string[] | null }, db: CoreQueryable = getCoreDb()) {
-  if (clientId) {
+  const scope = options?.clientIds;
+  if (clientId !== undefined) {
+    // An explicit clientId never widens into "all clients": an empty id matches nothing, and an id outside the
+    // supplied scope (when one is supplied) is hidden. A null/undefined scope is unrestricted (admin).
+    if (!clientId || (scope && !scope.includes(clientId))) {
+      return [];
+    }
     const rows = await coreAll(db, `SELECT * FROM daily_stats WHERE client_id = $1 ORDER BY stat_date DESC, created_at DESC`, [clientId]);
     return rows.map(rowToDailyStat);
   }
-  const scope = options?.clientIds;
   const where = scope ? `WHERE client_id = ANY($1::text[])` : '';
   const rows = await coreAll(db, `SELECT * FROM daily_stats ${where} ORDER BY stat_date DESC, created_at DESC`, scopeParam(scope));
   return rows.map(rowToDailyStat);
@@ -2358,6 +2363,11 @@ export async function listRrssChannels(clientId: string, db: CoreQueryable = get
   return rows.map(rowToRrssChannel);
 }
 
+export async function getRrssChannelById(id: string, db: CoreQueryable = getCoreDb()) {
+  const row = await coreGet(db, `SELECT * FROM rrss_channels WHERE id = $1`, [id]);
+  return row ? rowToRrssChannel(row) : null;
+}
+
 export async function saveRrssChannel(input: RrssChannelInput, db: CoreQueryable = getCoreDb()) {
   const client = await getClientById(input.clientId, db);
   if (!client) {
@@ -2388,16 +2398,17 @@ export async function saveRrssChannel(input: RrssChannelInput, db: CoreQueryable
     return rowToRrssChannel(row);
   }
 
-  const existing = await coreGet(db, `SELECT * FROM rrss_channels WHERE id = $1`, [input.id]);
-  if (existing) {
-    const refreshed = await coreGet(
-      db,
-      `UPDATE rrss_channels
-       SET platform_key = $1, label = $2, is_active = $3, sort_order = $4::numeric, updated_at = $5
-       WHERE id = $6
-       RETURNING *`,
-      [platformKey, label, isActive, sortOrder, timestamp, existing.id],
-    );
+  // The id path only ever touches a row owned by input.clientId: a channel id that belongs to another client is
+  // neither updated nor re-inserted (null, like an unknown client).
+  const refreshed = await coreGet(
+    db,
+    `UPDATE rrss_channels
+     SET platform_key = $1, label = $2, is_active = $3, sort_order = $4::numeric, updated_at = $5
+     WHERE id = $6 AND client_id = $7
+     RETURNING *`,
+    [platformKey, label, isActive, sortOrder, timestamp, input.id, input.clientId],
+  );
+  if (refreshed) {
     return rowToRrssChannel(refreshed);
   }
 
@@ -2405,10 +2416,11 @@ export async function saveRrssChannel(input: RrssChannelInput, db: CoreQueryable
     db,
     `INSERT INTO rrss_channels (id, client_id, platform_key, label, is_active, sort_order, created_at, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $7)
+     ON CONFLICT (id) DO NOTHING
      RETURNING *`,
     [input.id, input.clientId, platformKey, label, isActive, sortOrder, timestamp],
   );
-  return rowToRrssChannel(created);
+  return created ? rowToRrssChannel(created) : null;
 }
 
 export async function listMonthlyKpis(clientId: string, monthKey?: string, db: CoreQueryable = getCoreDb()) {
