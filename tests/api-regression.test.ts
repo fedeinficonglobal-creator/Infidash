@@ -967,3 +967,108 @@ test('logout-all revokes every session of that user and leaves other users untou
 
   await request(`/api/users/${user.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${adminToken}` } });
 });
+
+test('a viewer scoped to client A cannot read client B stats or change client B RRSS channels, while admin is unrestricted', async () => {
+  const stamp = Date.now();
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const createClient = async (label: string) => {
+    const { response, body } = await request('/api/clients', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ name: `Scope ${label} ${stamp}`, industry: 'QA / Scope' }),
+    });
+    assert.equal(response.status, 201, JSON.stringify(body));
+    return body.client.id as string;
+  };
+  const clientA = await createClient('A');
+  const clientB = await createClient('B');
+
+  const addStat = async (clientId: string, revenue: number) => {
+    const { response, body } = await request('/api/daily-stats', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ clientId, statDate: '2026-06-01', revenue }),
+    });
+    assert.equal(response.status, 201, JSON.stringify(body));
+  };
+  await addStat(clientA, 111);
+  await addStat(clientB, 222);
+
+  const { response: channelResponse, body: channelBody } = await request(`/api/clients/${clientB}/rrss-channels`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ platformKey: 'instagram', label: 'B Instagram', sortOrder: 1 }),
+  });
+  assert.equal(channelResponse.status, 201, JSON.stringify(channelBody));
+  const channelBId = channelBody.channel.id as string;
+
+  const viewer = await createDisposableViewer('scope');
+  try {
+    const { response: grantResponse } = await request(`/api/users/${viewer.id}`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({ clientIds: [clientA] }),
+    });
+    assert.equal(grantResponse.status, 200);
+    const viewerHeaders = { authorization: `Bearer ${await login(viewer.email, 'TempPass123')}` };
+
+    // Reads: client B is forbidden, the unfiltered list is limited to client A.
+    const { response: forbiddenStats, body: forbiddenStatsBody } = await request(`/api/daily-stats?clientId=${clientB}`, { headers: viewerHeaders });
+    assert.equal(forbiddenStats.status, 403);
+    assert.equal(forbiddenStatsBody.code, 'FORBIDDEN');
+    const { response: ownStats, body: ownStatsBody } = await request(`/api/daily-stats?clientId=${clientA}`, { headers: viewerHeaders });
+    assert.equal(ownStats.status, 200);
+    assert.deepEqual(ownStatsBody.stats.map((stat: any) => stat.clientId), [clientA]);
+    const { response: listStats, body: listStatsBody } = await request('/api/daily-stats', { headers: viewerHeaders });
+    assert.equal(listStats.status, 200);
+    assert.ok(listStatsBody.stats.length > 0);
+    assert.ok(listStatsBody.stats.every((stat: any) => stat.clientId === clientA));
+
+    // Writes: a viewer cannot update client B's channel, with or without claiming client A in the body.
+    for (const body of [{ clientId: clientB }, { clientId: clientA }, {}]) {
+      const { response } = await request(`/api/rrss-channels/${channelBId}`, {
+        method: 'PUT',
+        headers: viewerHeaders,
+        body: JSON.stringify({ ...body, platformKey: 'instagram', label: 'Hijacked' }),
+      });
+      assert.equal(response.status, 403);
+    }
+  } finally {
+    await request(`/api/users/${viewer.id}`, { method: 'DELETE', headers: adminHeaders });
+  }
+
+  // Admin: unrestricted reads, and a channel id can only be updated through its real owner.
+  const { body: adminStatsBody } = await request(`/api/daily-stats?clientId=${clientB}`, { headers: adminHeaders });
+  assert.deepEqual(adminStatsBody.stats.map((stat: any) => stat.revenue), [222]);
+
+  const { response: mismatchResponse, body: mismatchBody } = await request(`/api/rrss-channels/${channelBId}`, {
+    method: 'PUT',
+    headers: adminHeaders,
+    body: JSON.stringify({ clientId: clientA, platformKey: 'tiktok', label: 'Hijacked' }),
+  });
+  assert.equal(mismatchResponse.status, 404);
+  assert.equal(mismatchBody.error, 'Canal no encontrado');
+
+  const { response: unknownResponse } = await request(`/api/rrss-channels/${crypto.randomUUID()}`, {
+    method: 'PUT',
+    headers: adminHeaders,
+    body: JSON.stringify({ clientId: clientB, platformKey: 'instagram', label: 'Nope' }),
+  });
+  assert.equal(unknownResponse.status, 404);
+
+  const { response: okResponse, body: okBody } = await request(`/api/rrss-channels/${channelBId}`, {
+    method: 'PUT',
+    headers: adminHeaders,
+    body: JSON.stringify({ clientId: clientB, platformKey: 'instagram', label: 'B Instagram renamed', isActive: false }),
+  });
+  assert.equal(okResponse.status, 200, JSON.stringify(okBody));
+  assert.equal(okBody.channel.clientId, clientB);
+  assert.equal(okBody.channel.label, 'B Instagram renamed');
+  assert.equal(okBody.channel.isActive, false);
+
+  // The rejected attempts left no trace on either client.
+  const { body: bChannels } = await request(`/api/clients/${clientB}/rrss-channels`, { headers: adminHeaders });
+  assert.deepEqual(bChannels.channels.map((channel: any) => channel.label), ['B Instagram renamed']);
+  const { body: aChannels } = await request(`/api/clients/${clientA}/rrss-channels`, { headers: adminHeaders });
+  assert.deepEqual(aChannels.channels, []);
+});

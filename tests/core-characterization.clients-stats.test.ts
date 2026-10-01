@@ -389,10 +389,20 @@ test('listDailyStats orders by stat_date desc, applies scopes and returns empty 
   assert.equal(scoped[0]?.id, b?.id);
   assert.deepEqual((await listDailyStats(undefined, { clientIds: [clientB.id] })).map((stat) => stat.id), [b?.id]);
 
-  // KNOWN BUG: an explicit clientId bypasses the clientIds scope, and an empty-string clientId is falsy and lists
-  // every client's stats (subject to the scope). Authorization relies entirely on the route layer.
-  assert.equal((await listDailyStats(clientB.id, { clientIds: [clientA.id] })).length, 1);
-  assert.equal((await listDailyStats('', { clientIds: [clientA.id] })).length, 3);
+  // An explicit clientId honors the clientIds scope: outside it nothing is returned, inside it only that client's rows.
+  assert.deepEqual(await listDailyStats(clientB.id, { clientIds: [clientA.id] }), []);
+  assert.deepEqual(await listDailyStats(clientB.id, { clientIds: [] }), []);
+  assert.deepEqual((await listDailyStats(clientB.id, { clientIds: [clientA.id, clientB.id] })).map((stat) => stat.id), [b?.id]);
+  // A null/undefined scope is unrestricted (admin semantics), also with an explicit clientId.
+  assert.deepEqual((await listDailyStats(clientB.id, { clientIds: null })).map((stat) => stat.id), [b?.id]);
+  assert.deepEqual((await listDailyStats(clientB.id, {})).map((stat) => stat.id), [b?.id]);
+  // An empty-string clientId means "no such client", never "every client", with or without a scope.
+  assert.deepEqual(await listDailyStats('', { clientIds: [clientA.id] }), []);
+  assert.deepEqual(await listDailyStats(''), []);
+  assert.deepEqual(await listDailyStats('', { clientIds: null }), []);
+  // Only an undefined clientId means "all within scope".
+  assert.equal((await listDailyStats(undefined, { clientIds: [clientA.id] })).length, 3);
+  assert.equal((await listDailyStats(undefined, { clientIds: null })).length >= 4, true);
 });
 
 test('deleteDailyStat and getDailyStatById report presence', async () => {

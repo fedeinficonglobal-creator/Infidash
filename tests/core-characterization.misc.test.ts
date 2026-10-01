@@ -319,6 +319,29 @@ test('saveRrssChannel by id updates that row, and an unknown id inserts with the
   assert.equal((await listRrssChannels(client.id)).length, 2);
 });
 
+test('saveRrssChannel by id never touches or duplicates a channel owned by another client', async () => {
+  const { saveRrssChannel, listRrssChannels, getRrssChannelById } = await loadDatabase();
+  const owner = await makeClient('RRSS id owner');
+  const other = await makeClient('RRSS id other');
+  const channel = await saveRrssChannel({ clientId: owner.id, platformKey: 'facebook', label: 'FB', sortOrder: 1 });
+  assert.ok(channel);
+
+  // Another client's save carrying the owner's channel id is rejected: no update and no duplicate-id insert.
+  assert.equal(await saveRrssChannel({ id: channel.id, clientId: other.id, platformKey: 'tiktok', label: 'Hijacked', sortOrder: 9 }), null);
+  const untouched = await getRrssChannelById(channel.id);
+  assert.equal(untouched?.clientId, owner.id);
+  assert.equal(untouched?.platformKey, 'facebook');
+  assert.equal(untouched?.label, 'FB');
+  assert.equal(untouched?.sortOrder, 1);
+  assert.deepEqual(await listRrssChannels(other.id), []);
+  assert.equal((await listRrssChannels(owner.id)).length, 1);
+
+  // The owner can still update it, and unknown ids read as null.
+  const renamed = await saveRrssChannel({ id: channel.id, clientId: owner.id, platformKey: 'facebook', label: 'FB 2' });
+  assert.equal(renamed?.label, 'FB 2');
+  assert.equal(await getRrssChannelById(crypto.randomUUID()), null);
+});
+
 test('saveRrssChannel surfaces the unique violation when a rename collides with another channel', async () => {
   const { saveRrssChannel } = await loadDatabase();
   const client = await makeClient('RRSS collide');

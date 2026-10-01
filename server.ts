@@ -48,6 +48,7 @@ import {
   listMonthlyKpis,
   listMonthlyKpiEvents,
   listMonthlyKpiCycles,
+  getRrssChannelById,
   listRrssChannels,
   listReportRuns,
   listUsers,
@@ -1459,6 +1460,10 @@ app.post('/api/clients/:clientId/rrss-channels', async (req: AnyFastifyRequest, 
     return;
   }
 
+  if (!requireClientAccess(reply, session, (req.params as any).clientId)) {
+    return;
+  }
+
   const { platformKey, label, isActive, sortOrder } = (req.body ?? {}) as any;
   if (typeof platformKey !== 'string' || typeof label !== 'string') {
     return sendError(reply, 400, 'platformKey y label son obligatorios', 'INVALID_PAYLOAD');
@@ -1485,9 +1490,22 @@ app.put('/api/rrss-channels/:id', async (req: AnyFastifyRequest, reply: FastifyR
     return;
   }
 
+  // The channel's real owner decides authorization; a body clientId can only confirm it, never redirect the update.
+  const existing = await getRrssChannelById(String((req.params as any).id));
+  if (!existing) {
+    return sendError(reply, 404, 'Canal no encontrado', 'NOT_FOUND');
+  }
+  if (!requireClientAccess(reply, session, existing.clientId)) {
+    return;
+  }
+  const bodyClientId = (req.body as any)?.clientId;
+  if (typeof bodyClientId === 'string' && bodyClientId !== '' && bodyClientId !== existing.clientId) {
+    return sendError(reply, 404, 'Canal no encontrado', 'NOT_FOUND');
+  }
+
   const channel = await saveRrssChannel({
-    id: (req.params as any).id,
-    clientId: typeof (req.body as any)?.clientId === 'string' ? (req.body as any).clientId : '',
+    id: existing.id,
+    clientId: existing.clientId,
     platformKey: typeof (req.body as any)?.platformKey === 'string' ? (req.body as any).platformKey : 'instagram',
     label: typeof (req.body as any)?.label === 'string' ? (req.body as any).label : '',
     isActive: typeof (req.body as any)?.isActive === 'boolean' ? (req.body as any).isActive : undefined,
@@ -1495,7 +1513,7 @@ app.put('/api/rrss-channels/:id', async (req: AnyFastifyRequest, reply: FastifyR
   });
 
   if (!channel) {
-    return sendError(reply, 404, 'Canal no encontrado o cliente no válido', 'NOT_FOUND');
+    return sendError(reply, 404, 'Canal no encontrado', 'NOT_FOUND');
   }
 
   return reply.send({ channel });
