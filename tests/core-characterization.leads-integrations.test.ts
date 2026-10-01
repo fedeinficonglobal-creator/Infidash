@@ -1,6 +1,7 @@
 import './helpers/isolated-harness-required.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { coreSqlRun } from './helpers/coreSql.js';
 import { UserFacingError } from '../src/lib/userFacingError.js';
 
 // Characterization tests for integrations and leads in src/lib/database.ts.
@@ -557,7 +558,7 @@ test('deleting an integration keeps its leads and nulls their integrationId', as
 // ---------------------------------------------------------------- leads: listLeadsByClient
 
 async function seedLeads() {
-  const { getDatabase, insertLead } = await loadDatabase();
+  const { insertLead } = await loadDatabase();
   const client = await makeClient('Lead list');
   const wp = await makeWordpress(client.id);
   // [name, source, status]; received_at is forced to a distinct, increasing timestamp so the ordering is deterministic.
@@ -572,7 +573,7 @@ async function seedLeads() {
   const ids: string[] = [];
   for (const [index, [name, source, status]] of plan.entries()) {
     const { lead } = await insertLead(leadInput(client.id, wp.id, { name, source, message: `msg ${name}`, rawPayload: { secret: `hidden-${name}` } }));
-    getDatabase().prepare(`UPDATE leads SET status = ?, received_at = ? WHERE id = ?`).run(status, `2030-01-01T00:00:0${index}.000Z`, lead.id);
+    await coreSqlRun(`UPDATE leads SET status = $1, received_at = $2 WHERE id = $3`, [status, `2030-01-01T00:00:0${index}.000Z`, lead.id]);
     ids.push(lead.id);
   }
   return { client, ids };

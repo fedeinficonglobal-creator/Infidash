@@ -1,6 +1,7 @@
 import './helpers/isolated-harness-required.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { coreSqlAll, coreSqlGet, coreSqlRun } from './helpers/coreSql.js';
 
 // Characterization tests for users, authentication and sessions in src/lib/database.ts.
 // They pin CURRENT behavior ahead of the psql-shim -> pg pool migration.
@@ -19,9 +20,8 @@ async function makeUser(role: 'admin' | 'viewer' = 'viewer', extra: { clientIds?
 }
 
 async function countSessions(where: 'user_id' | 'token_hash', value: string) {
-  const { getDatabase } = await loadDatabase();
-  const row = getDatabase().prepare(`SELECT COUNT(*) AS total FROM sessions WHERE ${where} = ?`).get(value) as { total: number };
-  return row.total;
+  const row = await coreSqlGet<{ total: number }>(`SELECT COUNT(*)::int AS total FROM sessions WHERE ${where} = $1`, [value]);
+  return row!.total;
 }
 
 // ---------------------------------------------------------------- createUser
@@ -112,7 +112,7 @@ test('authenticateUser returns null for a wrong password, an unknown email, an e
 });
 
 test('authenticateUser stores only the SHA-256 of the token with a 12 hour expiry and one row per login', async () => {
-  const { authenticateUser, getDatabase } = await loadDatabase();
+  const { authenticateUser } = await loadDatabase();
   const { hashToken } = await loadAuth();
   const { user, email } = await makeUser();
 
@@ -121,7 +121,7 @@ test('authenticateUser stores only the SHA-256 of the token with a 12 hour expir
   assert.ok(first && second);
   assert.notEqual(first.token, second.token);
 
-  const rows = getDatabase().prepare(`SELECT * FROM sessions WHERE user_id = ?`).all(user.id) as Array<Record<string, string>>;
+  const rows = await coreSqlAll<Record<string, string>>(`SELECT * FROM sessions WHERE user_id = $1`, [user.id]);
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map((row) => row.token_hash).sort(), [hashToken(first.token), hashToken(second.token)].sort());
   for (const row of rows) {
@@ -164,14 +164,14 @@ test('getSessionByToken returns the token, the live user and the expiry; unknown
 });
 
 test('an expired session returns null and is deleted on first read', async () => {
-  const { authenticateUser, getDatabase, getSessionByToken } = await loadDatabase();
+  const { authenticateUser, getSessionByToken } = await loadDatabase();
   const { hashToken } = await loadAuth();
   const { email } = await makeUser();
   const login = await authenticateUser(email, PASSWORD);
   assert.ok(login);
   const tokenHash = hashToken(login.token);
 
-  getDatabase().prepare(`UPDATE sessions SET expires_at = ? WHERE token_hash = ?`).run(new Date(Date.now() - 1000).toISOString(), tokenHash);
+  await coreSqlRun(`UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`, [new Date(Date.now() - 1000).toISOString(), tokenHash]);
   assert.equal(await countSessions('token_hash', tokenHash), 1);
   assert.equal(await getSessionByToken(login.token), null);
   assert.equal(await countSessions('token_hash', tokenHash), 0);
@@ -180,7 +180,7 @@ test('an expired session returns null and is deleted on first read', async () =>
   // A session expiring in the future is still valid.
   const fresh = await authenticateUser(email, PASSWORD);
   assert.ok(fresh);
-  getDatabase().prepare(`UPDATE sessions SET expires_at = ? WHERE token_hash = ?`).run(new Date(Date.now() + 60_000).toISOString(), hashToken(fresh.token));
+  await coreSqlRun(`UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`, [new Date(Date.now() + 60_000).toISOString(), hashToken(fresh.token)]);
   assert.ok(await getSessionByToken(fresh.token));
 });
 
@@ -329,4 +329,23 @@ test('listUsers orders by creation time and reports membership per user (null fo
   assert.equal(byId.get(second.user.id)?.clientIds, null);
   assert.deepEqual(byId.get(third.user.id)?.clientIds, []);
   assert.deepEqual(Object.keys(byId.get(first.user.id)!).sort(), ['active', 'clientIds', 'createdAt', 'email', 'id', 'name', 'role', 'updatedAt']);
+});
+
+test('purgeExpiredSessions deletes only expired sessions and reports how many it removed', async () => {
+  const { authenticateUser, purgeExpiredSessions } = await loadDatabase();
+  const { hashToken } = await loadAuth();
+  const { email } = await makeUser();
+  const expired = await authenticateUser(email, PASSWORD);
+  const live = await authenticateUser(email, PASSWORD);
+  assert.ok(expired && live);
+
+  const now = new Date();
+  await coreSqlRun(`UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`, [new Date(now.getTime() - 60_000).toISOString(), hashToken(expired.token)]);
+
+  assert.ok(await purgeExpiredSessions(now) >= 1);
+  assert.equal(await countSessions('token_hash', hashToken(expired.token)), 0);
+  assert.equal(await countSessions('token_hash', hashToken(live.token)), 1);
+  // Idempotent: nothing of ours is left to purge on a second run.
+  await purgeExpiredSessions(now);
+  assert.equal(await countSessions('token_hash', hashToken(live.token)), 1);
 });

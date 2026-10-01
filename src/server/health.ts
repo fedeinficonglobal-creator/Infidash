@@ -23,11 +23,10 @@ export interface HealthCheckOptions {
   logIntervalMs?: number;
   logger?: (...args: unknown[]) => void;
   /**
-   * Optional core-layer probe, only used by `?deep=1`. The core layer shells out to psql synchronously,
-   * so it blocks the event loop (and may hang when the database is unreachable): never use it on the
-   * shallow check that orchestrators poll.
+   * Optional core-layer probe, only used by `?deep=1`: an async SELECT 1 on the core pool (bounded by the same
+   * timeout). It is kept off the shallow check that orchestrators poll so that probe stays a single query.
    */
-  coreCheck?: () => void;
+  coreCheck?: () => void | Promise<void>;
 }
 
 const DEGRADED: HealthResult = { statusCode: 503, body: { status: 'degraded', checks: { database: 'down' } } };
@@ -90,7 +89,8 @@ export function createHealthCheck(options: HealthCheckOptions): HealthCheck {
     }
     if (options.coreCheck) {
       try {
-        options.coreCheck();
+        const coreCheck = options.coreCheck;
+        await withTimeout(async () => coreCheck(), timeoutMs);
         checks.core = 'ok';
       } catch (error) {
         logFailure(error);

@@ -911,8 +911,12 @@ test('admin can create a postgres backup and viewer cannot', async () => {
 
   assert.equal(response.status, 201, JSON.stringify(body));
   assert.equal(body.backup.label, 'regression-smoke');
-  assert.equal(typeof body.backup.path, 'string');
-  assert.ok(body.backup.path.endsWith('.sql'));
+  // The internal filesystem path is never exposed; the client only gets the file name.
+  assert.equal('path' in body.backup, false);
+  assert.equal(typeof body.backup.name, 'string');
+  assert.ok(body.backup.name.endsWith('.sql'));
+  assert.ok(!body.backup.name.includes('/') && !body.backup.name.includes('\\'));
+  assert.equal(typeof body.backup.sizeBytes, 'number');
   assert.equal(typeof body.backup.createdAt, 'string');
 });
 
