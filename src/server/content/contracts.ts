@@ -132,20 +132,39 @@ export function normalizeRrssNetworks(value: unknown, field = 'networks', code =
   return [...new Set(value as string[])];
 }
 
-/** Social post media: a list of `{url}` with an HTTP(S) URL; any other key is dropped. */
-export function normalizeSocialMedia(value: unknown, field = 'media', code = 'INVALID_PAYLOAD'): Array<{ url: string }> {
+export const SOCIAL_MEDIA_TYPES = ['image', 'video'] as const;
+export const MAX_SOCIAL_MEDIA_ITEMS = 10;
+export const MAX_SOCIAL_MEDIA_NAME_LENGTH = 200;
+export type SocialMediaItem = { url: string; type?: typeof SOCIAL_MEDIA_TYPES[number]; name?: string };
+
+/**
+ * Social post media: a list of `{url, type?, name?}` with an HTTP(S) URL, an optional `image`|`video`
+ * type and an optional display name; any other key is dropped.
+ */
+export function normalizeSocialMedia(value: unknown, field = 'media', code = 'INVALID_PAYLOAD'): SocialMediaItem[] {
   if (!Array.isArray(value)) throw new ContentApiError(400, code, `${field} debe ser una lista`);
-  if (value.length > 10) throw new ContentApiError(400, code, `${field} admite como máximo 10 elementos`);
+  if (value.length > MAX_SOCIAL_MEDIA_ITEMS) throw new ContentApiError(400, code, `${field} admite como máximo ${MAX_SOCIAL_MEDIA_ITEMS} elementos`);
   return value.map((item) => {
-    const url = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>).url : undefined;
+    const record = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : {};
+    const url = record.url;
     if (typeof url !== 'string' || url.length > 2048) throw new ContentApiError(400, code, `${field} requiere una url por elemento`);
+    let normalized: SocialMediaItem;
     try {
       const parsed = new URL(url.trim());
       if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('unsupported protocol');
-      return { url: parsed.toString() };
+      normalized = { url: parsed.toString() };
     } catch {
       throw new ContentApiError(400, code, `${field} debe contener URLs HTTP o HTTPS válidas`);
     }
+    if (record.type !== undefined && record.type !== null) {
+      if (typeof record.type !== 'string' || !(SOCIAL_MEDIA_TYPES as readonly string[]).includes(record.type)) throw new ContentApiError(400, code, `${field}: type debe ser image o video`);
+      normalized.type = record.type as SocialMediaItem['type'];
+    }
+    if (record.name !== undefined && record.name !== null) {
+      if (typeof record.name !== 'string' || record.name.length > MAX_SOCIAL_MEDIA_NAME_LENGTH) throw new ContentApiError(400, code, `${field}: name debe ser texto de como máximo ${MAX_SOCIAL_MEDIA_NAME_LENGTH} caracteres`);
+      normalized.name = record.name;
+    }
+    return normalized;
   });
 }
 

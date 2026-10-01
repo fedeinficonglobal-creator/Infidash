@@ -9,6 +9,10 @@ import {
   upsertRrssPlanRow,
   type RrssPlanRow,
 } from '../lib/rrssPlan.js';
+import { RrssPostsSection } from './rrss/RrssPostsSection.js';
+
+type RrssSection = 'posts' | 'plan';
+const SECTIONS: ReadonlyArray<[RrssSection, string]> = [['posts', 'Publicaciones'], ['plan', 'Planificación mensual']];
 
 const EMPTY_FORM = {
   web: '',
@@ -21,6 +25,7 @@ const EMPTY_FORM = {
 export function RrssTab({ client }: { client: Client }) {
   const { currentUser, sessionToken } = useClientStore();
   const isAdmin = currentUser?.role === 'admin';
+  const [section, setSection] = useState<RrssSection>('posts');
   const [periodKey, setPeriodKey] = useState(currentPlanPeriodKey);
   const [search, setSearch] = useState('');
   const plan = useOperationalPlan<RrssPlanRow>({ token: sessionToken, clientId: client.id, domain: 'rrss', periodKey, loadLocal: loadRrssPlanRows, saveLocal: saveRrssPlanRows });
@@ -113,10 +118,20 @@ export function RrssTab({ client }: { client: Client }) {
       <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 mb-1 flex items-center gap-3">Redes Sociales</h2>
-          <p className="text-slate-500 font-medium">Plan compartido de contenidos de {client.name}.</p>
+          <p className="text-slate-500 font-medium">Publicaciones y plan compartido de contenidos de {client.name}.</p>
         </div>
       </header>
 
+      <div role="tablist" aria-label="Secciones de Redes Sociales" className="mb-6 inline-flex rounded-xl border border-slate-200 bg-white p-1">
+        {SECTIONS.map(([id, label]) => <button key={id} type="button" role="tab" id={`rrss-tab-${id}`} aria-selected={section === id} aria-controls={`rrss-panel-${id}`} onClick={() => setSection(id)} className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors ${section === id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>{label}</button>)}
+      </div>
+
+      {/* Both panels stay mounted so switching sections keeps their state (filters, open dialogs, unsaved rows). */}
+      <div role="tabpanel" id="rrss-panel-posts" aria-labelledby="rrss-tab-posts" hidden={section !== 'posts'}>
+        <RrssPostsSection clientId={client.id} />
+      </div>
+
+      <div role="tabpanel" id="rrss-panel-plan" aria-labelledby="rrss-tab-plan" hidden={section !== 'plan'}>
       <div className="mb-6 flex flex-wrap items-end gap-3">
         <label className="text-sm font-semibold text-slate-700">Mes del plan
           <input type="month" value={periodKey} onChange={(event) => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) setPeriodKey(event.target.value); }} className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2" />
@@ -313,6 +328,7 @@ export function RrssTab({ client }: { client: Client }) {
           </div>
         </div>
       )}
+      </div>
 
     </div>
   );
