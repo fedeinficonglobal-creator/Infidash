@@ -277,8 +277,10 @@ async function syncClarityIntegration(integrationId: string) {
     segmentName: typeof integration.config.segmentName === 'string' ? integration.config.segmentName : undefined,
   });
 
-  const savedSnapshots = snapshots
-    .map((snapshot) => upsertUxSnapshot({
+  // Sequential on purpose: snapshots are saved in fetch order and the last one drives lastSync.
+  const savedSnapshots: NonNullable<Awaited<ReturnType<typeof upsertUxSnapshot>>>[] = [];
+  for (const snapshot of snapshots) {
+    const saved = await upsertUxSnapshot({
       clientId: snapshot.clientId,
       snapshotDate: snapshot.snapshotDate,
       sessions: snapshot.sessions,
@@ -292,8 +294,9 @@ async function syncClarityIntegration(integrationId: string) {
       notes: snapshot.notes,
       source: snapshot.source,
       payloadJson: snapshot.payloadJson,
-    }))
-    .filter(Boolean);
+    });
+    if (saved) savedSnapshots.push(saved);
+  }
 
   const lastSnapshot = savedSnapshots[savedSnapshots.length - 1] ?? null;
   const refreshedIntegration = await updateIntegrationSyncState(integration.id, {
@@ -332,7 +335,7 @@ async function syncAllClarityIntegrations() {
     const integrations = await listIntegrationsByProvider('clarity');
     for (const integration of integrations) {
       const lastSyncAt = integration.lastSync ? Date.parse(integration.lastSync) : NaN;
-      const latestSnapshot = getLatestUxSnapshot(integration.clientId);
+      const latestSnapshot = await getLatestUxSnapshot(integration.clientId);
       if (integration.status === 'connected' && Number.isFinite(lastSyncAt) &&
         Date.now() - lastSyncAt < CLARITY_AUTOMATIC_INTERVAL_MS && latestSnapshot?.source === 'clarity' &&
         hasClarityMetric(latestSnapshot, 'sessions')) continue;
@@ -563,8 +566,8 @@ app.get('/api/clients/:clientId/dashboard', async (req: AnyFastifyRequest, reply
   }
 
   const dailyStats = await listDailyStats(client.id);
-  const uxSnapshots = listUxSnapshots(client.id);
-  const latestUxSnapshot = getLatestUxSnapshot(client.id);
+  const uxSnapshots = await listUxSnapshots(client.id);
+  const latestUxSnapshot = await getLatestUxSnapshot(client.id);
 
   return reply.send({
     client,
@@ -1350,7 +1353,7 @@ app.get('/api/clients/:clientId/ux-snapshots', async (req: AnyFastifyRequest, re
     return;
   }
 
-  return reply.send({ snapshots: listUxSnapshots((req.params as any).clientId) });
+  return reply.send({ snapshots: await listUxSnapshots((req.params as any).clientId) });
 });
 
 app.post('/api/clients/:clientId/ux-snapshots', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1364,7 +1367,7 @@ app.post('/api/clients/:clientId/ux-snapshots', async (req: AnyFastifyRequest, r
     return sendError(reply, 400, 'snapshotDate es obligatorio', 'INVALID_PAYLOAD');
   }
 
-  const snapshot = upsertUxSnapshot({
+  const snapshot = await upsertUxSnapshot({
     clientId: (req.params as any).clientId,
     snapshotDate,
     sessions: parseNumber((req.body as any)?.sessions),
@@ -1395,7 +1398,7 @@ app.get('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFasti
   if (!isOperationalPlanDomain(domain) || !isPlanPeriod(periodKey)) return sendError(reply, 400, 'Dominio o periodo inválido', 'INVALID_PAYLOAD');
   if (!requireClientAccess(reply, session, clientId)) return;
   if (!(await getClientByIdRecord(clientId))) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
-  return reply.send({ plan: getOperationalPlan(clientId, domain, periodKey) });
+  return reply.send({ plan: await getOperationalPlan(clientId, domain, periodKey) });
 });
 
 app.put('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1410,7 +1413,7 @@ app.put('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFasti
   if (!(await getClientByIdRecord(clientId))) return sendError(reply, 404, 'Cliente no encontrado', 'NOT_FOUND');
   const normalizedRows = normalizeOperationalPlanRows(domain, rows);
   if (!normalizedRows) return sendError(reply, 400, 'Filas del plan inválidas o demasiado numerosas', 'INVALID_PAYLOAD');
-  const saved = saveOperationalPlan({ clientId, domain, periodKey, version, rows: normalizedRows });
+  const saved = await saveOperationalPlan({ clientId, domain, periodKey, version, rows: normalizedRows });
   if (!saved) return sendError(reply, 409, 'El plan cambió en otro navegador. Recarga antes de guardar.', 'STALE_VERSION');
   return reply.send({ plan: saved });
 });
@@ -1424,7 +1427,7 @@ app.get('/api/clients/:clientId/rrss-channels', async (req: AnyFastifyRequest, r
     return;
   }
 
-  return reply.send({ channels: listRrssChannels((req.params as any).clientId) });
+  return reply.send({ channels: await listRrssChannels((req.params as any).clientId) });
 });
 
 app.post('/api/clients/:clientId/rrss-channels', async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1438,7 +1441,7 @@ app.post('/api/clients/:clientId/rrss-channels', async (req: AnyFastifyRequest, 
     return sendError(reply, 400, 'platformKey y label son obligatorios', 'INVALID_PAYLOAD');
   }
 
-  const channel = saveRrssChannel({
+  const channel = await saveRrssChannel({
     clientId: (req.params as any).clientId,
     platformKey,
     label,
@@ -1459,7 +1462,7 @@ app.put('/api/rrss-channels/:id', async (req: AnyFastifyRequest, reply: FastifyR
     return;
   }
 
-  const channel = saveRrssChannel({
+  const channel = await saveRrssChannel({
     id: (req.params as any).id,
     clientId: typeof (req.body as any)?.clientId === 'string' ? (req.body as any).clientId : '',
     platformKey: typeof (req.body as any)?.platformKey === 'string' ? (req.body as any).platformKey : 'instagram',
@@ -1518,7 +1521,7 @@ app.get('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, rep
   const before = (req.query as any)?.before;
   const match = typeof before === 'string' ? /^(\d{4}-\d\d-\d\dT[^|]+)\|([0-9a-f-]{36})$/.exec(before) : null;
   if (before !== undefined && (!match || Number.isNaN(Date.parse(match[1])))) return sendError(reply, 400, 'Cursor no válido', 'INVALID_CURSOR');
-  const page = listReportRuns(clientId, 51, match ? { at: match[1], id: match[2] } : undefined);
+  const page = await listReportRuns(clientId, 51, match ? { at: match[1], id: match[2] } : undefined);
   const runs = page.slice(0, 50);
   const last = runs.at(-1);
   return reply.send({ runs, nextCursor: page.length > 50 && last ? `${last.generatedAt}|${last.id}` : null, smtpConfigured: reportSmtpConfigured() });
@@ -1536,7 +1539,7 @@ app.post('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, re
     summarizeDailyStats([], from, to);
     const stats = (await listDailyStats(clientId)).filter((stat) => stat.statDate >= from && stat.statDate <= to);
     const pdf = await buildDailyStatsPdf({ clientName: client.name, from, to, generatedAt: new Date().toISOString(), stats });
-    return reply.code(201).send({ run: saveReportRun({ clientId, from, to, createdByUserId: session.user.id, pdf }) });
+    return reply.code(201).send({ run: await saveReportRun({ clientId, from, to, createdByUserId: session.user.id, pdf }) });
   } catch (error) {
     return sendCaughtError(reply, error, { status: 400, fallback: 'No se pudo guardar el informe', code: 'INVALID_PERIOD' });
   }
@@ -1547,9 +1550,9 @@ app.get('/api/clients/:clientId/report-runs/:id/daily.pdf', async (req: AnyFasti
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
-  const run = getReportRun(clientId, String((req.params as any).id));
+  const run = await getReportRun(clientId, String((req.params as any).id));
   if (!run) return sendError(reply, 404, 'Informe no encontrado', 'NOT_FOUND');
-  const pdf = getReportRunPdf(clientId, run.id);
+  const pdf = await getReportRunPdf(clientId, run.id);
   return reply.header('Cache-Control', 'private, no-store')
     .header('Content-Disposition', `attachment; filename="infidash-${run.from}-${run.to}.pdf"`)
     .type('application/pdf').send(pdf);
@@ -1560,18 +1563,18 @@ app.post('/api/clients/:clientId/report-runs/:id/send', async (req: AnyFastifyRe
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
-  const run = getReportRun(clientId, String((req.params as any).id));
+  const run = await getReportRun(clientId, String((req.params as any).id));
   const client = await getClientByIdRecord(clientId);
   if (!run || !client) return sendError(reply, 404, 'Informe no encontrado', 'NOT_FOUND');
   const recipient = (req.body as any)?.recipient;
   if (typeof recipient !== 'string' || recipient.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return sendError(reply, 400, 'Correo destinatario no válido', 'INVALID_RECIPIENT');
   if (!reportSmtpConfigured()) return sendError(reply, 503, 'SMTP no configurado', 'SMTP_UNCONFIGURED');
   const delivery = await deliverReportEmail(
-    { recipient, clientName: client.name, from: run.from, to: run.to, pdf: getReportRunPdf(clientId, run.id)! },
-    { record: (failure) => recordReportSend(clientId, run.id, recipient, failure), context: { clientId, runId: run.id } },
+    { recipient, clientName: client.name, from: run.from, to: run.to, pdf: (await getReportRunPdf(clientId, run.id))! },
+    { record: async (failure) => recordReportSend(clientId, run.id, recipient, failure), context: { clientId, runId: run.id } },
   );
   if (!delivery.ok) return sendError(reply, delivery.status, delivery.message, delivery.code);
-  return reply.send({ run: getReportRun(clientId, run.id) });
+  return reply.send({ run: await getReportRun(clientId, run.id) });
 });
 
 app.get('/api/clients/:clientId/monthly-kpi-cycles', async (req: AnyFastifyRequest, reply: FastifyReply) => {

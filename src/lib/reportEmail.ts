@@ -39,18 +39,18 @@ export type ReportDeliveryResult =
  */
 export async function deliverReportEmail(
   input: ReportEmailInput,
-  deps: { send?: typeof sendReportEmail; record: (failure: string | null) => void; context: { clientId: string; runId: string } },
+  deps: { send?: typeof sendReportEmail; record: (failure: string | null) => void | Promise<void>; context: { clientId: string; runId: string } },
 ): Promise<ReportDeliveryResult> {
   try {
     await (deps.send ?? sendReportEmail)(input);
-    deps.record(null);
+    await deps.record(null);
     return { ok: true };
   } catch (error) {
     const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : undefined;
     console.error('[infidash] report email delivery failed', {
       clientId: deps.context.clientId, runId: deps.context.runId, code, message: error instanceof Error ? error.message : String(error),
     });
-    deps.record('Entrega no confirmada');
+    await deps.record('Entrega no confirmada');
     return { ok: false, status: 502, code: 'SMTP_DELIVERY_UNKNOWN', message: 'No se pudo confirmar la entrega SMTP; revisa el buzón antes de repetir' };
   }
 }

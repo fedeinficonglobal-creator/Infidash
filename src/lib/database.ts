@@ -1849,7 +1849,7 @@ async function getClientById(clientId: string, db: CoreQueryable = getCoreDb()) 
 }
 
 /**
- * Synchronous psql-shim lookup, kept only for the UX/RRSS/KPI functions that have not moved to the async
+ * Synchronous psql-shim lookup, kept only for the monthly KPI functions that have not moved to the async
  * pool yet and cannot await. Remove it together with the last of them.
  */
 function getClientByIdShim(clientId: string) {
@@ -2348,20 +2348,15 @@ export async function listDailyStats(clientId?: string, options?: { clientIds?: 
   return rows.map(rowToDailyStat);
 }
 
-export function listUxSnapshots(clientId?: string) {
-  const query = clientId
-    ? `SELECT * FROM ux_snapshots WHERE client_id = ? ORDER BY snapshot_date DESC, created_at DESC`
-    : `SELECT * FROM ux_snapshots ORDER BY snapshot_date DESC, created_at DESC`;
+export async function listUxSnapshots(clientId?: string, db: CoreQueryable = getCoreDb()) {
   const rows = clientId
-    ? getDatabase().prepare(query).all(clientId)
-    : getDatabase().prepare(query).all();
+    ? await coreAll(db, `SELECT * FROM ux_snapshots WHERE client_id = $1 ORDER BY snapshot_date DESC, created_at DESC`, [clientId])
+    : await coreAll(db, `SELECT * FROM ux_snapshots ORDER BY snapshot_date DESC, created_at DESC`);
   return rows.map(rowToUxSnapshot);
 }
 
-export function getLatestUxSnapshot(clientId: string) {
-  const row = getDatabase()
-    .prepare(`SELECT * FROM ux_snapshots WHERE client_id = ? ORDER BY snapshot_date DESC, updated_at DESC LIMIT 1`)
-    .get(clientId) as any;
+export async function getLatestUxSnapshot(clientId: string, db: CoreQueryable = getCoreDb()) {
+  const row = await coreGet(db, `SELECT * FROM ux_snapshots WHERE client_id = $1 ORDER BY snapshot_date DESC, updated_at DESC LIMIT 1`, [clientId]);
   return row ? rowToUxSnapshot(row) : null;
 }
 
@@ -2376,27 +2371,29 @@ function rowToOperationalPlan(row: any): OperationalPlanRecord {
   };
 }
 
-export function getOperationalPlan(clientId: string, domain: OperationalPlanDomain, periodKey: string): OperationalPlanRecord {
-  const row = getDatabase().prepare(`SELECT * FROM operational_plans WHERE client_id = ? AND domain = ? AND period_key = ?`)
-    .get(clientId, domain, periodKey) as any;
+export async function getOperationalPlan(clientId: string, domain: OperationalPlanDomain, periodKey: string, db: CoreQueryable = getCoreDb()): Promise<OperationalPlanRecord> {
+  const row = await coreGet(db, `SELECT * FROM operational_plans WHERE client_id = $1 AND domain = $2 AND period_key = $3`, [clientId, domain, periodKey]);
   return row ? rowToOperationalPlan(row) : { clientId, domain, periodKey, version: 0, rows: [], updatedAt: null };
 }
 
-export function saveOperationalPlan(input: Omit<OperationalPlanRecord, 'updatedAt'>): OperationalPlanRecord | null {
-  if (input.version > 0 && getOperationalPlan(input.clientId, input.domain, input.periodKey).version === 0) return null;
+export async function saveOperationalPlan(input: Omit<OperationalPlanRecord, 'updatedAt'>, db: CoreQueryable = getCoreDb()): Promise<OperationalPlanRecord | null> {
+  if (input.version > 0 && (await getOperationalPlan(input.clientId, input.domain, input.periodKey, db)).version === 0) return null;
   const timestamp = nowIso();
-  const result = getDatabase().prepare(`INSERT INTO operational_plans
+  // The conflict branch only fires for the caller holding the current version, so concurrent writers with the same
+  // version never both win: the loser re-evaluates the WHERE against the committed row and changes nothing.
+  // ::numeric keeps the comparison with the INTEGER column valid for any number the former inlined literal accepted.
+  const result = await coreRun(db, `INSERT INTO operational_plans
     (id, client_id, domain, period_key, version, rows_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
     ON CONFLICT (client_id, domain, period_key) DO UPDATE SET
       version = operational_plans.version + 1,
       rows_json = excluded.rows_json,
       updated_at = excluded.updated_at
-    WHERE operational_plans.version = ?`).run(
+    WHERE operational_plans.version = $8::numeric`, [
     crypto.randomUUID(), input.clientId, input.domain, input.periodKey,
-    JSON.stringify(input.rows), timestamp, timestamp, input.version,
-  );
-  return result.changes ? getOperationalPlan(input.clientId, input.domain, input.periodKey) : null;
+    JSON.stringify(input.rows), timestamp, timestamp, finiteOrNull(input.version),
+  ]);
+  return result.changes ? getOperationalPlan(input.clientId, input.domain, input.periodKey, db) : null;
 }
 
 function rowToReportRun(row: any): ReportRunRecord {
@@ -2405,34 +2402,34 @@ function rowToReportRun(row: any): ReportRunRecord {
     lastSentAt: row.last_sent_at, lastSentTo: row.last_sent_to, lastSendError: row.last_send_error };
 }
 
-export function saveReportRun(input: { clientId: string; from: string; to: string; createdByUserId: string; pdf: Buffer }): ReportRunRecord {
+export async function saveReportRun(input: { clientId: string; from: string; to: string; createdByUserId: string; pdf: Buffer }, db: CoreQueryable = getCoreDb()): Promise<ReportRunRecord> {
   const id = crypto.randomUUID();
   const generatedAt = nowIso();
-  getDatabase().prepare(`INSERT INTO report_runs (id,client_id,from_date,to_date,generated_at,created_by_user_id,pdf_base64,bytes)
-    VALUES (?,?,?,?,?,?,?,?)`).run(id, input.clientId, input.from, input.to, generatedAt, input.createdByUserId, input.pdf.toString('base64'), input.pdf.length);
-  return getReportRun(input.clientId, id)!;
+  // pdf_base64 is a TEXT column: the PDF travels as base64 text exactly as before, never as bytea.
+  await coreRun(db, `INSERT INTO report_runs (id,client_id,from_date,to_date,generated_at,created_by_user_id,pdf_base64,bytes)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [id, input.clientId, input.from, input.to, generatedAt, input.createdByUserId, input.pdf.toString('base64'), input.pdf.length]);
+  return (await getReportRun(input.clientId, id, db))!;
 }
 
-export function listReportRuns(clientId: string, limit = 50, before?: { at: string; id: string }): ReportRunRecord[] {
+export async function listReportRuns(clientId: string, limit = 50, before?: { at: string; id: string }, db: CoreQueryable = getCoreDb()): Promise<ReportRunRecord[]> {
   const rows = before
-    ? getDatabase().prepare(`SELECT * FROM report_runs WHERE client_id=? AND (generated_at,id)<(?,?) ORDER BY generated_at DESC,id DESC LIMIT ?`).all(clientId, before.at, before.id, limit)
-    : getDatabase().prepare(`SELECT * FROM report_runs WHERE client_id=? ORDER BY generated_at DESC,id DESC LIMIT ?`).all(clientId, limit);
+    ? await coreAll(db, `SELECT * FROM report_runs WHERE client_id=$1 AND (generated_at,id)<($2,$3) ORDER BY generated_at DESC,id DESC LIMIT $4`, [clientId, before.at, before.id, limit])
+    : await coreAll(db, `SELECT * FROM report_runs WHERE client_id=$1 ORDER BY generated_at DESC,id DESC LIMIT $2`, [clientId, limit]);
   return rows.map(rowToReportRun);
 }
 
-export function getReportRun(clientId: string, id: string): ReportRunRecord | null {
-  const row = getDatabase().prepare(`SELECT * FROM report_runs WHERE client_id=? AND id=?`).get(clientId, id);
+export async function getReportRun(clientId: string, id: string, db: CoreQueryable = getCoreDb()): Promise<ReportRunRecord | null> {
+  const row = await coreGet(db, `SELECT * FROM report_runs WHERE client_id=$1 AND id=$2`, [clientId, id]);
   return row ? rowToReportRun(row) : null;
 }
 
-export function getReportRunPdf(clientId: string, id: string): Buffer | null {
-  const row = getDatabase().prepare(`SELECT pdf_base64 FROM report_runs WHERE client_id=? AND id=?`).get(clientId, id) as any;
+export async function getReportRunPdf(clientId: string, id: string, db: CoreQueryable = getCoreDb()): Promise<Buffer | null> {
+  const row = await coreGet(db, `SELECT pdf_base64 FROM report_runs WHERE client_id=$1 AND id=$2`, [clientId, id]);
   return row ? Buffer.from(row.pdf_base64, 'base64') : null;
 }
 
-export function recordReportSend(clientId: string, id: string, recipient: string, error: string | null) {
-  getDatabase().prepare(`UPDATE report_runs SET last_sent_at=?,last_sent_to=?,last_send_error=? WHERE client_id=? AND id=?`)
-    .run(nowIso(), recipient, error, clientId, id);
+export async function recordReportSend(clientId: string, id: string, recipient: string, error: string | null, db: CoreQueryable = getCoreDb()) {
+  await coreRun(db, `UPDATE report_runs SET last_sent_at=$1,last_sent_to=$2,last_send_error=$3 WHERE client_id=$4 AND id=$5`, [nowIso(), recipient, error, clientId, id]);
 }
 
 export async function listIntegrationsByProvider(provider: IntegrationProvider, db: CoreQueryable = getCoreDb()) {
@@ -2467,146 +2464,114 @@ export async function updateIntegrationSyncState(
   return refreshed ? rowToIntegration(refreshed) : null;
 }
 
-export function upsertUxSnapshot(input: ClarityUxSnapshotInput) {
-  const db = getDatabase();
-  const client = getClientByIdShim(input.clientId);
+export async function upsertUxSnapshot(input: ClarityUxSnapshotInput, db: CoreQueryable = getCoreDb()) {
+  const client = await getClientById(input.clientId, db);
   if (!client) {
     return null;
   }
 
   const timestamp = nowIso();
-  const existing = db.prepare(`SELECT * FROM ux_snapshots WHERE client_id = ? AND snapshot_date = ?`).get(input.clientId, input.snapshotDate) as any;
-  const record = {
-    id: existing?.id ?? input.id ?? crypto.randomUUID(),
-    client_id: input.clientId,
-    snapshot_date: input.snapshotDate.trim(),
-    sessions: Number.isFinite(input.sessions) ? Number(input.sessions ?? 0) : 0,
-    page_views: Number.isFinite(input.pageViews) ? Number(input.pageViews ?? 0) : 0,
-    rage_clicks: Number.isFinite(input.rageClicks) ? Number(input.rageClicks ?? 0) : 0,
-    dead_clicks: Number.isFinite(input.deadClicks) ? Number(input.deadClicks ?? 0) : 0,
-    scroll_depth_avg: Number.isFinite(input.scrollDepthAvg) ? Number(input.scrollDepthAvg ?? 0) : 0,
-    engaged_sessions: Number.isFinite(input.engagedSessions) ? Number(input.engagedSessions ?? 0) : 0,
-    conversions: Number.isFinite(input.conversions) ? Number(input.conversions ?? 0) : 0,
-    conversion_rate: Number.isFinite(input.conversionRate) ? Number(input.conversionRate ?? 0) : 0,
-    notes: input.notes ?? null,
-    source: input.source?.trim() || 'clarity',
-    payload_json: input.payloadJson ?? '{}',
-    created_at: existing?.created_at ?? timestamp,
-    updated_at: timestamp,
-  };
+  // Non-finite and missing numbers become 0 (as before); the ::numeric casts reproduce the assignment casts of the
+  // former inlined literals, so INTEGER columns round fractional values instead of PostgreSQL rejecting "12.7".
+  const count = (value: number | undefined) => (Number.isFinite(value) ? Number(value ?? 0) : 0);
+  // One atomic upsert on UNIQUE(client_id, snapshot_date): concurrent syncs of the same day cannot collide. The
+  // conflict branch keeps the stored id, created_at and snapshot_date, exactly like the former select-then-update.
+  const row = await coreGet(
+    db,
+    `INSERT INTO ux_snapshots (
+       id, client_id, snapshot_date, sessions, page_views, rage_clicks, dead_clicks, scroll_depth_avg, engaged_sessions, conversions, conversion_rate, notes, source, payload_json, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12, $13, $14, $15, $15)
+     ON CONFLICT (client_id, snapshot_date) DO UPDATE SET
+       sessions = EXCLUDED.sessions,
+       page_views = EXCLUDED.page_views,
+       rage_clicks = EXCLUDED.rage_clicks,
+       dead_clicks = EXCLUDED.dead_clicks,
+       scroll_depth_avg = EXCLUDED.scroll_depth_avg,
+       engaged_sessions = EXCLUDED.engaged_sessions,
+       conversions = EXCLUDED.conversions,
+       conversion_rate = EXCLUDED.conversion_rate,
+       notes = EXCLUDED.notes,
+       source = EXCLUDED.source,
+       payload_json = EXCLUDED.payload_json,
+       updated_at = EXCLUDED.updated_at
+     RETURNING *`,
+    [
+      input.id ?? crypto.randomUUID(),
+      input.clientId,
+      input.snapshotDate.trim(),
+      count(input.sessions),
+      count(input.pageViews),
+      count(input.rageClicks),
+      count(input.deadClicks),
+      count(input.scrollDepthAvg),
+      count(input.engagedSessions),
+      count(input.conversions),
+      count(input.conversionRate),
+      input.notes ?? null,
+      input.source?.trim() || 'clarity',
+      input.payloadJson ?? '{}',
+      timestamp,
+    ],
+  );
 
-  if (existing) {
-    db.prepare(
-      `UPDATE ux_snapshots
-       SET sessions = ?, page_views = ?, rage_clicks = ?, dead_clicks = ?, scroll_depth_avg = ?, engaged_sessions = ?, conversions = ?, conversion_rate = ?, notes = ?, source = ?, payload_json = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(
-      record.sessions,
-      record.page_views,
-      record.rage_clicks,
-      record.dead_clicks,
-      record.scroll_depth_avg,
-      record.engaged_sessions,
-      record.conversions,
-      record.conversion_rate,
-      record.notes,
-      record.source,
-      record.payload_json,
-      record.updated_at,
-      record.id,
-    );
-  } else {
-    db.prepare(
-      `INSERT INTO ux_snapshots (
-        id, client_id, snapshot_date, sessions, page_views, rage_clicks, dead_clicks, scroll_depth_avg, engaged_sessions, conversions, conversion_rate, notes, source, payload_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      record.id,
-      record.client_id,
-      record.snapshot_date,
-      record.sessions,
-      record.page_views,
-      record.rage_clicks,
-      record.dead_clicks,
-      record.scroll_depth_avg,
-      record.engaged_sessions,
-      record.conversions,
-      record.conversion_rate,
-      record.notes,
-      record.source,
-      record.payload_json,
-      record.created_at,
-      record.updated_at,
-    );
-  }
-
-  const saved = db.prepare(`SELECT * FROM ux_snapshots WHERE id = ?`).get(record.id) as any;
-  return saved ? rowToUxSnapshot(saved) : null;
+  return row ? rowToUxSnapshot(row) : null;
 }
 
-export function listRrssChannels(clientId: string) {
-  const rows = getDatabase()
-    .prepare(`SELECT * FROM rrss_channels WHERE client_id = ? ORDER BY sort_order ASC, created_at ASC`)
-    .all(clientId) as any[];
+export async function listRrssChannels(clientId: string, db: CoreQueryable = getCoreDb()) {
+  const rows = await coreAll(db, `SELECT * FROM rrss_channels WHERE client_id = $1 ORDER BY sort_order ASC, created_at ASC`, [clientId]);
   return rows.map(rowToRrssChannel);
 }
 
-export function saveRrssChannel(input: RrssChannelInput) {
-  const db = getDatabase();
-  const client = getClientByIdShim(input.clientId);
+export async function saveRrssChannel(input: RrssChannelInput, db: CoreQueryable = getCoreDb()) {
+  const client = await getClientById(input.clientId, db);
   if (!client) {
     return null;
   }
 
   const timestamp = nowIso();
-  const existing = input.id
-    ? (db.prepare(`SELECT * FROM rrss_channels WHERE id = ?`).get(input.id) as any)
-    : (db.prepare(`SELECT * FROM rrss_channels WHERE client_id = ? AND platform_key = ? AND label = ?`).get(input.clientId, input.platformKey, input.label.trim()) as any);
+  const platformKey = input.platformKey.trim();
+  const label = input.label.trim();
+  const isActive = input.isActive === false ? 0 : 1;
+  // sort_order is bound with ::numeric to reproduce the assignment cast of the former inlined literal (2.7 -> 3).
+  const sortOrder = Number.isFinite(input.sortOrder) ? input.sortOrder ?? 0 : 0;
 
-  if (existing) {
-    db.prepare(
-      `UPDATE rrss_channels
-       SET platform_key = ?, label = ?, is_active = ?, sort_order = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(
-      input.platformKey.trim(),
-      input.label.trim(),
-      input.isActive === false ? 0 : 1,
-      Number.isFinite(input.sortOrder) ? input.sortOrder ?? 0 : 0,
-      timestamp,
-      existing.id,
+  if (!input.id) {
+    // Natural-key save: one atomic upsert on UNIQUE(client_id, platform_key, label). The conflict branch keeps the
+    // stored id, created_at, platform_key and label, exactly like the former select-then-update.
+    const row = await coreGet(
+      db,
+      `INSERT INTO rrss_channels (id, client_id, platform_key, label, is_active, sort_order, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $7)
+       ON CONFLICT (client_id, platform_key, label) DO UPDATE SET
+         is_active = EXCLUDED.is_active,
+         sort_order = EXCLUDED.sort_order,
+         updated_at = EXCLUDED.updated_at
+       RETURNING *`,
+      [crypto.randomUUID(), input.clientId, platformKey, label, isActive, sortOrder, timestamp],
     );
+    return rowToRrssChannel(row);
+  }
 
-    const refreshed = db.prepare(`SELECT * FROM rrss_channels WHERE id = ?`).get(existing.id) as any;
+  const existing = await coreGet(db, `SELECT * FROM rrss_channels WHERE id = $1`, [input.id]);
+  if (existing) {
+    const refreshed = await coreGet(
+      db,
+      `UPDATE rrss_channels
+       SET platform_key = $1, label = $2, is_active = $3, sort_order = $4::numeric, updated_at = $5
+       WHERE id = $6
+       RETURNING *`,
+      [platformKey, label, isActive, sortOrder, timestamp, existing.id],
+    );
     return rowToRrssChannel(refreshed);
   }
 
-  const record = {
-    id: input.id ?? crypto.randomUUID(),
-    client_id: input.clientId,
-    platform_key: input.platformKey.trim(),
-    label: input.label.trim(),
-    is_active: input.isActive === false ? 0 : 1,
-    sort_order: Number.isFinite(input.sortOrder) ? input.sortOrder ?? 0 : 0,
-    created_at: timestamp,
-    updated_at: timestamp,
-  };
-
-  db.prepare(
+  const created = await coreGet(
+    db,
     `INSERT INTO rrss_channels (id, client_id, platform_key, label, is_active, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    record.id,
-    record.client_id,
-    record.platform_key,
-    record.label,
-    record.is_active,
-    record.sort_order,
-    record.created_at,
-    record.updated_at,
+     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $7)
+     RETURNING *`,
+    [input.id, input.clientId, platformKey, label, isActive, sortOrder, timestamp],
   );
-
-  const created = db.prepare(`SELECT * FROM rrss_channels WHERE id = ?`).get(record.id) as any;
   return rowToRrssChannel(created);
 }
 

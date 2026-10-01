@@ -55,3 +55,46 @@ test('the grouped 30-day revenue window equals summing listDailyStats per client
   }
   assert.equal(rows.find((row) => row.id === empty.id)?.revenue30d.count, 0);
 });
+
+test('parallel UX snapshot upserts for the same client and date never fail and leave exactly one row', async () => {
+  const { createClient, listUxSnapshots, upsertUxSnapshot } = await loadDatabase();
+  const client = await createClient({ name: `Concurrent UX ${unique()}` });
+
+  const results = await Promise.all(
+    Array.from({ length: 8 }, (_, index) => upsertUxSnapshot({ clientId: client.id, snapshotDate: '2026-05-01', sessions: index + 1 })),
+  );
+
+  assert.equal(new Set(results.map((snapshot) => snapshot?.id)).size, 1, 'every call resolves to the same row id');
+  const rows = await listUxSnapshots(client.id);
+  assert.equal(rows.length, 1);
+  assert.ok([1, 2, 3, 4, 5, 6, 7, 8].includes(rows[0].sessions), 'the surviving value comes from one of the writers');
+});
+
+test('parallel RRSS channel saves for the same key never fail and leave exactly one row', async () => {
+  const { createClient, listRrssChannels, saveRrssChannel } = await loadDatabase();
+  const client = await createClient({ name: `Concurrent RRSS ${unique()}` });
+
+  const results = await Promise.all(
+    Array.from({ length: 8 }, (_, index) => saveRrssChannel({ clientId: client.id, platformKey: 'instagram', label: 'IG', sortOrder: index })),
+  );
+
+  assert.equal(new Set(results.map((channel) => channel?.id)).size, 1, 'every call resolves to the same row id');
+  assert.equal((await listRrssChannels(client.id)).length, 1);
+});
+
+test('parallel operational plan saves with the same version let exactly one writer win', async () => {
+  const { createClient, getOperationalPlan, saveOperationalPlan } = await loadDatabase();
+  const client = await createClient({ name: `Concurrent plan ${unique()}` });
+
+  const created = await Promise.all(
+    Array.from({ length: 6 }, (_, index) => saveOperationalPlan({ clientId: client.id, domain: 'web', periodKey: '2026-06', version: 0, rows: [{ id: `r${index}` }] as any[] })),
+  );
+  assert.equal(created.filter(Boolean).length, 1);
+  assert.equal((await getOperationalPlan(client.id, 'web', '2026-06')).version, 1);
+
+  const updated = await Promise.all(
+    Array.from({ length: 6 }, (_, index) => saveOperationalPlan({ clientId: client.id, domain: 'web', periodKey: '2026-06', version: 1, rows: [{ id: `u${index}` }] as any[] })),
+  );
+  assert.equal(updated.filter(Boolean).length, 1);
+  assert.equal((await getOperationalPlan(client.id, 'web', '2026-06')).version, 2);
+});
