@@ -63,6 +63,7 @@ import {
   updateUserRole,
   upsertDailyStat,
   upsertUxSnapshot,
+  getDatabase,
   type UserRole,
 } from './src/lib/database.js';
 import { canAccessClient } from './src/lib/auth.js';
@@ -1730,6 +1731,8 @@ if (shouldServeHttp(process.env)) {
     // Apply pending editorial migrations before serving, so new code never runs against an old schema.
     // A failing migration stops the boot loudly instead of serving 500s.
     if (shouldRunEditorialMigrations(process.env)) {
+      // The editorial schema references core tables (public.clients, users…), so create those first.
+      getDatabase();
       const migrations = await runEditorialMigrations(getEditorialPool());
       if (migrations.applied.length) console.log('[infidash] migraciones editoriales aplicadas', migrations.applied);
     }
