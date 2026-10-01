@@ -5,6 +5,8 @@ import { getEditorialPool } from './postgres.js';
 import { authenticateServiceToken, serviceCan, type ServicePrincipal } from './serviceAuth.js';
 import { CALENDAR_STATUSES, CONTENT_STATUSES, ContentApiError, JOB_KINDS, PLAN_STATUSES, PUBLICATION_STATUSES, RRSS_FORMATS, assertEnum, decodeCursor, normalizeRrssNetworks, MAX_SOCIAL_MEDIA_ITEMS, normalizeSocialMedia, optionalString, parseLimit, redactSecrets, requireObject, requirePositiveVersion, requireSocialCopy, requireString, sanitizeError } from './contracts.js';
 import { canAccessClient } from '../../lib/auth.js';
+import { assertPublicHttpUrl } from '../../lib/urlSafety.js';
+import { UserFacingError } from '../../lib/userFacingError.js';
 import { createPostizUploader, postizConfigFromEnv } from './postizUpload.js';
 import { MAX_CREATIVE_BYTES, readCreative } from './creativeUpload.js';
 
@@ -39,8 +41,11 @@ function optionalHttpUrl(value: unknown) {
   try {
     const url = new URL(raw.trim());
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('unsupported protocol');
+    // Syntactic SSRF check only (no DNS): the link is published, not fetched, by this server.
+    assertPublicHttpUrl(url);
     return url.toString();
-  } catch {
+  } catch (error) {
+    if (error instanceof UserFacingError) throw new ContentApiError(400, 'INVALID_PAYLOAD', `externalUrl no es válida: ${error.message}`);
     throw new ContentApiError(400, 'INVALID_PAYLOAD', 'externalUrl debe ser una URL HTTP o HTTPS válida');
   }
 }

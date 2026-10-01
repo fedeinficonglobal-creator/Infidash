@@ -14,10 +14,11 @@ else process.env.DATABASE_URL = previousDatabaseUrl;
 
 after(async () => app.close());
 
-test('public health route returns liveness only, not business counts', async () => {
+test('public health route is unauthenticated and exposes no business counts or connection details', async () => {
+  // No PostgreSQL runs in the safe suite, so the database check fails: the body must stay generic.
   const response = await app.inject({ method: 'GET', url: '/api/health' });
-  assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), { status: 'ok' });
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(response.json(), { status: 'degraded', checks: { database: 'down' } });
 });
 
 test('dashboard diagnostics require an authenticated session', async () => {
