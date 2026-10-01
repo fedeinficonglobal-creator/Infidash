@@ -252,7 +252,7 @@ function parseNumber(value: unknown, fallback = 0) {
 }
 
 async function syncClarityIntegration(integrationId: string) {
-  const integration = getIntegrationById(integrationId);
+  const integration = await getIntegrationById(integrationId);
   if (!integration) {
     return null;
   }
@@ -265,7 +265,7 @@ async function syncClarityIntegration(integrationId: string) {
     };
   }
 
-  const credentials = getIntegrationCredentialsById(integrationId) ?? {};
+  const credentials = await getIntegrationCredentialsById(integrationId) ?? {};
   const accessToken = typeof credentials.accessToken === 'string' ? credentials.accessToken : undefined;
   const snapshots = await fetchClaritySnapshots({
     clientId: integration.clientId,
@@ -296,7 +296,7 @@ async function syncClarityIntegration(integrationId: string) {
     .filter(Boolean);
 
   const lastSnapshot = savedSnapshots[savedSnapshots.length - 1] ?? null;
-  const refreshedIntegration = updateIntegrationSyncState(integration.id, {
+  const refreshedIntegration = await updateIntegrationSyncState(integration.id, {
     status: 'connected',
     lastError: null,
     lastSync: lastSnapshot?.updatedAt ?? new Date().toISOString(),
@@ -329,7 +329,7 @@ async function syncAllClarityIntegrations() {
 
   claritySyncRunning = true;
   try {
-    const integrations = listIntegrationsByProvider('clarity');
+    const integrations = await listIntegrationsByProvider('clarity');
     for (const integration of integrations) {
       const lastSyncAt = integration.lastSync ? Date.parse(integration.lastSync) : NaN;
       const latestSnapshot = getLatestUxSnapshot(integration.clientId);
@@ -339,7 +339,7 @@ async function syncAllClarityIntegrations() {
       try {
         await syncClarityIntegration(integration.id);
       } catch (error) {
-        updateIntegrationSyncState(integration.id, {
+        await updateIntegrationSyncState(integration.id, {
           status: 'error',
           lastError: publicErrorMessage(error, 'Error desconocido durante la sincronización de Análisis/UX'),
         });
@@ -654,7 +654,7 @@ app.get('/api/clients/:clientId/integrations', async (req: AnyFastifyRequest, re
     return;
   }
 
-  const clientIntegrations = redactIntegrationSecrets(getClientIntegrations((req.params as any).clientId), session.user.role);
+  const clientIntegrations = redactIntegrationSecrets(await getClientIntegrations((req.params as any).clientId), session.user.role);
   return reply.send({ integrations: clientIntegrations });
 });
 
@@ -671,7 +671,7 @@ app.post('/api/integrations', async (req: AnyFastifyRequest, reply: FastifyReply
 
   try {
     assertIntegrationUrls(provider, config && typeof config === 'object' ? config : null);
-    const saved = createOrUpdateClientIntegration({
+    const saved = await createOrUpdateClientIntegration({
       id: typeof id === 'string' && id.trim() ? id : undefined,
       clientId,
       provider: provider as any,
@@ -698,7 +698,7 @@ app.patch('/api/integrations/:id', async (req: AnyFastifyRequest, reply: Fastify
     return;
   }
 
-  const existing = getIntegrationById((req.params as any).id) as any;
+  const existing = await getIntegrationById((req.params as any).id) as any;
   if (!existing) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
   }
@@ -706,7 +706,7 @@ app.patch('/api/integrations/:id', async (req: AnyFastifyRequest, reply: Fastify
   try {
     const patchConfig = (req.body as any)?.config;
     assertIntegrationUrls(existing.provider, patchConfig && typeof patchConfig === 'object' ? patchConfig : null);
-    const saved = createOrUpdateClientIntegration({
+    const saved = await createOrUpdateClientIntegration({
       id: existing.id,
       clientId: existing.clientId,
       provider: existing.provider,
@@ -729,7 +729,7 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     return;
   }
 
-  const integrationToTest = getIntegrationById((req.params as any).id) as any;
+  const integrationToTest = await getIntegrationById((req.params as any).id) as any;
   if (integrationToTest?.isActive === false) {
     return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   }
@@ -743,7 +743,7 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     }
   }
 
-  let result = testIntegrationById((req.params as any).id);
+  let result = await testIntegrationById((req.params as any).id);
   if (!result) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
   }
@@ -751,8 +751,8 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
   // The field-completeness check above never actually contacts WordPress.
   // For wordpress integrations with all required fields, do a real HTTP probe.
   if (result.ready && result.integration.provider === 'wordpress') {
-    const probe = await testWordPressConnection(result.integration, getIntegrationCredentialsById(result.integration.id) ?? {});
-    const updated = setClientIntegrationStatus(
+    const probe = await testWordPressConnection(result.integration, await getIntegrationCredentialsById(result.integration.id) ?? {});
+    const updated = await setClientIntegrationStatus(
       result.integration.id,
       probe.ok ? 'connected' : 'error',
       probe.ok ? null : probe.error,
@@ -767,13 +767,13 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
   }
 
   if (result.ready && result.integration.provider === 'woocommerce') {
-    const credentials = getIntegrationCredentialsById(result.integration.id) ?? {};
+    const credentials = await getIntegrationCredentialsById(result.integration.id) ?? {};
     const probe = await probeWooCommerceOrders({
       storeUrl: String(result.integration.config?.storeUrl ?? ''),
       consumerKey: String(credentials.consumerKey ?? ''),
       consumerSecret: String(credentials.consumerSecret ?? ''),
     });
-    const updated = setClientIntegrationStatus(result.integration.id, probe.ok ? 'pending' : 'error', probe.error);
+    const updated = await setClientIntegrationStatus(result.integration.id, probe.ok ? 'pending' : 'error', probe.error);
     result = {
       ...result,
       integration: updated ?? result.integration,
@@ -784,12 +784,12 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
 
   if (result.ready && result.integration.provider === 'ga4') {
     if (!ga4Service) {
-      const updated = setClientIntegrationStatus(result.integration.id, 'error', 'GA4 no está configurado en el servidor');
+      const updated = await setClientIntegrationStatus(result.integration.id, 'error', 'GA4 no está configurado en el servidor');
       result = { ...result, integration: updated ?? result.integration, ready: false, summary: 'GA4 no está configurado en el servidor' };
     } else {
       const propertyId = String(result.integration.config?.propertyId ?? '');
       const probe = await probeGa4Property({ propertyId }, ga4Service.getAccessToken, ga4Service.clientEmail);
-      const updated = setClientIntegrationStatus(
+      const updated = await setClientIntegrationStatus(
         result.integration.id,
         probe.ok ? 'connected' : 'error',
         probe.ok ? null : probe.error,
@@ -806,12 +806,12 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
 
   if (result.ready && result.integration.provider === 'google_ads') {
     if (!googleAdsService) {
-      const updated = setClientIntegrationStatus(result.integration.id, 'error', 'Google Ads no está configurado en el servidor');
+      const updated = await setClientIntegrationStatus(result.integration.id, 'error', 'Google Ads no está configurado en el servidor');
       result = { ...result, integration: updated ?? result.integration, ready: false, summary: 'Google Ads no está configurado en el servidor' };
     } else {
       const customerId = String(result.integration.config?.customerId ?? '');
       const probe = await probeGoogleAdsAccount({ customerId }, googleAdsService.getAccessToken, googleAdsService.developerToken, googleAdsService.loginCustomerId);
-      const updated = setClientIntegrationStatus(
+      const updated = await setClientIntegrationStatus(
         result.integration.id,
         probe.ok ? 'connected' : 'error',
         probe.ok ? null : probe.error,
@@ -833,7 +833,7 @@ app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastif
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'woocommerce') {
     return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
   }
@@ -846,7 +846,7 @@ app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastif
   let refundPolicy;
   try { refundPolicy = parseWooRefundPolicy(integration.config.refundPolicy); }
   catch { return sendError(reply, 400, 'Política de reembolsos inválida', 'INVALID_REFUND_POLICY'); }
-  const credentials = getIntegrationCredentialsById(integration.id) ?? {};
+  const credentials = await getIntegrationCredentialsById(integration.id) ?? {};
   try {
     const orders = await fetchWooCommercePurchaseWindow({
       storeUrl: String(integration.config.storeUrl ?? ''),
@@ -868,7 +868,7 @@ app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastif
 app.post('/api/integrations/:id/woocommerce/sales-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!await requireSession(req, reply, ['admin'])) return;
   reply.header('Cache-Control', 'no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'woocommerce') return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   const body = req.body as Record<string, unknown> | null;
@@ -876,13 +876,13 @@ app.post('/api/integrations/:id/woocommerce/sales-sync', async (req: AnyFastifyR
   let refundPolicy;
   try { refundPolicy = parseWooRefundPolicy(integration.config.refundPolicy); }
   catch { return sendError(reply, 400, 'Política de reembolsos inválida', 'INVALID_REFUND_POLICY'); }
-  const credentials = getIntegrationCredentialsById(integration.id) ?? {};
+  const credentials = await getIntegrationCredentialsById(integration.id) ?? {};
   try {
     const storeUrl = String(integration.config.storeUrl ?? '');
     const orders = await fetchWooCommercePurchaseWindow({ storeUrl, consumerKey: String(credentials.consumerKey ?? ''), consumerSecret: String(credentials.consumerSecret ?? '') },
       { from: body.from, to: body.to, maxPages: 5 });
     validateWooCommerceSnapshot({ from: body.from, to: body.to, orders });
-    const snapshot = saveWooCommerceSalesSnapshot({ integrationId: integration.id, sourceKey: wooCommerceSourceKey(storeUrl), from: body.from, to: body.to, orders });
+    const snapshot = await saveWooCommerceSalesSnapshot({ integrationId: integration.id, sourceKey: wooCommerceSourceKey(storeUrl), from: body.from, to: body.to, orders });
     return reply.send({ source: 'woocommerce', from: body.from, to: body.to, refundPolicy, complete: true,
       orderCount: orders.length, sales: summarizeCompletedOrderSales(orders, refundPolicy), persisted: true, syncedAt: snapshot.syncedAt });
   } catch (error) {
@@ -895,14 +895,14 @@ app.get('/api/integrations/:id/woocommerce/sales-snapshot', async (req: AnyFasti
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'private, no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'woocommerce') return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
   if (!requireClientAccess(reply, session, integration.clientId)) return;
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   const { from, to } = req.query as Record<string, string>;
   if (!from || !to) return sendError(reply, 400, 'Indica las fechas de compra desde y hasta', 'INVALID_RANGE');
   try {
-    const snapshot = getWooCommerceSalesSnapshot({ integrationId: integration.id, sourceKey: wooCommerceSourceKey(String(integration.config.storeUrl ?? '')), from, to });
+    const snapshot = await getWooCommerceSalesSnapshot({ integrationId: integration.id, sourceKey: wooCommerceSourceKey(String(integration.config.storeUrl ?? '')), from, to });
     if (!snapshot) return reply.send({ source: 'woocommerce', from, to, refundPolicy: parseWooRefundPolicy(integration.config.refundPolicy),
       complete: false, orderCount: 0, sales: [], persisted: false });
     const refundPolicy = parseWooRefundPolicy(integration.config.refundPolicy);
@@ -923,7 +923,7 @@ app.get('/api/integrations/:id/ga4/traffic-preview', async (req: AnyFastifyReque
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
   if (!requireClientAccess(reply, session, integration.clientId)) return;
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
@@ -945,7 +945,7 @@ app.get('/api/integrations/:id/ga4/traffic-preview', async (req: AnyFastifyReque
 app.post('/api/integrations/:id/ga4/traffic-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!await requireSession(req, reply, ['admin'])) return;
   reply.header('Cache-Control', 'no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   if (!ga4Service) return sendError(reply, 503, 'GA4 no está configurado en el servidor', 'GA4_NOT_CONFIGURED');
@@ -956,7 +956,7 @@ app.post('/api/integrations/:id/ga4/traffic-sync', async (req: AnyFastifyRequest
   const propertyId = String(integration.config?.propertyId ?? '');
   try {
     const report = await fetchGa4TrafficReport({ propertyId, from: body.from, to: body.to }, ga4Service.getAccessToken, ga4Service.clientEmail);
-    const snapshot = saveGa4Snapshot({
+    const snapshot = await saveGa4Snapshot({
       integrationId: integration.id, propertyId, from: body.from, to: body.to,
       sessionsSeries: report.sessionsSeries, trafficSources: report.trafficSources, topPages: report.topPages, landingPages: report.landingPages,
     });
@@ -971,14 +971,14 @@ app.get('/api/integrations/:id/ga4/traffic-snapshot', async (req: AnyFastifyRequ
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'private, no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
   if (!requireClientAccess(reply, session, integration.clientId)) return;
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   const { from, to } = req.query as Record<string, string>;
   if (!from || !to) return sendError(reply, 400, 'Indica un rango de fechas', 'INVALID_RANGE');
   const propertyId = String(integration.config?.propertyId ?? '');
-  const snapshot = getGa4Snapshot({ integrationId: integration.id, propertyId, from, to });
+  const snapshot = await getGa4Snapshot({ integrationId: integration.id, propertyId, from, to });
   if (!snapshot) {
     return reply.send({ source: 'ga4', from, to, propertyId, complete: false, persisted: false,
       sessionsSeries: [], trafficSources: [], topPages: [], landingPages: [], samplingWarning: false, timeZone: null });
@@ -1000,7 +1000,7 @@ app.get('/api/integrations/:id/google-ads/campaigns-preview', async (req: AnyFas
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
   if (!requireClientAccess(reply, session, integration.clientId)) return;
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
@@ -1022,7 +1022,7 @@ app.get('/api/integrations/:id/google-ads/campaigns-preview', async (req: AnyFas
 app.post('/api/integrations/:id/google-ads/campaigns-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!await requireSession(req, reply, ['admin'])) return;
   reply.header('Cache-Control', 'no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   if (!googleAdsService) return sendError(reply, 503, 'Google Ads no está configurado en el servidor', 'GOOGLE_ADS_NOT_CONFIGURED');
@@ -1033,7 +1033,7 @@ app.post('/api/integrations/:id/google-ads/campaigns-sync', async (req: AnyFasti
   const customerId = String(integration.config?.customerId ?? '');
   try {
     const report = await fetchGoogleAdsCampaignReport({ customerId, from: body.from, to: body.to }, googleAdsService.getAccessToken, googleAdsService.developerToken, googleAdsService.loginCustomerId);
-    const snapshot = saveGoogleAdsSnapshot({ integrationId: integration.id, customerId, from: body.from, to: body.to, campaigns: report.campaigns, currencyCode: report.currencyCode });
+    const snapshot = await saveGoogleAdsSnapshot({ integrationId: integration.id, customerId, from: body.from, to: body.to, campaigns: report.campaigns, currencyCode: report.currencyCode });
     return reply.send({ source: 'google_ads', from: body.from, to: body.to, customerId, complete: true, persisted: true, syncedAt: snapshot.syncedAt, ...report });
   } catch (error) {
     const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de fechas de Google Ads inválida');
@@ -1045,14 +1045,14 @@ app.get('/api/integrations/:id/google-ads/campaigns-snapshot', async (req: AnyFa
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'private, no-store');
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
   if (!requireClientAccess(reply, session, integration.clientId)) return;
   if (!integration.isActive) return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
   const { from, to } = req.query as Record<string, string>;
   if (!from || !to) return sendError(reply, 400, 'Indica un rango de fechas', 'INVALID_RANGE');
   const customerId = String(integration.config?.customerId ?? '');
-  const snapshot = getGoogleAdsSnapshot({ integrationId: integration.id, customerId, from, to });
+  const snapshot = await getGoogleAdsSnapshot({ integrationId: integration.id, customerId, from, to });
   if (!snapshot) {
     return reply.send({ source: 'google_ads', from, to, customerId, complete: false, persisted: false, campaigns: [], currencyCode: '', accountName: '' });
   }
@@ -1068,7 +1068,7 @@ app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: Fas
     return;
   }
 
-  const integration = getIntegrationById((req.params as any).id);
+  const integration = await getIntegrationById((req.params as any).id);
   if (!integration) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
   }
@@ -1090,7 +1090,7 @@ app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: Fas
     });
   } catch (error) {
     const message = publicErrorMessage(error, 'No se pudo sincronizar Análisis/UX');
-    updateIntegrationSyncState(integration.id, {
+    await updateIntegrationSyncState(integration.id, {
       status: 'error',
       lastError: message,
       lastSync: null,
@@ -1121,7 +1121,7 @@ function pickLeadField(payload: Record<string, any>, candidates: string[]) {
 // (WordPress form plugins like Fluent Forms / Contact Form 7 POST here on submit).
 app.post('/api/public/leads/:token', { config: leadsRouteConfig(process.env) }, async (req: AnyFastifyRequest, reply: FastifyReply) => {
   const token = String((req.params as any).token ?? '').trim();
-  const integration = token ? getIntegrationByWebhookSecret(token) : null;
+  const integration = token ? await getIntegrationByWebhookSecret(token) : null;
   if (!integration || integration.provider !== 'wordpress') {
     return sendError(reply, 404, 'Webhook no encontrado', 'NOT_FOUND');
   }
@@ -1145,7 +1145,7 @@ app.post('/api/public/leads/:token', { config: leadsRouteConfig(process.env) }, 
     return sendCaughtError(reply, error, { status: 400, fallback: 'Identificador de entrega inválido', code: 'INVALID_PAYLOAD' });
   }
 
-  const result = insertLead({
+  const result = await insertLead({
     clientId: integration.clientId,
     integrationId: integration.id,
     source: integration.config.leadSource?.trim() || 'WordPress',
@@ -1157,7 +1157,7 @@ app.post('/api/public/leads/:token', { config: leadsRouteConfig(process.env) }, 
     dedupeKey: deliveryIdentity ? leadDedupeKey(deliveryIdentity) : null,
   });
 
-  updateIntegrationSyncState(integration.id, { status: 'connected', lastError: null, lastSync: new Date().toISOString() });
+  await updateIntegrationSyncState(integration.id, { status: 'connected', lastError: null, lastSync: new Date().toISOString() });
 
   return reply.code(result.duplicate ? 200 : 201).send({ ok: true, leadId: result.lead.id, duplicate: result.duplicate });
 });
@@ -1177,7 +1177,7 @@ app.get('/api/leads', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   }
 
   try {
-    return reply.send(listLeadsByClient(clientId, parseLeadQuery((req.query ?? {}) as Record<string, unknown>)));
+    return reply.send(await listLeadsByClient(clientId, parseLeadQuery((req.query ?? {}) as Record<string, unknown>)));
   } catch (error) {
     return sendCaughtError(reply, error, { status: 400, fallback: 'Filtros de leads inválidos', code: 'INVALID_PAYLOAD' });
   }
@@ -1186,7 +1186,7 @@ app.get('/api/leads', async (req: AnyFastifyRequest, reply: FastifyReply) => {
 for (const [action, active] of [['disable', false], ['enable', true]] as const) {
   app.post(`/api/integrations/:id/${action}`, async (req: AnyFastifyRequest, reply: FastifyReply) => {
     if (!await requireSession(req, reply, ['admin'])) return;
-    const integration = setClientIntegrationActive(String((req.params as any).id), active);
+    const integration = await setClientIntegrationActive(String((req.params as any).id), active);
     if (!integration) return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
     return reply.send({ integration });
   });
@@ -1218,7 +1218,7 @@ function startMonthlyKpiCloseScheduler() {
 
 app.post('/api/integrations/:id/rotate-webhook', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   if (!await requireSession(req, reply, ['admin'])) return;
-  const integration = rotateClientIntegrationWebhook(String((req.params as any).id));
+  const integration = await rotateClientIntegrationWebhook(String((req.params as any).id));
   if (!integration) return sendError(reply, 404, 'Webhook de WordPress no encontrado', 'NOT_FOUND');
   return reply.send({ integration });
 });
@@ -1229,7 +1229,7 @@ app.delete('/api/integrations/:id', async (req: AnyFastifyRequest, reply: Fastif
     return;
   }
 
-  const removed = removeClientIntegration((req.params as any).id);
+  const removed = await removeClientIntegration((req.params as any).id);
   if (!removed) {
     return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
   }

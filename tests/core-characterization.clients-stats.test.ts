@@ -182,14 +182,14 @@ test('deleteClient reports existence, is idempotent and cascades to daily stats 
   const { deleteClient, getClientByIdRecord, listClientIntegrations, listDailyStats, saveClientIntegration, upsertDailyStat } = await loadDatabase();
   const client = await makeClient('Delete');
   await upsertDailyStat({ clientId: client.id, statDate: '2024-03-01', revenue: 10 });
-  const integration = saveClientIntegration({ clientId: client.id, provider: 'ga4', config: { propertyId: '123456' } });
+  const integration = await saveClientIntegration({ clientId: client.id, provider: 'ga4', config: { propertyId: '123456' } });
   assert.ok(integration);
   assert.equal((await listDailyStats(client.id)).length, 1);
 
   assert.equal(await deleteClient(client.id), true);
   assert.equal(await getClientByIdRecord(client.id), null);
   assert.deepEqual(await listDailyStats(client.id), []);
-  assert.deepEqual(listClientIntegrations(client.id), []);
+  assert.deepEqual(await listClientIntegrations(client.id), []);
   assert.equal(await deleteClient(client.id), false);
   assert.equal(await deleteClient(MISSING_ID), false);
 });

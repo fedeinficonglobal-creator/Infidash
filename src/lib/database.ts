@@ -1849,7 +1849,7 @@ async function getClientById(clientId: string, db: CoreQueryable = getCoreDb()) 
 }
 
 /**
- * Synchronous psql-shim lookup, kept only for the integration/UX/RRSS/KPI functions that have not moved to the async
+ * Synchronous psql-shim lookup, kept only for the UX/RRSS/KPI functions that have not moved to the async
  * pool yet and cannot await. Remove it together with the last of them.
  */
 function getClientByIdShim(clientId: string) {
@@ -1857,13 +1857,13 @@ function getClientByIdShim(clientId: string) {
   return row ? rowToClient(row) : null;
 }
 
-function getIntegrationRowById(id: string) {
-  const row = getDatabase().prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+async function getIntegrationRowById(id: string, db: CoreQueryable) {
+  const row = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [id]);
   return row ?? null;
 }
 
-export function getIntegrationCredentialsById(id: string) {
-  const row = getIntegrationRowById(id);
+export async function getIntegrationCredentialsById(id: string, db: CoreQueryable = getCoreDb()) {
+  const row = await getIntegrationRowById(id, db);
   if (!row) {
     return null;
   }
@@ -1871,26 +1871,23 @@ export function getIntegrationCredentialsById(id: string) {
   return parseJsonRecord(row.credentials_json ?? '{}');
 }
 
-export function listClientIntegrations(clientId: string) {
-  const rows = getDatabase()
-    .prepare(`SELECT * FROM integrations WHERE client_id = ? ORDER BY updated_at DESC, created_at DESC`)
-    .all(clientId) as any[];
+export async function listClientIntegrations(clientId: string, db: CoreQueryable = getCoreDb()) {
+  const rows = await coreAll(db, `SELECT * FROM integrations WHERE client_id = $1 ORDER BY updated_at DESC, created_at DESC`, [clientId]);
   return rows.map(rowToIntegration);
 }
 
-export function saveClientIntegration(input: IntegrationInput) {
-  const db = getDatabase();
+export async function saveClientIntegration(input: IntegrationInput, db: CoreQueryable = getCoreDb()) {
   const timestamp = nowIso();
   const existingById = input.id
-    ? (db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(input.id) as any)
+    ? await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [input.id])
     : null;
   const existingByProvider = !existingById
-    ? (db.prepare(`SELECT * FROM integrations WHERE client_id = ? AND provider = ?`).get(input.clientId, input.provider) as any)
+    ? await coreGet(db, `SELECT * FROM integrations WHERE client_id = $1 AND provider = $2`, [input.clientId, input.provider])
     : null;
   const existing = existingById ?? existingByProvider;
   const clientId = existing?.client_id ?? input.clientId;
   const provider = (existing?.provider ?? input.provider) as IntegrationProvider;
-  const client = getClientByIdShim(clientId);
+  const client = await getClientById(clientId, db);
   if (!client) {
     return null;
   }
@@ -1930,26 +1927,28 @@ export function saveClientIntegration(input: IntegrationInput) {
   const webhookSecret = needsWebhookSecret ? (existing?.webhook_secret ?? crypto.randomBytes(24).toString('hex')) : (existing?.webhook_secret ?? null);
 
   if (existing) {
-    db.prepare(
+    await coreRun(
+      db,
       `UPDATE integrations
-       SET client_id = ?, provider = ?, label = ?, status = ?, config_json = ?, credentials_json = ?, is_active = ?, last_sync = ?, last_error = ?, webhook_secret = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(
-      clientId,
-      provider,
-      label,
-      status,
-      JSON.stringify(config),
-      JSON.stringify(credentials),
-      Number(existing.is_active ?? 1),
-      lastSync,
-      lastError,
-      webhookSecret,
-      timestamp,
-      existing.id,
+       SET client_id = $1, provider = $2, label = $3, status = $4, config_json = $5, credentials_json = $6, is_active = $7, last_sync = $8, last_error = $9, webhook_secret = $10, updated_at = $11
+       WHERE id = $12`,
+      [
+        clientId,
+        provider,
+        label,
+        status,
+        JSON.stringify(config),
+        JSON.stringify(credentials),
+        Number(existing.is_active ?? 1),
+        lastSync,
+        lastError,
+        webhookSecret,
+        timestamp,
+        existing.id,
+      ],
     );
 
-    const refreshed = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(existing.id) as any;
+    const refreshed = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [existing.id]);
     return rowToIntegration(refreshed);
   }
 
@@ -1969,36 +1968,38 @@ export function saveClientIntegration(input: IntegrationInput) {
     updated_at: timestamp,
   };
 
-  db.prepare(
+  await coreRun(
+    db,
     `INSERT INTO integrations (
       id, client_id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, webhook_secret, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    record.id,
-    record.client_id,
-    record.provider,
-    record.label,
-    record.status,
-    record.config_json,
-    record.credentials_json,
-    record.is_active,
-    record.last_sync,
-    record.last_error,
-    record.webhook_secret,
-    record.created_at,
-    record.updated_at,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      record.id,
+      record.client_id,
+      record.provider,
+      record.label,
+      record.status,
+      record.config_json,
+      record.credentials_json,
+      record.is_active,
+      record.last_sync,
+      record.last_error,
+      record.webhook_secret,
+      record.created_at,
+      record.updated_at,
+    ],
   );
 
-  const created = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(record.id) as any;
+  const created = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [record.id]);
   return rowToIntegration(created);
 }
 
-export function getIntegrationByWebhookSecret(secret: string) {
+export async function getIntegrationByWebhookSecret(secret: string, db: CoreQueryable = getCoreDb()) {
   if (!secret) {
     return null;
   }
 
-  const row = getDatabase().prepare(`SELECT * FROM integrations WHERE webhook_secret = ? AND is_active = 1 AND status <> 'disabled'`).get(secret) as any;
+  const row = await coreGet(db, `SELECT * FROM integrations WHERE webhook_secret = $1 AND is_active = 1 AND status <> 'disabled'`, [secret]);
   return row ? rowToIntegration(row) : null;
 }
 
@@ -2012,21 +2013,21 @@ export interface WooCommerceSalesSnapshot {
 }
 
 /** Replaces one fully-read purchase window atomically; credentials and customer data are never stored. */
-export function saveWooCommerceSalesSnapshot(input: Omit<WooCommerceSalesSnapshot, 'syncedAt'>) {
+export async function saveWooCommerceSalesSnapshot(input: Omit<WooCommerceSalesSnapshot, 'syncedAt'>, db: CoreQueryable = getCoreDb()) {
   const syncedAt = nowIso();
-  getDatabase().prepare(`INSERT INTO woocommerce_sales_snapshots
+  await coreRun(db, `INSERT INTO woocommerce_sales_snapshots
       (integration_id, source_key, purchase_from, purchase_to, orders_json, synced_at)
-    VALUES (?, ?, ?, ?, ?::jsonb, ?)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6)
     ON CONFLICT (integration_id, source_key, purchase_from, purchase_to)
-    DO UPDATE SET orders_json = EXCLUDED.orders_json, synced_at = EXCLUDED.synced_at`)
-    .run(input.integrationId, input.sourceKey, input.from, input.to, JSON.stringify(input.orders), syncedAt);
+    DO UPDATE SET orders_json = EXCLUDED.orders_json, synced_at = EXCLUDED.synced_at`,
+    [input.integrationId, input.sourceKey, input.from, input.to, JSON.stringify(input.orders), syncedAt]);
   return { ...input, syncedAt };
 }
 
-export function getWooCommerceSalesSnapshot(input: Pick<WooCommerceSalesSnapshot, 'integrationId' | 'sourceKey' | 'from' | 'to'>): WooCommerceSalesSnapshot | null {
-  const row = getDatabase().prepare(`SELECT integration_id, source_key, purchase_from, purchase_to, orders_json, synced_at
-    FROM woocommerce_sales_snapshots WHERE integration_id = ? AND source_key = ? AND purchase_from = ? AND purchase_to = ?`)
-    .get(input.integrationId, input.sourceKey, input.from, input.to) as any;
+export async function getWooCommerceSalesSnapshot(input: Pick<WooCommerceSalesSnapshot, 'integrationId' | 'sourceKey' | 'from' | 'to'>, db: CoreQueryable = getCoreDb()): Promise<WooCommerceSalesSnapshot | null> {
+  const row = await coreGet(db, `SELECT integration_id, source_key, purchase_from, purchase_to, orders_json, synced_at
+    FROM woocommerce_sales_snapshots WHERE integration_id = $1 AND source_key = $2 AND purchase_from = $3 AND purchase_to = $4`,
+    [input.integrationId, input.sourceKey, input.from, input.to]);
   if (!row) return null;
   const orders = typeof row.orders_json === 'string' ? JSON.parse(row.orders_json) : row.orders_json;
   if (!Array.isArray(orders)) throw new UserFacingError('El resumen WooCommerce guardado no es válido');
@@ -2047,23 +2048,23 @@ export interface Ga4TrafficSnapshot {
 }
 
 /** Replaces one fully-read GA4 report window atomically. Credentials are never stored per-client. */
-export function saveGa4Snapshot(input: Omit<Ga4TrafficSnapshot, 'syncedAt'>) {
+export async function saveGa4Snapshot(input: Omit<Ga4TrafficSnapshot, 'syncedAt'>, db: CoreQueryable = getCoreDb()) {
   const syncedAt = nowIso();
-  getDatabase().prepare(`INSERT INTO ga4_snapshots
+  await coreRun(db, `INSERT INTO ga4_snapshots
       (integration_id, property_id, period_from, period_to, sessions_json, traffic_sources_json, top_pages_json, landing_pages_json, synced_at)
-    VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9)
     ON CONFLICT (integration_id, property_id, period_from, period_to)
     DO UPDATE SET sessions_json = EXCLUDED.sessions_json, traffic_sources_json = EXCLUDED.traffic_sources_json,
-      top_pages_json = EXCLUDED.top_pages_json, landing_pages_json = EXCLUDED.landing_pages_json, synced_at = EXCLUDED.synced_at`)
-    .run(input.integrationId, input.propertyId, input.from, input.to,
-      JSON.stringify(input.sessionsSeries), JSON.stringify(input.trafficSources), JSON.stringify(input.topPages), JSON.stringify(input.landingPages), syncedAt);
+      top_pages_json = EXCLUDED.top_pages_json, landing_pages_json = EXCLUDED.landing_pages_json, synced_at = EXCLUDED.synced_at`,
+    [input.integrationId, input.propertyId, input.from, input.to,
+      JSON.stringify(input.sessionsSeries), JSON.stringify(input.trafficSources), JSON.stringify(input.topPages), JSON.stringify(input.landingPages), syncedAt]);
   return { ...input, syncedAt };
 }
 
-export function getGa4Snapshot(input: Pick<Ga4TrafficSnapshot, 'integrationId' | 'propertyId' | 'from' | 'to'>): Ga4TrafficSnapshot | null {
-  const row = getDatabase().prepare(`SELECT integration_id, property_id, period_from, period_to, sessions_json, traffic_sources_json, top_pages_json, landing_pages_json, synced_at
-    FROM ga4_snapshots WHERE integration_id = ? AND property_id = ? AND period_from = ? AND period_to = ?`)
-    .get(input.integrationId, input.propertyId, input.from, input.to) as any;
+export async function getGa4Snapshot(input: Pick<Ga4TrafficSnapshot, 'integrationId' | 'propertyId' | 'from' | 'to'>, db: CoreQueryable = getCoreDb()): Promise<Ga4TrafficSnapshot | null> {
+  const row = await coreGet(db, `SELECT integration_id, property_id, period_from, period_to, sessions_json, traffic_sources_json, top_pages_json, landing_pages_json, synced_at
+    FROM ga4_snapshots WHERE integration_id = $1 AND property_id = $2 AND period_from = $3 AND period_to = $4`,
+    [input.integrationId, input.propertyId, input.from, input.to]);
   if (!row) return null;
   const parseJson = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
   const sessionsSeries = parseJson(row.sessions_json);
@@ -2090,21 +2091,21 @@ export interface GoogleAdsSnapshot {
 }
 
 /** Replaces one fully-read Google Ads campaign report window atomically. Credentials are never stored per-client. */
-export function saveGoogleAdsSnapshot(input: Omit<GoogleAdsSnapshot, 'syncedAt'>) {
+export async function saveGoogleAdsSnapshot(input: Omit<GoogleAdsSnapshot, 'syncedAt'>, db: CoreQueryable = getCoreDb()) {
   const syncedAt = nowIso();
-  getDatabase().prepare(`INSERT INTO google_ads_snapshots
+  await coreRun(db, `INSERT INTO google_ads_snapshots
       (integration_id, customer_id, period_from, period_to, campaigns_json, currency_code, synced_at)
-    VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
     ON CONFLICT (integration_id, customer_id, period_from, period_to)
-    DO UPDATE SET campaigns_json = EXCLUDED.campaigns_json, currency_code = EXCLUDED.currency_code, synced_at = EXCLUDED.synced_at`)
-    .run(input.integrationId, input.customerId, input.from, input.to, JSON.stringify(input.campaigns), input.currencyCode, syncedAt);
+    DO UPDATE SET campaigns_json = EXCLUDED.campaigns_json, currency_code = EXCLUDED.currency_code, synced_at = EXCLUDED.synced_at`,
+    [input.integrationId, input.customerId, input.from, input.to, JSON.stringify(input.campaigns), input.currencyCode, syncedAt]);
   return { ...input, syncedAt };
 }
 
-export function getGoogleAdsSnapshot(input: Pick<GoogleAdsSnapshot, 'integrationId' | 'customerId' | 'from' | 'to'>): GoogleAdsSnapshot | null {
-  const row = getDatabase().prepare(`SELECT integration_id, customer_id, period_from, period_to, campaigns_json, currency_code, synced_at
-    FROM google_ads_snapshots WHERE integration_id = ? AND customer_id = ? AND period_from = ? AND period_to = ?`)
-    .get(input.integrationId, input.customerId, input.from, input.to) as any;
+export async function getGoogleAdsSnapshot(input: Pick<GoogleAdsSnapshot, 'integrationId' | 'customerId' | 'from' | 'to'>, db: CoreQueryable = getCoreDb()): Promise<GoogleAdsSnapshot | null> {
+  const row = await coreGet(db, `SELECT integration_id, customer_id, period_from, period_to, campaigns_json, currency_code, synced_at
+    FROM google_ads_snapshots WHERE integration_id = $1 AND customer_id = $2 AND period_from = $3 AND period_to = $4`,
+    [input.integrationId, input.customerId, input.from, input.to]);
   if (!row) return null;
   const campaigns = typeof row.campaigns_json === 'string' ? JSON.parse(row.campaigns_json) : row.campaigns_json;
   if (!Array.isArray(campaigns)) throw new UserFacingError('El resumen de Google Ads guardado no es válido');
@@ -2114,25 +2115,23 @@ export function getGoogleAdsSnapshot(input: Pick<GoogleAdsSnapshot, 'integration
   };
 }
 
-export function setClientIntegrationActive(id: string, active: boolean) {
-  const db = getDatabase();
-  const existing = getIntegrationRowById(id);
+export async function setClientIntegrationActive(id: string, active: boolean, db: CoreQueryable = getCoreDb()) {
+  const existing = await getIntegrationRowById(id, db);
   if (!existing) return null;
-  db.prepare(`UPDATE integrations SET is_active = ?, status = ?, last_error = NULL, updated_at = ? WHERE id = ?`)
-    .run(active ? 1 : 0, active ? 'pending' : 'disabled', nowIso(), id);
-  return rowToIntegration(getIntegrationRowById(id));
+  await coreRun(db, `UPDATE integrations SET is_active = $1, status = $2, last_error = NULL, updated_at = $3 WHERE id = $4`,
+    [active ? 1 : 0, active ? 'pending' : 'disabled', nowIso(), id]);
+  return rowToIntegration(await getIntegrationRowById(id, db));
 }
 
-export function rotateClientIntegrationWebhook(id: string) {
-  const db = getDatabase();
-  const existing = getIntegrationRowById(id);
+export async function rotateClientIntegrationWebhook(id: string, db: CoreQueryable = getCoreDb()) {
+  const existing = await getIntegrationRowById(id, db);
   if (!existing || existing.provider !== 'wordpress') return null;
-  db.prepare(`UPDATE integrations SET webhook_secret = ?, updated_at = ? WHERE id = ?`)
-    .run(crypto.randomBytes(24).toString('hex'), nowIso(), id);
-  return rowToIntegration(getIntegrationRowById(id));
+  await coreRun(db, `UPDATE integrations SET webhook_secret = $1, updated_at = $2 WHERE id = $3`,
+    [crypto.randomBytes(24).toString('hex'), nowIso(), id]);
+  return rowToIntegration(await getIntegrationRowById(id, db));
 }
 
-export function insertLead(input: {
+export async function insertLead(input: {
   clientId: string;
   integrationId: string | null;
   source: string;
@@ -2142,8 +2141,7 @@ export function insertLead(input: {
   message: string | null;
   rawPayload: Record<string, unknown>;
   dedupeKey?: string | null;
-}) {
-  const db = getDatabase();
+}, db: CoreQueryable = getCoreDb()) {
   const timestamp = nowIso();
   const record = {
     id: crypto.randomUUID(),
@@ -2161,53 +2159,56 @@ export function insertLead(input: {
     updated_at: timestamp,
   };
 
-  db.prepare(
+  // ON CONFLICT DO NOTHING is atomic against the unique (integration_id, dedupe_key) index: of two concurrent
+  // deliveries exactly one row is stored and the other falls through to the duplicate lookup below.
+  await coreRun(
+    db,
     `INSERT INTO leads (
       id, client_id, integration_id, source, name, email, phone, message, status, dedupe_key, raw_payload_json, received_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`
-  ).run(
-    record.id,
-    record.client_id,
-    record.integration_id,
-    record.source,
-    record.name,
-    record.email,
-    record.phone,
-    record.message,
-    record.dedupe_key,
-    record.raw_payload_json,
-    record.received_at,
-    record.created_at,
-    record.updated_at,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', $9, $10, $11, $12, $13) ON CONFLICT DO NOTHING`,
+    [
+      record.id,
+      record.client_id,
+      record.integration_id,
+      record.source,
+      record.name,
+      record.email,
+      record.phone,
+      record.message,
+      record.dedupe_key,
+      record.raw_payload_json,
+      record.received_at,
+      record.created_at,
+      record.updated_at,
+    ],
   );
-  const created = db.prepare(`SELECT * FROM leads WHERE id = ?`).get(record.id) as any;
+  const created = await coreGet(db, `SELECT * FROM leads WHERE id = $1`, [record.id]);
   if (created) return { lead: rowToLead(created), duplicate: false };
   if (!record.dedupe_key || !record.integration_id) throw new Error('No se pudo guardar el lead');
-  const existing = db.prepare(`SELECT * FROM leads WHERE integration_id = ? AND dedupe_key = ?`)
-    .get(record.integration_id, record.dedupe_key) as any;
+  const existing = await coreGet(db, `SELECT * FROM leads WHERE integration_id = $1 AND dedupe_key = $2`,
+    [record.integration_id, record.dedupe_key]);
   if (!existing) throw new Error('No se pudo recuperar el lead duplicado');
   return { lead: rowToLead(existing), duplicate: true };
 }
 
-export function listLeadsByClient(clientId: string, query: { limit: number; offset: number; status: string | null; source: string | null }) {
-  const db = getDatabase();
-  const conditions = ['client_id = ?'];
+export async function listLeadsByClient(clientId: string, query: { limit: number; offset: number; status: string | null; source: string | null }, db: CoreQueryable = getCoreDb()) {
+  const conditions = ['client_id = $1'];
   const parameters: Array<string | number> = [clientId];
   if (query.status) {
-    conditions.push('status = ?');
     parameters.push(query.status);
+    conditions.push(`status = $${parameters.length}`);
   }
   if (query.source) {
-    conditions.push('source = ?');
     parameters.push(query.source);
+    conditions.push(`source = $${parameters.length}`);
   }
   const where = conditions.join(' AND ');
-  const count = db.prepare(`SELECT COUNT(*) AS total,
-    SUM(CASE WHEN status IN ('new', 'in_progress') THEN 1 ELSE 0 END) AS open_count,
-    SUM(CASE WHEN status IN ('closed', 'lost') THEN 1 ELSE 0 END) AS resolved_count
-    FROM leads WHERE ${where}`).get(...parameters) as any;
-  const rows = db.prepare(`SELECT * FROM leads WHERE ${where} ORDER BY received_at DESC, id DESC LIMIT ? OFFSET ?`)
-    .all(...parameters, query.limit, query.offset) as any[];
+  const count = await coreGet(db, `SELECT COUNT(*)::int AS total,
+    SUM(CASE WHEN status IN ('new', 'in_progress') THEN 1 ELSE 0 END)::int AS open_count,
+    SUM(CASE WHEN status IN ('closed', 'lost') THEN 1 ELSE 0 END)::int AS resolved_count
+    FROM leads WHERE ${where}`, parameters);
+  const rows = await coreAll(db, `SELECT * FROM leads WHERE ${where} ORDER BY received_at DESC, id DESC LIMIT $${parameters.length + 1} OFFSET $${parameters.length + 2}`,
+    [...parameters, query.limit, query.offset]);
   const leads = rows.map((row) => {
     const { rawPayload: _rawPayload, ...safeLead } = rowToLead(row);
     return safeLead;
@@ -2222,15 +2223,13 @@ export function listLeadsByClient(clientId: string, query: { limit: number; offs
   };
 }
 
-export function deleteClientIntegration(id: string) {
-  const db = getDatabase();
-  const result = db.prepare(`DELETE FROM integrations WHERE id = ?`).run(id);
+export async function deleteClientIntegration(id: string, db: CoreQueryable = getCoreDb()) {
+  const result = await coreRun(db, `DELETE FROM integrations WHERE id = $1`, [id]);
   return result.changes > 0;
 }
 
-export function testClientIntegration(id: string) {
-  const db = getDatabase();
-  const row = getIntegrationRowById(id);
+export async function testClientIntegration(id: string, db: CoreQueryable = getCoreDb()) {
+  const row = await getIntegrationRowById(id, db);
   if (!row) {
     return null;
   }
@@ -2246,14 +2245,14 @@ export function testClientIntegration(id: string) {
       ? 'Configuración completa; falta una prueba o sincronización real.'
       : 'La configuración está completa, pero este proveedor todavía no dispone de una prueba/sincronización real.';
 
-  db.prepare(`UPDATE integrations SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(
+  await coreRun(db, `UPDATE integrations SET status = $1, last_error = $2, updated_at = $3 WHERE id = $4`, [
     status,
     lastError,
     timestamp,
     id,
-  );
+  ]);
 
-  const refreshed = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  const refreshed = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [id]);
   return {
     integration: rowToIntegration(refreshed),
     ready: missingFields.length === 0,
@@ -2262,8 +2261,8 @@ export function testClientIntegration(id: string) {
   };
 }
 
-export function getIntegrationById(id: string) {
-  const row = getIntegrationRowById(id);
+export async function getIntegrationById(id: string, db: CoreQueryable = getCoreDb()) {
+  const row = await getIntegrationRowById(id, db);
   return row ? rowToIntegration(row) : null;
 }
 
@@ -2271,22 +2270,21 @@ export async function getClientByIdRecord(clientId: string) {
   return getClientById(clientId);
 }
 
-export function getClientIntegrationsSummary(clientId: string) {
-  return listClientIntegrations(clientId).map((integration) => ({
+export async function getClientIntegrationsSummary(clientId: string, db: CoreQueryable = getCoreDb()) {
+  return (await listClientIntegrations(clientId, db)).map((integration) => ({
     ...integration,
     summary: buildIntegrationCapabilitySummary(getIntegrationProviderDefinition(integration.provider)!),
   }));
 }
 
-export function setClientIntegrationStatus(id: string, status: IntegrationStatus, lastError: string | null = null, lastSync?: string) {
-  const db = getDatabase();
+export async function setClientIntegrationStatus(id: string, status: IntegrationStatus, lastError: string | null = null, lastSync?: string, db: CoreQueryable = getCoreDb()) {
   const timestamp = nowIso();
   if (lastSync) {
-    db.prepare(`UPDATE integrations SET status = ?, last_error = ?, last_sync = ?, updated_at = ? WHERE id = ? AND is_active = 1`).run(status, lastError, lastSync, timestamp, id);
+    await coreRun(db, `UPDATE integrations SET status = $1, last_error = $2, last_sync = $3, updated_at = $4 WHERE id = $5 AND is_active = 1`, [status, lastError, lastSync, timestamp, id]);
   } else {
-    db.prepare(`UPDATE integrations SET status = ?, last_error = ?, updated_at = ? WHERE id = ? AND is_active = 1`).run(status, lastError, timestamp, id);
+    await coreRun(db, `UPDATE integrations SET status = $1, last_error = $2, updated_at = $3 WHERE id = $4 AND is_active = 1`, [status, lastError, timestamp, id]);
   }
-  const row = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  const row = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [id]);
   return row ? rowToIntegration(row) : null;
 }
 
@@ -2303,20 +2301,20 @@ export function getIntegrationCapabilitySummary(provider: IntegrationProvider) {
   return definition ? buildIntegrationCapabilitySummary(definition) : '';
 }
 
-export function getClientIntegrations(clientId: string) {
-  return listClientIntegrations(clientId);
+export function getClientIntegrations(clientId: string, db: CoreQueryable = getCoreDb()) {
+  return listClientIntegrations(clientId, db);
 }
 
-export function upsertClientIntegration(input: IntegrationInput) {
-  return saveClientIntegration(input);
+export function upsertClientIntegration(input: IntegrationInput, db: CoreQueryable = getCoreDb()) {
+  return saveClientIntegration(input, db);
 }
 
-export function removeClientIntegration(id: string) {
-  return deleteClientIntegration(id);
+export function removeClientIntegration(id: string, db: CoreQueryable = getCoreDb()) {
+  return deleteClientIntegration(id, db);
 }
 
-export function inspectClientIntegration(id: string) {
-  return testClientIntegration(id);
+export function inspectClientIntegration(id: string, db: CoreQueryable = getCoreDb()) {
+  return testClientIntegration(id, db);
 }
 
 export async function getClientByIdStrict(clientId: string) {
@@ -2327,16 +2325,16 @@ export async function getClientByIdLoose(value: string) {
   return (await getClientById(value)) ?? getClientBySlug(value);
 }
 
-export function listIntegrationsForClient(clientId: string) {
-  return listClientIntegrations(clientId);
+export function listIntegrationsForClient(clientId: string, db: CoreQueryable = getCoreDb()) {
+  return listClientIntegrations(clientId, db);
 }
 
-export function createOrUpdateClientIntegration(input: IntegrationInput) {
-  return saveClientIntegration(input);
+export function createOrUpdateClientIntegration(input: IntegrationInput, db: CoreQueryable = getCoreDb()) {
+  return saveClientIntegration(input, db);
 }
 
-export function testIntegrationById(id: string) {
-  return testClientIntegration(id);
+export function testIntegrationById(id: string, db: CoreQueryable = getCoreDb()) {
+  return testClientIntegration(id, db);
 }
 
 export async function listDailyStats(clientId?: string, options?: { clientIds?: string[] | null }, db: CoreQueryable = getCoreDb()) {
@@ -2437,19 +2435,17 @@ export function recordReportSend(clientId: string, id: string, recipient: string
     .run(nowIso(), recipient, error, clientId, id);
 }
 
-export function listIntegrationsByProvider(provider: IntegrationProvider) {
-  const rows = getDatabase()
-    .prepare(`SELECT * FROM integrations WHERE provider = ? AND is_active = 1 ORDER BY updated_at DESC, created_at DESC`)
-    .all(provider) as any[];
+export async function listIntegrationsByProvider(provider: IntegrationProvider, db: CoreQueryable = getCoreDb()) {
+  const rows = await coreAll(db, `SELECT * FROM integrations WHERE provider = $1 AND is_active = 1 ORDER BY updated_at DESC, created_at DESC`, [provider]);
   return rows.map(rowToIntegration);
 }
 
-export function updateIntegrationSyncState(
+export async function updateIntegrationSyncState(
   id: string,
   updates: { status?: IntegrationStatus; lastError?: string | null; lastSync?: string | null },
+  db: CoreQueryable = getCoreDb(),
 ) {
-  const db = getDatabase();
-  const current = getIntegrationRowById(id);
+  const current = await getIntegrationRowById(id, db);
   if (!current) {
     return null;
   }
@@ -2459,15 +2455,15 @@ export function updateIntegrationSyncState(
   const lastSync = updates.lastSync ?? current.last_sync ?? null;
   const lastError = updates.lastError ?? current.last_error ?? null;
 
-  db.prepare(`UPDATE integrations SET status = ?, last_sync = ?, last_error = ?, updated_at = ? WHERE id = ? AND is_active = 1`).run(
+  await coreRun(db, `UPDATE integrations SET status = $1, last_sync = $2, last_error = $3, updated_at = $4 WHERE id = $5 AND is_active = 1`, [
     status,
     lastSync,
     lastError,
     timestamp,
     id,
-  );
+  ]);
 
-  const refreshed = db.prepare(`SELECT * FROM integrations WHERE id = ?`).get(id) as any;
+  const refreshed = await coreGet(db, `SELECT * FROM integrations WHERE id = $1`, [id]);
   return refreshed ? rowToIntegration(refreshed) : null;
 }
 

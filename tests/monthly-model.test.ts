@@ -10,31 +10,31 @@ test('lead pagination reaches records beyond 200 and counts filtered rows withou
     `('${randomUUID()}', '${client.id}', 'WordPress', 'Lead ${index}', 'new', '{"private":"hidden"}', '2026-05-18T12:00:00.000Z', '2026-05-18T12:00:00.000Z', '2026-05-18T12:00:00.000Z')`
   ).join(',');
   getDatabase().exec(`INSERT INTO leads (id, client_id, source, name, status, raw_payload_json, received_at, created_at, updated_at) VALUES ${values}`);
-  const page = listLeadsByClient(client.id, { limit: 50, offset: 200, status: null, source: 'WordPress' });
+  const page = await listLeadsByClient(client.id, { limit: 50, offset: 200, status: null, source: 'WordPress' });
   assert.equal(page.total, 205);
   assert.equal(page.openCount, 205);
   assert.equal(page.leads.length, 5);
   assert.ok(page.leads.every((lead) => !('rawPayload' in lead)));
-  const firstPage = listLeadsByClient(client.id, { limit: 50, offset: 0, status: null, source: 'WordPress' });
+  const firstPage = await listLeadsByClient(client.id, { limit: 50, offset: 0, status: null, source: 'WordPress' });
   assert.equal(new Set([...firstPage.leads, ...page.leads].map((lead) => lead.id)).size, 55);
 });
 
 test('lead delivery identity is atomically unique within an integration', async () => {
   const { createClient, deleteClientIntegration, insertLead, listLeadsByClient, saveClientIntegration } = await import('../src/lib/database.js');
   const client = await createClient({ name: `Lead entrega ${Date.now()}` });
-  const integration = saveClientIntegration({ clientId: client.id, provider: 'wordpress', config: { siteUrl: 'https://example.test' } });
+  const integration = await saveClientIntegration({ clientId: client.id, provider: 'wordpress', config: { siteUrl: 'https://example.test' } });
   assert.ok(integration);
   const input = {
     clientId: client.id, integrationId: integration.id, source: 'WordPress', name: 'Ana',
     email: null, phone: null, message: null, rawPayload: { name: 'Ana' }, dedupeKey: 'same-delivery',
   };
-  const first = insertLead(input);
-  const replay = insertLead({ ...input, name: 'Cambio ignorado' });
+  const first = await insertLead(input);
+  const replay = await insertLead({ ...input, name: 'Cambio ignorado' });
   assert.equal(first.duplicate, false);
   assert.equal(replay.duplicate, true);
   assert.equal(replay.lead.id, first.lead.id);
-  assert.equal(listLeadsByClient(client.id, { limit: 50, offset: 0, status: null, source: null }).total, 1);
-  assert.equal(deleteClientIntegration(integration.id), true, 'DML changes must report actual deleted rows');
+  assert.equal((await listLeadsByClient(client.id, { limit: 50, offset: 0, status: null, source: null })).total, 1);
+  assert.equal(await deleteClientIntegration(integration.id), true, 'DML changes must report actual deleted rows');
 });
 
 test('RRSS channels and monthly KPIs round trip through the database layer', async () => {
