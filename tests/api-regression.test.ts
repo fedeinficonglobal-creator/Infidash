@@ -915,3 +915,51 @@ test('admin can create a postgres backup and viewer cannot', async () => {
   assert.ok(body.backup.path.endsWith('.sql'));
   assert.equal(typeof body.backup.createdAt, 'string');
 });
+
+async function createDisposableViewer(label: string) {
+  const email = `${label}-${Date.now()}@infidash.local`;
+  const { response, body } = await request('/api/users', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ email, name: `QA ${label}`, password: 'TempPass123', role: 'viewer' }),
+  });
+  assert.equal(response.status, 201, JSON.stringify(body));
+  return { id: body.user.id as string, email };
+}
+
+async function sessionStatus(token: string) {
+  const { response } = await request('/api/auth/me', { headers: { authorization: `Bearer ${token}` } });
+  return response.status;
+}
+
+test('logout revokes the session token server-side', async () => {
+  const user = await createDisposableViewer('logout');
+  const token = await login(user.email, 'TempPass123');
+  assert.equal(await sessionStatus(token), 200);
+
+  const { response } = await request('/api/auth/logout', { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 204);
+  assert.equal(await sessionStatus(token), 401);
+
+  await request(`/api/users/${user.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${adminToken}` } });
+});
+
+test('logout-all revokes every session of that user and leaves other users untouched', async () => {
+  const user = await createDisposableViewer('logout-all');
+  const first = await login(user.email, 'TempPass123');
+  const second = await login(user.email, 'TempPass123');
+  assert.equal(await sessionStatus(first), 200);
+  assert.equal(await sessionStatus(second), 200);
+
+  const { response } = await request('/api/auth/logout-all', { method: 'POST', headers: { authorization: `Bearer ${first}` } });
+  assert.equal(response.status, 204);
+  assert.equal(await sessionStatus(first), 401);
+  assert.equal(await sessionStatus(second), 401);
+  assert.equal(await sessionStatus(adminToken), 200);
+  assert.equal(await sessionStatus(viewerToken), 200);
+
+  const { response: unauthenticated } = await request('/api/auth/logout-all', { method: 'POST' });
+  assert.equal(unauthenticated.status, 401);
+
+  await request(`/api/users/${user.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${adminToken}` } });
+});

@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { isValidInclusiveDateRange } from './dateRange.js';
+import { UserFacingError } from './userFacingError.js';
 
 /** Bumped roughly yearly by Google; check https://developers.google.com/google-ads/api/docs/release-notes before raising. */
 export const GOOGLE_ADS_API_VERSION = 'v25';
@@ -33,13 +34,13 @@ export function createGoogleAdsAccessTokenProvider(credentials: GoogleAdsCredent
   client.setCredentials({ refresh_token: credentials.refreshToken });
   return async () => {
     const { token } = await client.getAccessToken();
-    if (!token) throw new Error('No se pudo obtener un token de acceso para Google Ads');
+    if (!token) throw new UserFacingError('No se pudo obtener un token de acceso para Google Ads');
     return token;
   };
 }
 
 function googleAdsCustomerId(customerId: string) {
-  if (!/^\d+$/.test(customerId)) throw new Error('El Customer ID de Google Ads debe ser numérico, sin guiones');
+  if (!/^\d+$/.test(customerId)) throw new UserFacingError('El Customer ID de Google Ads debe ser numérico, sin guiones');
   return customerId;
 }
 
@@ -95,7 +96,7 @@ async function runGoogleAdsQuery(
       signal: controller.signal,
     });
   } catch {
-    throw new Error('No se pudo conectar con la API de Google Ads');
+    throw new UserFacingError('No se pudo conectar con la API de Google Ads');
   } finally {
     clearTimeout(timeout);
   }
@@ -117,7 +118,7 @@ export async function fetchGoogleAdsCampaignReport(
   loginCustomerId: string,
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<GoogleAdsCampaignData> {
-  if (!isValidInclusiveDateRange(input.from, input.to, 31)) throw new Error('Ventana de fechas de Google Ads inválida: usa hasta 31 días');
+  if (!isValidInclusiveDateRange(input.from, input.to, 31)) throw new UserFacingError('Ventana de fechas de Google Ads inválida: usa hasta 31 días');
   const campaignQuery = `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date BETWEEN '${input.from}' AND '${input.to}' ORDER BY metrics.cost_micros DESC`;
   const customerQuery = `SELECT customer.currency_code, customer.descriptive_name FROM customer LIMIT 1`;
   const [campaignRows, customerRows] = await Promise.all([

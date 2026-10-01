@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { UserFacingError } from './userFacingError.js';
 
 export interface WooCommerceCredentials {
   storeUrl: string;
@@ -29,7 +30,7 @@ export interface CompletedOrderSalesSummary extends CompletedOrderGrossSummary {
 
 export function parseWooRefundPolicy(value: unknown): WooRefundPolicy {
   if (value === 'subtract' || value === 'ignore') return value;
-  throw new Error('Política de reembolsos WooCommerce inválida');
+  throw new UserFacingError('Política de reembolsos WooCommerce inválida');
 }
 
 export interface CompletedOrderGrossSummary {
@@ -46,7 +47,7 @@ function sumDecimalStrings(values: string[]) {
   const precision = Math.max(2, ...values.map((value) => value.split('.')[1]?.length ?? 0));
   const scale = 10n ** BigInt(precision);
   const sum = values.reduce((acc, value) => {
-    if (!/^\d+(?:\.\d+)?$/.test(value)) throw new Error('Pedido WooCommerce con importe inválido');
+    if (!/^\d+(?:\.\d+)?$/.test(value)) throw new UserFacingError('Pedido WooCommerce con importe inválido');
     const [whole, fraction = ''] = value.split('.');
     return acc + BigInt(whole) * scale + BigInt(fraction.padEnd(precision, '0'));
   }, 0n);
@@ -63,7 +64,7 @@ function subtractDecimalStrings(total: string, deduction: string) {
     return BigInt(whole) * scale + BigInt(fraction.padEnd(precision, '0'));
   };
   const result = units(total) - units(deduction);
-  if (result < 0n) throw new Error('Los reembolsos superan el importe del pedido WooCommerce');
+  if (result < 0n) throw new UserFacingError('Los reembolsos superan el importe del pedido WooCommerce');
   return `${result / scale}.${String(result % scale).padStart(precision, '0')}`;
 }
 
@@ -76,7 +77,7 @@ function latestOrders(orders: WooCommerceOrderSummary[]) {
          order.totalTax !== previous.totalTax || order.shippingTotal !== previous.shippingTotal ||
          order.dateCreated !== previous.dateCreated || order.dateCreatedGmt !== previous.dateCreatedGmt ||
          JSON.stringify(order.refunds) !== JSON.stringify(previous.refunds))) {
-      throw new Error('Pedido WooCommerce duplicado con datos contradictorios');
+      throw new UserFacingError('Pedido WooCommerce duplicado con datos contradictorios');
     }
     if (!previous || order.dateModifiedGmt > previous.dateModifiedGmt) latestById.set(order.id, order);
   }
@@ -136,7 +137,7 @@ function ordersEndpoint(storeUrl: string) {
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
       (url.port && url.port !== '443') || !host.includes('.') || host === 'localhost' ||
       /\.(local|internal|localhost)$/.test(host) || isIP(host)) {
-    throw new Error('La tienda debe usar una URL HTTPS pública sin credenciales ni parámetros');
+    throw new UserFacingError('La tienda debe usar una URL HTTPS pública sin credenciales ni parámetros');
   }
   url.pathname = `${url.pathname.replace(/\/+$/, '')}/wp-json/wc/v3/orders`;
   url.searchParams.set('per_page', '1');
@@ -172,31 +173,31 @@ function normalizeOrder(value: unknown): WooCommerceOrderSummary {
   const order = value as Record<string, unknown>;
   const money = (field: string) => {
     const raw = order[field];
-    if (typeof raw !== 'string' || !/^\d+(?:\.\d+)?$/.test(raw)) throw new Error('Pedido WooCommerce con importe inválido');
+    if (typeof raw !== 'string' || !/^\d+(?:\.\d+)?$/.test(raw)) throw new UserFacingError('Pedido WooCommerce con importe inválido');
     return raw;
   };
   const date = (field: string) => {
     const raw = order[field];
     if (typeof raw !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/.test(raw) ||
         Number.isNaN(Date.parse(`${raw}Z`)) || new Date(`${raw}Z`).toISOString().slice(0, 19) !== raw) {
-      throw new Error('Pedido WooCommerce sin fecha de compra o GMT válida');
+      throw new UserFacingError('Pedido WooCommerce sin fecha de compra o GMT válida');
     }
     return raw;
   };
-  if (!Array.isArray(order.refunds)) throw new Error('Pedido WooCommerce sin lista de reembolsos válida');
+  if (!Array.isArray(order.refunds)) throw new UserFacingError('Pedido WooCommerce sin lista de reembolsos válida');
   const refundIds = new Set<number>();
   const refunds = order.refunds.map((value: unknown) => {
     const refund = value as Record<string, unknown>;
     if (!refund || !Number.isSafeInteger(refund.id) || Number(refund.id) < 1 || refundIds.has(Number(refund.id)) ||
         typeof refund.total !== 'string' || !/^-\d+(?:\.\d+)?$/.test(refund.total)) {
-      throw new Error('Pedido WooCommerce con reembolso inválido');
+      throw new UserFacingError('Pedido WooCommerce con reembolso inválido');
     }
     refundIds.add(Number(refund.id));
     return { id: Number(refund.id), total: refund.total };
   });
   if (!Number.isSafeInteger(order.id) || Number(order.id) < 1 || typeof order.status !== 'string' ||
       typeof order.currency !== 'string' || !/^[A-Z]{3}$/.test(order.currency)) {
-    throw new Error('Pedido WooCommerce con identidad, estado o moneda inválidos');
+    throw new UserFacingError('Pedido WooCommerce con identidad, estado o moneda inválidos');
   }
   return {
     id: order.id as number,
@@ -221,7 +222,7 @@ export async function fetchWooCommerceOrderSummaries(
   if (!Number.isInteger(range.maxPages) || range.maxPages < 1 || range.maxPages > 20 ||
       !Number.isFinite(Date.parse(range.modifiedAfter)) || !Number.isFinite(Date.parse(range.modifiedBefore)) ||
       Date.parse(range.modifiedAfter) >= Date.parse(range.modifiedBefore)) {
-    throw new Error('Rango o límite de páginas WooCommerce inválido');
+    throw new UserFacingError('Rango o límite de páginas WooCommerce inválido');
   }
   return fetchOrderPages(input, {
     modified_after: range.modifiedAfter,
@@ -245,7 +246,7 @@ export async function fetchWooCommercePurchaseWindow(
       !Number.isInteger(range.maxPages) || range.maxPages < 1 || range.maxPages > 20 ||
       Date.parse(`${range.to}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`) > 30 * 86_400_000 ||
       range.from > range.to) {
-    throw new Error('Ventana de compra inválida: usa hasta 31 días y 20 páginas');
+    throw new UserFacingError('Ventana de compra inválida: usa hasta 31 días y 20 páginas');
   }
   const adjacentDate = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000)
     .toISOString().slice(0, 10);
@@ -266,7 +267,7 @@ async function fetchOrderPages(
   fetchImpl: typeof fetch,
   sleep: (ms: number) => Promise<void>,
 ) {
-  if (!input.consumerKey.trim() || !input.consumerSecret.trim()) throw new Error('Faltan las credenciales de WooCommerce');
+  if (!input.consumerKey.trim() || !input.consumerSecret.trim()) throw new UserFacingError('Faltan las credenciales de WooCommerce');
   const url = new URL(ordersEndpoint(input.storeUrl));
   url.searchParams.set('per_page', '100');
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
@@ -282,7 +283,7 @@ async function fetchOrderPages(
       try {
         response = await fetchImpl(url, { method: 'GET', headers, redirect: 'error', signal: controller.signal });
       } catch {
-        if (attempt === 2) throw new Error('No se pudo leer la página de pedidos WooCommerce');
+        if (attempt === 2) throw new UserFacingError('No se pudo leer la página de pedidos WooCommerce');
       } finally {
         clearTimeout(timeout);
       }
@@ -295,14 +296,14 @@ async function fetchOrderPages(
         await sleep(delay);
       }
     }
-    if (!response) throw new Error('No se pudo leer la página de pedidos WooCommerce');
-    if (!response.ok) throw new Error(`WooCommerce respondió HTTP ${response.status}`);
+    if (!response) throw new UserFacingError('No se pudo leer la página de pedidos WooCommerce');
+    if (!response.ok) throw new UserFacingError(`WooCommerce respondió HTTP ${response.status}`);
     const body: unknown = await response.json();
-    if (!Array.isArray(body)) throw new Error('WooCommerce no devolvió una lista de pedidos válida');
+    if (!Array.isArray(body)) throw new UserFacingError('WooCommerce no devolvió una lista de pedidos válida');
     orders.push(...body.map(normalizeOrder));
     const totalPages = Number(response.headers.get('x-wp-totalpages'));
-    if (Number.isInteger(totalPages) && totalPages > maxPages) throw new Error('El rango excede el límite de páginas; divídelo en intervalos más pequeños');
+    if (Number.isInteger(totalPages) && totalPages > maxPages) throw new UserFacingError('El rango excede el límite de páginas; divídelo en intervalos más pequeños');
     if (Number.isInteger(totalPages) && totalPages >= 1 ? page >= totalPages : body.length < 100) return orders;
   }
-  throw new Error('La paginación WooCommerce no terminó dentro del límite');
+  throw new UserFacingError('La paginación WooCommerce no terminó dentro del límite');
 }

@@ -35,6 +35,8 @@ import {
   getReportRun,
   getReportRunPdf,
   getSessionByToken,
+  revokeAllSessionsForUser,
+  revokeSessionByToken,
   insertLead,
   listClients,
   listClientsWithLatestStat,
@@ -84,7 +86,9 @@ import { parseLeadQuery } from './src/lib/leadQuery.js';
 import { leadDedupeKey, readLeadDeliveryIdentity } from './src/lib/leadDelivery.js';
 import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
 import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPdf.js';
-import { reportSmtpConfigured, sendReportEmail } from './src/lib/reportEmail.js';
+import { deliverReportEmail, reportSmtpConfigured } from './src/lib/reportEmail.js';
+import { registerErrorHandling } from './src/lib/errorHandling.js';
+import { publicErrorMessage, UserFacingError } from './src/lib/userFacingError.js';
 import { shouldRunEditorialMigrations, shouldServeHttp } from './src/lib/serverRuntime.js';
 import { isOperationalPlanDomain, isPlanPeriod, normalizeOperationalPlanRows } from './src/lib/operationalPlanValidation.js';
 
@@ -128,6 +132,9 @@ if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN && process.env.GOOGLE_ADS_CLIENT_ID &
 }
 const loginThrottle = new LoginThrottle();
 
+// Must be registered before any plugin so every encapsulated route inherits it.
+registerErrorHandling(app);
+
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
   const rawBody = typeof body === 'string' ? body.trim() : '';
   if (!rawBody) {
@@ -138,7 +145,8 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body,
   try {
     done(null, JSON.parse(rawBody));
   } catch (error) {
-    done(error as Error);
+    // A body that is not valid JSON is a client error, not a server failure.
+    done(Object.assign(error as Error, { statusCode: 400 }));
   }
 });
 
@@ -164,6 +172,17 @@ app.addHook('onRequest', (request, reply, done) => {
 
 function sendError(reply: FastifyReply, status: number, message: string, code?: string) {
   return reply.code(status).send({ error: message, code });
+}
+
+/**
+ * Reply for a caught exception. The error message reaches the client only when it is a UserFacingError
+ * (our own Spanish validation/provider messages, sent with `status`). Any other error (database, filesystem,
+ * unexpected) gets `fallback` with `unknownStatus` and the real error goes to the server log only.
+ */
+function sendCaughtError(reply: FastifyReply, error: unknown, opts: { status: number; fallback: string; code: string; unknownStatus?: number }) {
+  if (error instanceof UserFacingError) return sendError(reply, opts.status, error.message, opts.code);
+  console.error('[infidash] request failed', opts.code, error);
+  return sendError(reply, opts.unknownStatus ?? 500, opts.fallback, opts.code);
 }
 
 function getBearerToken(req: AnyFastifyRequest) {
@@ -305,7 +324,9 @@ async function testWordPressConnection(integration: any, fetchImpl: typeof fetch
     }
     return { ok: true, error: null };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'No se pudo conectar con WordPress' };
+    console.error('[infidash] wordpress probe failed', error);
+    const timedOut = error instanceof Error && error.name === 'AbortError';
+    return { ok: false, error: timedOut ? 'WordPress no respondió a tiempo' : 'No se pudo conectar con WordPress' };
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
@@ -331,12 +352,11 @@ async function syncAllClarityIntegrations() {
       try {
         await syncClarityIntegration(integration.id);
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Error desconocido durante la sincronización de Análisis/UX';
         updateIntegrationSyncState(integration.id, {
           status: 'error',
-          lastError: message,
+          lastError: publicErrorMessage(error, 'Error desconocido durante la sincronización de Análisis/UX'),
         });
-        console.error('[infidash] clarity sync failed', integration.id, message);
+        console.error('[infidash] clarity sync failed', integration.id, error instanceof Error ? error.message : error);
       }
     }
   } finally {
@@ -413,6 +433,18 @@ app.post('/api/auth/logout', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return;
   }
 
+  const token = getBearerToken(req);
+  if (token) revokeSessionByToken(token);
+  return reply.code(204).send();
+});
+
+app.post('/api/auth/logout-all', (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = requireSession(req, reply);
+  if (!session) {
+    return;
+  }
+
+  revokeAllSessionsForUser(session.user.id);
   return reply.code(204).send();
 });
 
@@ -668,7 +700,7 @@ app.post('/api/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {
 
     return reply.code(201).send({ integration: saved });
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'No se pudo guardar la integración', 'INVALID_INTEGRATION');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'No se pudo guardar la integración', code: 'INVALID_INTEGRATION' });
   }
 });
 
@@ -697,7 +729,7 @@ app.patch('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply)
 
     return reply.send({ integration: saved });
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'No se pudo actualizar la integración', 'INVALID_INTEGRATION');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'No se pudo actualizar la integración', code: 'INVALID_INTEGRATION' });
   }
 });
 
@@ -828,8 +860,8 @@ app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastif
       persisted: false,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo leer WooCommerce';
-    return sendError(reply, message.startsWith('Ventana de compra inválida') ? 400 : 502, message, 'WOOCOMMERCE_PREVIEW_FAILED');
+    const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de compra inválida');
+    return sendCaughtError(reply, error, { status: badWindow ? 400 : 502, fallback: 'No se pudo leer WooCommerce', code: 'WOOCOMMERCE_PREVIEW_FAILED', unknownStatus: 502 });
   }
 });
 
@@ -854,8 +886,8 @@ app.post('/api/integrations/:id/woocommerce/sales-sync', async (req: AnyFastifyR
     return reply.send({ source: 'woocommerce', from: body.from, to: body.to, refundPolicy, complete: true,
       orderCount: orders.length, sales: summarizeCompletedOrderSales(orders, refundPolicy), persisted: true, syncedAt: snapshot.syncedAt });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo sincronizar WooCommerce';
-    return sendError(reply, message.startsWith('Ventana de compra inválida') ? 400 : 502, message, 'WOOCOMMERCE_SYNC_FAILED');
+    const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de compra inválida');
+    return sendCaughtError(reply, error, { status: badWindow ? 400 : 502, fallback: 'No se pudo sincronizar WooCommerce', code: 'WOOCOMMERCE_SYNC_FAILED', unknownStatus: 502 });
   }
 });
 
@@ -877,7 +909,7 @@ app.get('/api/integrations/:id/woocommerce/sales-snapshot', (req: AnyFastifyRequ
     return reply.send({ source: 'woocommerce', from, to, refundPolicy, complete: true, orderCount: snapshot.orders.length,
       sales: summarizeCompletedOrderSales(snapshot.orders, refundPolicy), persisted: true, syncedAt: snapshot.syncedAt });
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'No se pudo leer el resumen guardado', 'SNAPSHOT_READ_FAILED');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'No se pudo leer el resumen guardado', code: 'SNAPSHOT_READ_FAILED' });
   }
 });
 
@@ -905,8 +937,8 @@ app.get('/api/integrations/:id/ga4/traffic-preview', async (req: AnyFastifyReque
     const report = await fetchGa4TrafficReport({ propertyId, from: query.from, to: query.to }, ga4Service.getAccessToken, ga4Service.clientEmail);
     return reply.send({ source: 'ga4', from: query.from, to: query.to, propertyId, complete: true, persisted: false, ...report });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo leer GA4';
-    return sendError(reply, message.startsWith('Ventana de fechas GA4 inválida') ? 400 : 502, message, 'GA4_PREVIEW_FAILED');
+    const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de fechas GA4 inválida');
+    return sendCaughtError(reply, error, { status: badWindow ? 400 : 502, fallback: 'No se pudo leer GA4', code: 'GA4_PREVIEW_FAILED', unknownStatus: 502 });
   }
 });
 
@@ -930,8 +962,8 @@ app.post('/api/integrations/:id/ga4/traffic-sync', async (req: AnyFastifyRequest
     });
     return reply.send({ source: 'ga4', from: body.from, to: body.to, propertyId, complete: true, persisted: true, syncedAt: snapshot.syncedAt, ...report });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo sincronizar GA4';
-    return sendError(reply, message.startsWith('Ventana de fechas GA4 inválida') ? 400 : 502, message, 'GA4_SYNC_FAILED');
+    const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de fechas GA4 inválida');
+    return sendCaughtError(reply, error, { status: badWindow ? 400 : 502, fallback: 'No se pudo sincronizar GA4', code: 'GA4_SYNC_FAILED', unknownStatus: 502 });
   }
 });
 
@@ -982,8 +1014,8 @@ app.get('/api/integrations/:id/google-ads/campaigns-preview', async (req: AnyFas
     const report = await fetchGoogleAdsCampaignReport({ customerId, from: query.from, to: query.to }, googleAdsService.getAccessToken, googleAdsService.developerToken, googleAdsService.loginCustomerId);
     return reply.send({ source: 'google_ads', from: query.from, to: query.to, customerId, complete: true, persisted: false, ...report });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo leer Google Ads';
-    return sendError(reply, message.startsWith('Ventana de fechas de Google Ads inválida') ? 400 : 502, message, 'GOOGLE_ADS_PREVIEW_FAILED');
+    const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de fechas de Google Ads inválida');
+    return sendCaughtError(reply, error, { status: badWindow ? 400 : 502, fallback: 'No se pudo leer Google Ads', code: 'GOOGLE_ADS_PREVIEW_FAILED', unknownStatus: 502 });
   }
 });
 
@@ -1004,8 +1036,8 @@ app.post('/api/integrations/:id/google-ads/campaigns-sync', async (req: AnyFasti
     const snapshot = saveGoogleAdsSnapshot({ integrationId: integration.id, customerId, from: body.from, to: body.to, campaigns: report.campaigns, currencyCode: report.currencyCode });
     return reply.send({ source: 'google_ads', from: body.from, to: body.to, customerId, complete: true, persisted: true, syncedAt: snapshot.syncedAt, ...report });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo sincronizar Google Ads';
-    return sendError(reply, message.startsWith('Ventana de fechas de Google Ads inválida') ? 400 : 502, message, 'GOOGLE_ADS_SYNC_FAILED');
+    const badWindow = error instanceof UserFacingError && error.message.startsWith('Ventana de fechas de Google Ads inválida');
+    return sendCaughtError(reply, error, { status: badWindow ? 400 : 502, fallback: 'No se pudo sincronizar Google Ads', code: 'GOOGLE_ADS_SYNC_FAILED', unknownStatus: 502 });
   }
 });
 
@@ -1057,13 +1089,13 @@ app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: Fas
       skipped: result.skipped,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo sincronizar Análisis/UX';
+    const message = publicErrorMessage(error, 'No se pudo sincronizar Análisis/UX');
     updateIntegrationSyncState(integration.id, {
       status: 'error',
       lastError: message,
       lastSync: null,
     });
-    return sendError(reply, 500, message, 'CLARITY_SYNC_FAILED');
+    return sendCaughtError(reply, error, { status: 500, fallback: message, code: 'CLARITY_SYNC_FAILED' });
   }
 });
 
@@ -1110,7 +1142,7 @@ app.post('/api/public/leads/:token', async (req: AnyFastifyRequest, reply: Fasti
   try {
     deliveryIdentity = readLeadDeliveryIdentity(body);
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'Identificador de entrega inválido', 'INVALID_PAYLOAD');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'Identificador de entrega inválido', code: 'INVALID_PAYLOAD' });
   }
 
   const result = insertLead({
@@ -1147,7 +1179,7 @@ app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
   try {
     return reply.send(listLeadsByClient(clientId, parseLeadQuery((req.query ?? {}) as Record<string, unknown>)));
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'Filtros de leads inválidos', 'INVALID_PAYLOAD');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'Filtros de leads inválidos', code: 'INVALID_PAYLOAD' });
   }
 });
 
@@ -1474,7 +1506,7 @@ app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyReques
       .header('Content-Disposition', `attachment; filename="infidash-${from}-${to}.pdf"`)
       .type('application/pdf').send(pdf);
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'Periodo de informe inválido', 'INVALID_PERIOD');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'No se pudo generar el informe', code: 'INVALID_PERIOD' });
   }
 });
 
@@ -1506,7 +1538,7 @@ app.post('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, re
     const pdf = await buildDailyStatsPdf({ clientName: client.name, from, to, generatedAt: new Date().toISOString(), stats });
     return reply.code(201).send({ run: saveReportRun({ clientId, from, to, createdByUserId: session.user.id, pdf }) });
   } catch (error) {
-    return sendError(reply, 400, error instanceof Error ? error.message : 'Periodo no válido', 'INVALID_PERIOD');
+    return sendCaughtError(reply, error, { status: 400, fallback: 'No se pudo guardar el informe', code: 'INVALID_PERIOD' });
   }
 });
 
@@ -1534,14 +1566,12 @@ app.post('/api/clients/:clientId/report-runs/:id/send', async (req: AnyFastifyRe
   const recipient = (req.body as any)?.recipient;
   if (typeof recipient !== 'string' || recipient.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return sendError(reply, 400, 'Correo destinatario no válido', 'INVALID_RECIPIENT');
   if (!reportSmtpConfigured()) return sendError(reply, 503, 'SMTP no configurado', 'SMTP_UNCONFIGURED');
-  try {
-    await sendReportEmail({ recipient, clientName: client.name, from: run.from, to: run.to, pdf: getReportRunPdf(clientId, run.id)! });
-    recordReportSend(clientId, run.id, recipient, null);
-    return reply.send({ run: getReportRun(clientId, run.id) });
-  } catch {
-    recordReportSend(clientId, run.id, recipient, 'Entrega no confirmada');
-    return sendError(reply, 502, 'No se pudo confirmar la entrega SMTP; revisa el buzón antes de repetir', 'SMTP_DELIVERY_UNKNOWN');
-  }
+  const delivery = await deliverReportEmail(
+    { recipient, clientName: client.name, from: run.from, to: run.to, pdf: getReportRunPdf(clientId, run.id)! },
+    { record: (failure) => recordReportSend(clientId, run.id, recipient, failure), context: { clientId, runId: run.id } },
+  );
+  if (!delivery.ok) return sendError(reply, delivery.status, delivery.message, delivery.code);
+  return reply.send({ run: getReportRun(clientId, run.id) });
 });
 
 app.get('/api/clients/:clientId/monthly-kpi-cycles', (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1583,8 +1613,8 @@ app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: 
     updatedByUserId: session.user.id,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo guardar el KPI';
-    return sendError(reply, /cerrad/i.test(message) ? 409 : 400, message, /cerrad/i.test(message) ? 'MONTHLY_KPI_CLOSED' : 'INVALID_PAYLOAD');
+    const closed = error instanceof UserFacingError && /cerrad/i.test(error.message);
+    return sendCaughtError(reply, error, { status: closed ? 409 : 400, fallback: 'No se pudo guardar el KPI', code: closed ? 'MONTHLY_KPI_CLOSED' : 'INVALID_PAYLOAD' });
   }
 
   if (!kpi) {
@@ -1625,8 +1655,8 @@ app.put('/api/monthly-kpis/:id', (req: AnyFastifyRequest, reply: FastifyReply) =
     updatedByUserId: session.user.id,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'No se pudo actualizar el KPI';
-    return sendError(reply, /cerrad/i.test(message) ? 409 : 400, message, /cerrad/i.test(message) ? 'MONTHLY_KPI_CLOSED' : 'INVALID_PAYLOAD');
+    const closed = error instanceof UserFacingError && /cerrad/i.test(error.message);
+    return sendCaughtError(reply, error, { status: closed ? 409 : 400, fallback: 'No se pudo actualizar el KPI', code: closed ? 'MONTHLY_KPI_CLOSED' : 'INVALID_PAYLOAD' });
   }
 
   if (!kpi) {
@@ -1664,7 +1694,7 @@ app.post('/api/monthly-kpis/:id/reopen', (req: AnyFastifyRequest, reply: Fastify
     if (!cycle) return sendError(reply, 409, 'El ciclo no está cerrado', 'MONTHLY_KPI_CONFLICT');
     return reply.send({ kpi: getMonthlyKpiById(existing.id) });
   } catch (error) {
-    return sendError(reply, 409, error instanceof Error ? error.message : 'No se pudo reabrir el KPI', 'MONTHLY_KPI_CONFLICT');
+    return sendCaughtError(reply, error, { status: 409, fallback: 'No se pudo reabrir el KPI', code: 'MONTHLY_KPI_CONFLICT' });
   }
 });
 
@@ -1703,23 +1733,22 @@ app.get('/api/dashboard/summary', (req: AnyFastifyRequest, reply: FastifyReply) 
   });
 });
 
-if (shouldServeHttp(process.env)) {
-  if (existsSync(distPath)) {
-    app.register(fastifyStatic, {
-      root: distPath,
-      index: ['index.html'],
-    });
-  }
-
-  app.setNotFoundHandler((request: AnyFastifyRequest, reply: FastifyReply) => {
-    const url = request.raw.url ?? '';
-    if (!url.startsWith('/api/') && existsSync(indexHtmlPath)) {
-      return reply.type('text/html').sendFile('index.html');
-    }
-
-    return sendError(reply, 404, 'Ruta no encontrada', 'NOT_FOUND');
+if (shouldServeHttp(process.env) && existsSync(distPath)) {
+  app.register(fastifyStatic, {
+    root: distPath,
+    index: ['index.html'],
   });
 }
+
+// Registered in every mode so unknown routes always answer with the project's JSON error shape.
+app.setNotFoundHandler((request: AnyFastifyRequest, reply: FastifyReply) => {
+  const url = request.raw.url ?? '';
+  if (shouldServeHttp(process.env) && !url.startsWith('/api/') && existsSync(indexHtmlPath)) {
+    return reply.type('text/html').sendFile('index.html');
+  }
+
+  return sendError(reply, 404, 'Ruta no encontrada', 'NOT_FOUND');
+});
 
 if (process.env.NODE_ENV !== 'test') {
   startClaritySyncScheduler();

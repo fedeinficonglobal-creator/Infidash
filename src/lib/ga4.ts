@@ -1,5 +1,6 @@
 import { JWT } from 'google-auth-library';
 import { isValidInclusiveDateRange } from './dateRange.js';
+import { UserFacingError } from './userFacingError.js';
 
 export interface Ga4ServiceAccount {
   clientEmail: string;
@@ -28,13 +29,13 @@ export function parseGa4ServiceAccount(json: string): Ga4ServiceAccount {
   try {
     parsed = JSON.parse(json);
   } catch {
-    throw new Error('GA4_SERVICE_ACCOUNT_JSON no es un JSON válido');
+    throw new UserFacingError('GA4_SERVICE_ACCOUNT_JSON no es un JSON válido');
   }
   const record = parsed as Record<string, unknown>;
   const clientEmail = record?.client_email;
   const privateKey = record?.private_key;
   if (typeof clientEmail !== 'string' || !clientEmail.trim() || typeof privateKey !== 'string' || !privateKey.trim()) {
-    throw new Error('GA4_SERVICE_ACCOUNT_JSON debe incluir client_email y private_key');
+    throw new UserFacingError('GA4_SERVICE_ACCOUNT_JSON debe incluir client_email y private_key');
   }
   return { clientEmail, privateKey };
 }
@@ -44,13 +45,13 @@ export function createGa4AccessTokenProvider(account: Ga4ServiceAccount): () => 
   const client = new JWT({ email: account.clientEmail, key: account.privateKey, scopes: [GA4_READONLY_SCOPE] });
   return async () => {
     const { token } = await client.getAccessToken();
-    if (!token) throw new Error('No se pudo obtener un token de acceso para GA4');
+    if (!token) throw new UserFacingError('No se pudo obtener un token de acceso para GA4');
     return token;
   };
 }
 
 function ga4PropertyId(propertyId: string) {
-  if (!/^\d+$/.test(propertyId)) throw new Error('El Property ID de GA4 debe ser numérico');
+  if (!/^\d+$/.test(propertyId)) throw new UserFacingError('El Property ID de GA4 debe ser numérico');
   return propertyId;
 }
 
@@ -64,7 +65,7 @@ function toNumber(value: string | undefined) {
 }
 
 function formatGa4Date(value: string) {
-  if (!/^\d{8}$/.test(value)) throw new Error('GA4 devolvió una fecha inválida');
+  if (!/^\d{8}$/.test(value)) throw new UserFacingError('GA4 devolvió una fecha inválida');
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
 }
 
@@ -113,7 +114,7 @@ export async function fetchGa4TrafficReport(
   clientEmail?: string,
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<Ga4TrafficData> {
-  if (!isValidInclusiveDateRange(input.from, input.to, 31)) throw new Error('Ventana de fechas GA4 inválida: usa hasta 31 días');
+  if (!isValidInclusiveDateRange(input.from, input.to, 31)) throw new UserFacingError('Ventana de fechas GA4 inválida: usa hasta 31 días');
   const url = ga4BatchEndpoint(input.propertyId);
   const range = dateRange(input.from, input.to);
   const body = {
@@ -137,14 +138,14 @@ export async function fetchGa4TrafficReport(
       signal: controller.signal,
     });
   } catch {
-    throw new Error('No se pudo conectar con la API de Google Analytics');
+    throw new UserFacingError('No se pudo conectar con la API de Google Analytics');
   } finally {
     clearTimeout(timeout);
   }
   if (!response.ok) throw await ga4ErrorFromResponse(response, clientEmail);
   const payload: unknown = await response.json();
   const reports = Array.isArray((payload as any)?.reports) ? (payload as any).reports : [];
-  if (reports.length !== 4) throw new Error('GA4 no devolvió los cuatro informes esperados');
+  if (reports.length !== 4) throw new UserFacingError('GA4 no devolvió los cuatro informes esperados');
   const [sessionsReport, sourcesReport, pagesReport, landingReport] = reports.map(parseGa4Report);
   const samplingWarning = [sessionsReport, sourcesReport, pagesReport, landingReport].some((report) => report.sampled);
   const timeZone = sessionsReport.timeZone ?? sourcesReport.timeZone ?? pagesReport.timeZone ?? landingReport.timeZone;

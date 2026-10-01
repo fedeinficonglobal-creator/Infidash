@@ -49,3 +49,15 @@ export function getBootstrapUsers(env: BootstrapEnvironment, activeAdminExists: 
 
   return users;
 }
+
+const DEFAULT_PASSWORDS: Record<BootstrapUser['role'], string> = { admin: 'admin1234', viewer: 'viewer1234' };
+
+/** Returns the startup warning text when default seed passwords are in use outside production, otherwise null. */
+export function getDefaultAccountsWarning(env: BootstrapEnvironment, users: BootstrapUser[]): string | null {
+  if (env.NODE_ENV === 'production' || env.NODE_ENV === 'test') return null;
+  const defaults = users.filter((user) => user.password === DEFAULT_PASSWORDS[user.role]);
+  if (!defaults.length) return null;
+  const accounts = defaults.map((user) => `${user.email} (${user.role})`).join(', ');
+  return `[infidash] WARNING: default credentials are in use for ${accounts}. `
+    + 'Anyone who knows them can log in. Set NODE_ENV=production and INFIDASH_ADMIN_PASSWORD (and INFIDASH_VIEWER_PASSWORD if you need a viewer) before exposing this instance.';
+}
