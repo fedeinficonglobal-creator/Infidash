@@ -1,5 +1,6 @@
 import { nowIso } from './auth.js';
 import { UserFacingError } from './userFacingError.js';
+import { safeFetch } from './urlSafety.js';
 
 const DEFAULT_CLARITY_EXPORT_URL = 'https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1';
 
@@ -295,11 +296,12 @@ export async function fetchClaritySnapshots(
       headers.set('authorization', `Bearer ${context.accessToken.trim()}`);
     }
 
-    const response = await fetchImpl(exportUrl, {
+    // exportUrl is admin-configurable: validate it (and any redirect hop) against internal addresses.
+    const response = await safeFetch(exportUrl, {
       method: 'GET',
       headers,
       signal: controller.signal,
-    });
+    }, { fetchImpl });
 
     const responseText = await response.text();
     if (!response.ok) {

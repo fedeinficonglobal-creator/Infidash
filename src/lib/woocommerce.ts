@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { UserFacingError } from './userFacingError.js';
+import { assertPublicHttpUrl, assertResolvesToPublicAddress } from './urlSafety.js';
 
 export interface WooCommerceCredentials {
   storeUrl: string;
@@ -139,6 +140,7 @@ function ordersEndpoint(storeUrl: string) {
       /\.(local|internal|localhost)$/.test(host) || isIP(host)) {
     throw new UserFacingError('La tienda debe usar una URL HTTPS pública sin credenciales ni parámetros');
   }
+  assertPublicHttpUrl(url);
   url.pathname = `${url.pathname.replace(/\/+$/, '')}/wp-json/wc/v3/orders`;
   url.searchParams.set('per_page', '1');
   url.searchParams.set('page', '1');
@@ -155,6 +157,8 @@ export async function probeWooCommerceOrders(input: WooCommerceCredentials, fetc
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
+    // Redirects stay disabled (redirect: 'error' below); only DNS needs the extra internal-address check.
+    await assertResolvesToPublicAddress(new URL(url).hostname);
     const headers = new Headers({ accept: 'application/json' });
     headers.set('authorization', `Basic ${Buffer.from(`${input.consumerKey}:${input.consumerSecret}`).toString('base64')}`);
     const response = await fetchImpl(url, { method: 'GET', headers, redirect: 'error', signal: controller.signal });
@@ -162,7 +166,8 @@ export async function probeWooCommerceOrders(input: WooCommerceCredentials, fetc
     const body: unknown = await response.json();
     if (!Array.isArray(body)) return { ok: false, error: 'WooCommerce no devolvió una lista de pedidos válida' };
     return { ok: true, error: null };
-  } catch {
+  } catch (error) {
+    if (error instanceof UserFacingError) return { ok: false, error: error.message };
     return { ok: false, error: 'No se pudo conectar de forma segura con WooCommerce' };
   } finally {
     clearTimeout(timeout);
@@ -269,6 +274,7 @@ async function fetchOrderPages(
 ) {
   if (!input.consumerKey.trim() || !input.consumerSecret.trim()) throw new UserFacingError('Faltan las credenciales de WooCommerce');
   const url = new URL(ordersEndpoint(input.storeUrl));
+  await assertResolvesToPublicAddress(url.hostname);
   url.searchParams.set('per_page', '100');
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
   const headers = new Headers({ accept: 'application/json' });

@@ -105,6 +105,8 @@ if (suite === 'db' || suite === 'api') {
     childEnv.API_BASE_URL = apiUrl;
     childEnv.API_PORT = parsedApiUrl.port;
     childEnv.INFIDASH_TEST_RUNNER_MANAGED_API = '1';
+    // The API regression suite probes a loopback WordPress fixture; the SSRF guard would block it otherwise.
+    childEnv.INFIDASH_ALLOW_PRIVATE_URLS = '1';
     childEnv.INFIDASH_TEST_LEGACY_SQLITE_PATH = sqlitePath;
     childEnv.INFIDASH_BACKUP_DIR = join(tempDirectory, 'backups');
     selectedFiles = apiFiles;

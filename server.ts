@@ -75,6 +75,10 @@ import { hasClarityMetric } from './src/lib/clarityAvailability.js';
 import { contentRoutes } from './src/server/content/routes.js';
 import { closeEditorialPool, getEditorialPool } from './src/server/content/postgres.js';
 import { runEditorialMigrations } from './src/server/content/migrations.js';
+import { testWordPressConnection } from './src/lib/wordpressProbe.js';
+import { createHealthCheck, registerHealthRoute } from './src/server/health.js';
+import { assertPublicHttpUrl } from './src/lib/urlSafety.js';
+import { getIntegrationProviderDefinition } from './src/lib/integrationCatalog.js';
 import { LoginThrottle } from './src/lib/loginThrottle.js';
 import { redactIntegrationSecrets } from './src/lib/integrationPresentation.js';
 import { fetchWooCommercePurchaseWindow, parseWooRefundPolicy, probeWooCommerceOrders, summarizeCompletedOrderSales } from './src/lib/woocommerce.js';
@@ -304,37 +308,13 @@ async function syncClarityIntegration(integrationId: string) {
   };
 }
 
-async function testWordPressConnection(integration: any, fetchImpl: typeof fetch = globalThis.fetch) {
-  const siteUrl = String(integration.config?.siteUrl ?? '').trim().replace(/\/+$/, '');
-  if (!siteUrl) {
-    return { ok: false, error: 'Falta la URL del sitio' };
-  }
-
-  const restNamespace = String(integration.config?.restNamespace ?? '/wp-json/wp/v2').trim() || '/wp-json/wp/v2';
-  const url = `${siteUrl}${restNamespace.startsWith('/') ? '' : '/'}${restNamespace}`;
-  const credentials = getIntegrationCredentialsById(integration.id) ?? {};
-  const username = typeof credentials.username === 'string' ? credentials.username.trim() : '';
-  const applicationPassword = typeof credentials.applicationPassword === 'string' ? credentials.applicationPassword.trim() : '';
-
-  const headers = new Headers({ accept: 'application/json' });
-  if (username && applicationPassword) {
-    headers.set('authorization', `Basic ${Buffer.from(`${username}:${applicationPassword}`).toString('base64')}`);
-  }
-
-  const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(new DOMException('WordPress connection timeout', 'AbortError')), 8000);
-  try {
-    const response = await fetchImpl(url, { method: 'GET', headers, signal: controller.signal });
-    if (!response.ok) {
-      return { ok: false, error: `WordPress respondió ${response.status} ${response.statusText}` };
-    }
-    return { ok: true, error: null };
-  } catch (error) {
-    console.error('[infidash] wordpress probe failed', error);
-    const timedOut = error instanceof Error && error.name === 'AbortError';
-    return { ok: false, error: timedOut ? 'WordPress no respondió a tiempo' : 'No se pudo conectar con WordPress' };
-  } finally {
-    globalThis.clearTimeout(timeoutId);
+/** Rejects (UserFacingError) any URL-typed config field of the provider that points at a non-public host. */
+function assertIntegrationUrls(provider: string, config: Record<string, unknown> | null | undefined) {
+  const definition = getIntegrationProviderDefinition(provider as any);
+  for (const field of definition?.configFields ?? []) {
+    if (field.type !== 'url') continue;
+    const value = config?.[field.key];
+    if (typeof value === 'string' && value.trim()) assertPublicHttpUrl(value);
   }
 }
 
@@ -397,9 +377,12 @@ function startClaritySyncScheduler() {
   globalState.__infidashClaritySyncInterval = setInterval(run, safeInterval);
 }
 
-app.get('/api/health', (_req: AnyFastifyRequest, reply: FastifyReply) => {
-  return reply.send({ status: 'ok' });
-});
+// Real health check: async SELECT 1 through the editorial pg.Pool (2s timeout). `?deep=1` also reports editorial
+// migrations and runs the core SELECT 1 through the psql shim; that one blocks the event loop, so it is deep-only.
+registerHealthRoute(app, createHealthCheck({
+  pool: { query: (sql: string) => getEditorialPool().query(sql) },
+  coreCheck: () => { getDatabase().prepare('SELECT 1').get(); },
+}));
 
 app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, (req: AnyFastifyRequest, reply: FastifyReply) => {
   const { email, password } = (req.body ?? {}) as any;
@@ -689,6 +672,7 @@ app.post('/api/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {
   }
 
   try {
+    assertIntegrationUrls(provider, config && typeof config === 'object' ? config : null);
     const saved = createOrUpdateClientIntegration({
       id: typeof id === 'string' && id.trim() ? id : undefined,
       clientId,
@@ -722,6 +706,8 @@ app.patch('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply)
   }
 
   try {
+    const patchConfig = (req.body as any)?.config;
+    assertIntegrationUrls(existing.provider, patchConfig && typeof patchConfig === 'object' ? patchConfig : null);
     const saved = createOrUpdateClientIntegration({
       id: existing.id,
       clientId: existing.clientId,
@@ -745,8 +731,18 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
     return;
   }
 
-  if (getIntegrationById((req.params as any).id)?.isActive === false) {
+  const integrationToTest = getIntegrationById((req.params as any).id) as any;
+  if (integrationToTest?.isActive === false) {
     return sendError(reply, 409, 'La integración está desactivada', 'INTEGRATION_DISABLED');
+  }
+
+  // Never probe (or store a probe result for) a configuration that points at the internal network.
+  if (integrationToTest) {
+    try {
+      assertIntegrationUrls(integrationToTest.provider, integrationToTest.config);
+    } catch (error) {
+      return sendCaughtError(reply, error, { status: 400, fallback: 'URL de integración no válida', code: 'INVALID_INTEGRATION_URL' });
+    }
   }
 
   let result = testIntegrationById((req.params as any).id);
@@ -757,7 +753,7 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
   // The field-completeness check above never actually contacts WordPress.
   // For wordpress integrations with all required fields, do a real HTTP probe.
   if (result.ready && result.integration.provider === 'wordpress') {
-    const probe = await testWordPressConnection(result.integration);
+    const probe = await testWordPressConnection(result.integration, getIntegrationCredentialsById(result.integration.id) ?? {});
     const updated = setClientIntegrationStatus(
       result.integration.id,
       probe.ok ? 'connected' : 'error',
