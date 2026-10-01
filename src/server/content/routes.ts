@@ -8,7 +8,8 @@ import { canAccessClient } from '../../lib/auth.js';
 import { assertPublicHttpUrl } from '../../lib/urlSafety.js';
 import { UserFacingError } from '../../lib/userFacingError.js';
 import { createPostizUploader, postizConfigFromEnv } from './postizUpload.js';
-import { MAX_CREATIVE_BYTES, readCreative } from './creativeUpload.js';
+import { MAX_CREATIVE_BYTES, spoolCreative } from './creativeUpload.js';
+import { createUploadLimiter, maxConcurrentUploadsFromEnv } from './uploadLimiter.js';
 
 type HumanSession = { user: { id: string; role: 'admin' | 'viewer'; clientIds: string[] | null } };
 type Request = FastifyRequest<{ Body: any; Params: any; Querystring: any; Headers: any }>;
@@ -22,6 +23,7 @@ export interface ContentRoutesOptions {
   authenticateService?: (token: string) => ServicePrincipal | null | Promise<ServicePrincipal | null>;
   /** Postiz upload wiring; env defaults to process.env (read per request) and fetchImpl to fetch. Injectable for tests. */
   postiz?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch };
+  uploads?: { maxConcurrent?: number; tmpDir?: string };
 }
 
 function bearer(request: Request) {
@@ -82,6 +84,8 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
   const serviceAuthenticator = options.authenticateService ?? ((token: string) => authenticateServiceToken(getEditorialPool(), token));
   // Scoped to this plugin: only the creative upload route consumes multipart bodies; JSON routes are unaffected.
   await app.register(fastifyMultipart, { limits: { fileSize: MAX_CREATIVE_BYTES, files: 1, fields: 0, parts: 1 } });
+
+  const uploadLimiter = createUploadLimiter(options.uploads?.maxConcurrent ?? maxConcurrentUploadsFromEnv());
 
   async function requireHuman(request: Request, role: 'viewer' | 'admin' = 'viewer') {
     const token = humanToken(request);
@@ -290,14 +294,24 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     const config = postizConfigFromEnv(options.postiz?.env ?? process.env);
     if (!config) throw new ContentApiError(503, 'POSTIZ_NOT_CONFIGURED', 'La subida de creatividades no está disponible: falta configurar Postiz (POSTIZ_API_URL y POSTIZ_API_KEY) en el servidor');
     if (!request.isMultipart()) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Envía el archivo como multipart/form-data en el campo file');
-    const part = await request.file();
-    if (!part || part.fieldname !== 'file') {
-      part?.file.resume();
-      throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Falta el archivo en el campo file');
+    // Server-wide cap on simultaneous uploads (each one spools to disk and streams to Postiz); no queueing.
+    const release = uploadLimiter.acquire();
+    let creative: Awaited<ReturnType<typeof spoolCreative>> | undefined;
+    let socialPost: unknown;
+    try {
+      const part = await request.file();
+      if (!part || part.fieldname !== 'file') {
+        part?.file.resume();
+        throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Falta el archivo en el campo file');
+      }
+      creative = await spoolCreative(part, { tmpDir: options.uploads?.tmpDir });
+      const uploaded = await createPostizUploader(config, options.postiz?.fetchImpl ?? fetch)({ path: creative.path, filename: creative.name, mimetype: creative.mimetype });
+      socialPost = await repository.appendSocialPostMedia(id, { url: uploaded.url, type: creative.kind, name: creative.name }, session.user.id);
+    } finally {
+      await creative?.cleanup();
+      release();
     }
-    const creative = await readCreative(part);
-    const uploaded = await createPostizUploader(config, options.postiz?.fetchImpl ?? fetch)({ buffer: creative.buffer, filename: creative.name, mimetype: creative.mimetype });
-    const socialPost = await repository.appendSocialPostMedia(id, { url: uploaded.url, type: creative.kind, name: creative.name }, session.user.id);
+    // Reply only after the temp file is gone and the slot is free.
     return reply.send({ socialPost });
   }));
 

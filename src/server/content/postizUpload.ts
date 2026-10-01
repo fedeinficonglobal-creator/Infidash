@@ -1,8 +1,10 @@
+import { openAsBlob } from 'node:fs';
 import { ContentApiError } from './contracts.js';
 
 /** Agency-wide Postiz public API access; the key only ever lives in server env. */
 export interface PostizConfig { apiUrl: string; apiKey: string; publicUrl: string; }
-export interface PostizUploadFile { buffer: Buffer; filename: string; mimetype: string; }
+/** Either an in-memory buffer or a file on disk (streamed to Postiz without loading it into memory). */
+export type PostizUploadFile = { filename: string; mimetype: string } & ({ buffer: Buffer } | { path: string });
 export type PostizUploader = (file: PostizUploadFile) => Promise<{ url: string }>;
 type FetchImpl = typeof fetch;
 
@@ -45,7 +47,14 @@ function uploadFailed(detail: string) {
 export function createPostizUploader(config: PostizConfig, fetchImpl: FetchImpl = fetch): PostizUploader {
   return async (file) => {
     const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }), file.filename);
+    let blob: Blob;
+    try {
+      // A path-backed Blob is read lazily from disk while fetch sends it, never loaded into memory.
+      blob = 'path' in file ? await openAsBlob(file.path, { type: file.mimetype }) : new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
+    } catch {
+      throw uploadFailed('no se pudo leer el archivo temporal');
+    }
+    form.append('file', blob, file.filename);
     let response: Response;
     try {
       response = await fetchImpl(`${config.apiUrl}/public/v1/upload`, { method: 'POST', headers: { Authorization: config.apiKey }, body: form, signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) });
