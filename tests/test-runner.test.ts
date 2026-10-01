@@ -18,7 +18,7 @@ test('test runner defaults to explicit unit files and classifies every suite', (
     .filter(file => file.startsWith('core-characterization.') && file.endsWith('.test.ts'))
     .map(file => `tests/${file}`);
   assert.ok(coreCharacterization.length >= 3);
-  const all = [...files, 'tests/monthly-model.test.ts', 'tests/api-regression.test.ts', 'tests/client-memberships.test.ts', ...coreCharacterization].sort();
+  const all = [...files, 'tests/monthly-model.test.ts', 'tests/api-regression.test.ts', 'tests/client-memberships.test.ts', 'tests/core-baseline-migration.db.test.ts', ...coreCharacterization].sort();
   assert.deepEqual(all, readdirSync('tests').filter(file => file.endsWith('.test.ts')).map(file => `tests/${file}`).sort());
   const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
   assert.equal(scripts.test, 'node scripts/run-tests.mjs');
@@ -28,7 +28,7 @@ test('test runner defaults to explicit unit files and classifies every suite', (
 });
 
 test('unsafe suites have a guard before side-effectful imports or requests', () => {
-  for (const file of ['monthly-model', 'api-regression', 'client-memberships', 'core-characterization.clients-stats', 'core-characterization.auth', 'core-characterization.leads-integrations', 'core-characterization.misc', 'core-characterization.kpis']) {
+  for (const file of ['monthly-model', 'api-regression', 'client-memberships', 'core-characterization.clients-stats', 'core-characterization.auth', 'core-characterization.leads-integrations', 'core-characterization.misc', 'core-characterization.kpis', 'core-baseline-migration.db']) {
     const source = readFileSync(`tests/${file}.test.ts`, 'utf8');
     assert.match(source, /^import '\.\/helpers\/isolated-harness-required\.js';/);
     if (file === 'monthly-model') {

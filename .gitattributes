@@ -1,0 +1,2 @@
+# Applied migrations are checksummed: keep them LF on every platform.
+db/migrations/*.sql text eol=lf

@@ -23,7 +23,7 @@ test('editorial migration declares tenant-safe foreign keys and operational inde
 
 test('migration discovery is deterministic and checksums detect edits', async () => {
   const directory = path.join(repositoryRoot, 'db', 'migrations');
-  assert.deepEqual(await discoverMigrations(directory), ['0001_editorial_schema.sql', '0002_editorial_api.sql', '0003_rrss_social_posts.sql']);
+  assert.deepEqual(await discoverMigrations(directory), ['0001_editorial_schema.sql', '0002_editorial_api.sql', '0003_rrss_social_posts.sql', '0004_core_baseline.sql']);
   assert.equal(checksumMigration('SELECT 1;'), checksumMigration('SELECT 1;'));
   assert.notEqual(checksumMigration('SELECT 1;'), checksumMigration('SELECT 2;'));
 });

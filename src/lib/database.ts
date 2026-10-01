@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { UserFacingError } from './userFacingError.js';
+import { runCoreMigrations } from '../server/content/migrations.js';
 import { coreAll, coreGet, coreRun, getCorePool, withCoreTransaction, type CoreQueryable } from './corePool.js';
 import { createBackupFile, type BackupResult } from './databaseBackup.js';
 import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.js';
@@ -673,277 +674,6 @@ async function tableColumns(db: CoreQueryable, tableName: string): Promise<strin
   return rows.map((row) => row.column_name);
 }
 
-async function initializeSchema(db: CoreQueryable) {
-  // One multi-statement simple query (no parameters), as the former `psql -c` call was.
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
-      active INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS organizations (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      slug TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS clients (
-      id TEXT PRIMARY KEY,
-      org_id TEXT REFERENCES organizations(id) ON DELETE SET NULL,
-      name TEXT NOT NULL,
-      slug TEXT NOT NULL UNIQUE,
-      logo_url TEXT,
-      industry TEXT,
-      health_score INTEGER NOT NULL DEFAULT 0,
-      kpi_thresholds_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS client_memberships (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL,
-      UNIQUE(user_id, client_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_client_memberships_user ON client_memberships (user_id);
-
-    CREATE TABLE IF NOT EXISTS schema_backfills (
-      key TEXT PRIMARY KEY,
-      completed_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS integrations (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      provider TEXT NOT NULL,
-      label TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      config_json TEXT NOT NULL DEFAULT '{}',
-      credentials_json TEXT NOT NULL DEFAULT '{}',
-      is_active INTEGER NOT NULL DEFAULT 1,
-      last_sync TEXT,
-      last_error TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(client_id, provider)
-    );
-
-    CREATE TABLE IF NOT EXISTS woocommerce_sales_snapshots (
-      integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
-      source_key TEXT NOT NULL,
-      purchase_from TEXT NOT NULL,
-      purchase_to TEXT NOT NULL,
-      orders_json JSONB NOT NULL,
-      synced_at TEXT NOT NULL,
-      PRIMARY KEY (integration_id, source_key, purchase_from, purchase_to),
-      CHECK (purchase_from <= purchase_to)
-    );
-
-    CREATE TABLE IF NOT EXISTS ga4_snapshots (
-      integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
-      property_id TEXT NOT NULL,
-      period_from TEXT NOT NULL,
-      period_to TEXT NOT NULL,
-      sessions_json JSONB NOT NULL,
-      traffic_sources_json JSONB NOT NULL,
-      top_pages_json JSONB NOT NULL,
-      landing_pages_json JSONB NOT NULL,
-      synced_at TEXT NOT NULL,
-      PRIMARY KEY (integration_id, property_id, period_from, period_to),
-      CHECK (period_from <= period_to)
-    );
-
-    CREATE TABLE IF NOT EXISTS google_ads_snapshots (
-      integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
-      customer_id TEXT NOT NULL,
-      period_from TEXT NOT NULL,
-      period_to TEXT NOT NULL,
-      campaigns_json JSONB NOT NULL,
-      currency_code TEXT NOT NULL,
-      synced_at TEXT NOT NULL,
-      PRIMARY KEY (integration_id, customer_id, period_from, period_to),
-      CHECK (period_from <= period_to)
-    );
-
-    CREATE TABLE IF NOT EXISTS daily_stats (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      stat_date TEXT NOT NULL,
-      revenue REAL NOT NULL DEFAULT 0,
-      roas REAL NOT NULL DEFAULT 0,
-      clicks INTEGER NOT NULL DEFAULT 0,
-      conversions INTEGER NOT NULL DEFAULT 0,
-      cpa REAL NOT NULL DEFAULT 0,
-      leads INTEGER NOT NULL DEFAULT 0,
-      traffic INTEGER NOT NULL DEFAULT 0,
-      notes TEXT,
-      source TEXT NOT NULL DEFAULT 'manual',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(client_id, stat_date)
-    );
-
-    CREATE TABLE IF NOT EXISTS ux_snapshots (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      snapshot_date TEXT NOT NULL,
-      sessions INTEGER NOT NULL DEFAULT 0,
-      page_views INTEGER NOT NULL DEFAULT 0,
-      rage_clicks INTEGER NOT NULL DEFAULT 0,
-      dead_clicks INTEGER NOT NULL DEFAULT 0,
-      scroll_depth_avg REAL NOT NULL DEFAULT 0,
-      engaged_sessions INTEGER NOT NULL DEFAULT 0,
-      conversions INTEGER NOT NULL DEFAULT 0,
-      conversion_rate REAL NOT NULL DEFAULT 0,
-      notes TEXT,
-      source TEXT NOT NULL DEFAULT 'clarity',
-      payload_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(client_id, snapshot_date)
-    );
-
-    CREATE TABLE IF NOT EXISTS operational_plans (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      domain TEXT NOT NULL CHECK (domain IN ('web', 'rrss')),
-      period_key TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1,
-      rows_json TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(client_id, domain, period_key)
-    );
-
-    CREATE TABLE IF NOT EXISTS report_runs (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      from_date TEXT NOT NULL,
-      to_date TEXT NOT NULL,
-      generated_at TEXT NOT NULL,
-      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      pdf_base64 TEXT NOT NULL,
-      bytes INTEGER NOT NULL,
-      last_sent_at TEXT,
-      last_sent_to TEXT,
-      last_send_error TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_report_runs_client_generated ON report_runs(client_id, generated_at DESC);
-
-    CREATE TABLE IF NOT EXISTS rrss_channels (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      platform_key TEXT NOT NULL,
-      label TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(client_id, platform_key, label)
-    );
-
-    CREATE TABLE IF NOT EXISTS monthly_kpis (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      department_key TEXT NOT NULL,
-      metric_key TEXT NOT NULL,
-      month_key TEXT NOT NULL,
-      target_value REAL,
-      target_text TEXT,
-      actual_value REAL,
-      actual_text TEXT,
-      status TEXT NOT NULL DEFAULT 'unknown',
-      difference_value REAL,
-      difference_pct REAL,
-      notes TEXT,
-      closed_at TEXT,
-      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      updated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(client_id, department_key, metric_key, month_key)
-    );
-
-    CREATE TABLE IF NOT EXISTS monthly_kpi_cycles (
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      month_key TEXT NOT NULL,
-      closed_at TEXT,
-      closed_by_user_id TEXT,
-      close_token TEXT,
-      reopened_at TEXT,
-      reopened_by_user_id TEXT,
-      reopen_reason TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (client_id, month_key)
-    );
-
-    CREATE TABLE IF NOT EXISTS monthly_kpi_events (
-      id TEXT PRIMARY KEY,
-      kpi_id TEXT NOT NULL,
-      client_id TEXT NOT NULL,
-      month_key TEXT NOT NULL,
-      action TEXT NOT NULL CHECK (action IN ('closed', 'reopened')),
-      actor_user_id TEXT,
-      reason TEXT,
-      occurred_at TEXT NOT NULL,
-      snapshot_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_monthly_kpi_events_kpi_time ON monthly_kpi_events (kpi_id, occurred_at DESC, id DESC);
-
-    CREATE TABLE IF NOT EXISTS ai_insights (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      insight_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS leads (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-      integration_id TEXT REFERENCES integrations(id) ON DELETE SET NULL,
-      source TEXT NOT NULL DEFAULT 'wordpress',
-      name TEXT,
-      email TEXT,
-      phone TEXT,
-      message TEXT,
-      status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_progress', 'closed', 'lost')),
-      dedupe_key TEXT,
-      raw_payload_json TEXT NOT NULL DEFAULT '{}',
-      received_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_leads_client_received_id ON leads (client_id, received_at DESC, id DESC);
-  `);
-}
-
-async function ensureLeadSchema(db: CoreQueryable) {
-  if (!(await tableColumns(db, 'leads')).includes('dedupe_key')) {
-    await coreRun(db, `ALTER TABLE leads ADD COLUMN dedupe_key TEXT`);
-  }
-  await coreRun(db, `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_integration_delivery ON leads (integration_id, dedupe_key) WHERE dedupe_key IS NOT NULL`);
-}
-
 async function ensureClientMembershipsBackfill(db: CoreQueryable) {
   const marker = await coreGet(db, `SELECT 1 FROM schema_backfills WHERE key = $1`, ['client_memberships_v1']);
   if (marker) return;
@@ -961,120 +691,11 @@ async function ensureClientMembershipsBackfill(db: CoreQueryable) {
   await coreRun(db, `INSERT INTO schema_backfills (key, completed_at) VALUES ($1, $2)`, ['client_memberships_v1', nowIso()]);
 }
 
-async function ensureUxSnapshotSchema(db: CoreQueryable) {
-  const existingColumns = new Set(await tableColumns(db, 'ux_snapshots'));
-  const addColumn = (definition: string) => coreRun(db, `ALTER TABLE ux_snapshots ADD COLUMN ${definition}`);
-
-  if (!existingColumns.has('snapshot_date')) {
-    await addColumn(`snapshot_date TEXT NOT NULL DEFAULT ''`);
-  }
-
-  if (!existingColumns.has('sessions')) {
-    await addColumn(`sessions INTEGER NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('page_views')) {
-    await addColumn(`page_views INTEGER NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('rage_clicks')) {
-    await addColumn(`rage_clicks INTEGER NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('dead_clicks')) {
-    await addColumn(`dead_clicks INTEGER NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('scroll_depth_avg')) {
-    await addColumn(`scroll_depth_avg REAL NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('engaged_sessions')) {
-    await addColumn(`engaged_sessions INTEGER NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('conversions')) {
-    await addColumn(`conversions INTEGER NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('conversion_rate')) {
-    await addColumn(`conversion_rate REAL NOT NULL DEFAULT 0`);
-  }
-
-  if (!existingColumns.has('notes')) {
-    await addColumn(`notes TEXT`);
-  }
-
-  if (!existingColumns.has('source')) {
-    await addColumn(`source TEXT NOT NULL DEFAULT 'clarity'`);
-  }
-
-  if (!existingColumns.has('payload_json')) {
-    await addColumn(`payload_json TEXT NOT NULL DEFAULT '{}'`);
-  }
-
-  if (!existingColumns.has('created_at')) {
-    await addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
-  }
-
-  if (!existingColumns.has('updated_at')) {
-    await addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
-  }
-}
-
-async function ensureClientThresholdSchema(db: CoreQueryable) {
-  if (!(await tableColumns(db, 'clients')).includes('kpi_thresholds_json')) {
-    await coreRun(db, `ALTER TABLE clients ADD COLUMN kpi_thresholds_json TEXT NOT NULL DEFAULT '{}'`);
-  }
-}
-
-async function ensureIntegrationSchema(db: CoreQueryable) {
+// The core schema (tables, columns, indexes) lives in db/migrations/0004_core_baseline.sql and is applied by
+// initializeCoreDatabase() through the migration runner before this runs. What stays here is data work only.
+// Normalizes legacy integration rows (provider/label/status/config) once the migrated columns exist.
+async function normalizeIntegrationRows(db: CoreQueryable) {
   const existingColumns = new Set(await tableColumns(db, 'integrations'));
-  const addColumn = (definition: string) => coreRun(db, `ALTER TABLE integrations ADD COLUMN ${definition}`);
-
-  if (!existingColumns.has('provider')) {
-    await addColumn(`provider TEXT`);
-  }
-
-  if (!existingColumns.has('label')) {
-    await addColumn(`label TEXT`);
-  }
-
-  if (!existingColumns.has('status')) {
-    await addColumn(`status TEXT NOT NULL DEFAULT 'pending'`);
-  }
-
-  if (!existingColumns.has('config_json')) {
-    await addColumn(`config_json TEXT NOT NULL DEFAULT '{}'`);
-  }
-
-  if (!existingColumns.has('credentials_json')) {
-    await addColumn(`credentials_json TEXT NOT NULL DEFAULT '{}'`);
-  }
-
-  if (!existingColumns.has('last_error')) {
-    await addColumn(`last_error TEXT`);
-  }
-
-  if (!existingColumns.has('created_at')) {
-    await addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
-  }
-
-  if (!existingColumns.has('updated_at')) {
-    await addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
-  }
-
-  if (!existingColumns.has('is_active')) {
-    await addColumn(`is_active INTEGER NOT NULL DEFAULT 1`);
-  }
-
-  if (!existingColumns.has('last_sync')) {
-    await addColumn(`last_sync TEXT`);
-  }
-
-  if (!existingColumns.has('webhook_secret')) {
-    await addColumn(`webhook_secret TEXT`);
-  }
 
   const hasTypeColumn = existingColumns.has('type');
   const rows = await coreAll<Record<string, unknown>>(db, `SELECT id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at${hasTypeColumn ? ', type' : ''} FROM integrations`);
@@ -1170,22 +791,24 @@ async function seedDefaults(db: CoreQueryable) {
   // sincronización de Clarity.
 }
 
-// Arbitrary constant, distinct from the editorial migration lock: serializes concurrent boots of the core schema.
+// Arbitrary constant, distinct from the migration runner lock: serializes concurrent boots of the core data work
+// (integration normalization, memberships backfill, seed users, legacy import).
 const CORE_SCHEMA_LOCK_ID = 4_790_321_772;
 
 async function runCoreInitialization() {
+  // Schema first, and BEFORE taking the core lock: the migration runner serializes itself with its own advisory
+  // lock (4790321771) on a dedicated connection and releases it when done, so the two locks are never held at the
+  // same time and cannot deadlock. A concurrent boot waits in the runner, then finds everything applied.
+  await runCoreMigrations(getCorePool());
   const client = await getCorePool().connect();
   let releaseError: Error | undefined;
   try {
     // Session-level advisory lock on one dedicated connection: a second instance booting at the same time waits
     // here and then finds the schema, backfill marker and seed users already in place.
     await client.query('SELECT pg_advisory_lock($1)', [CORE_SCHEMA_LOCK_ID]);
-    // Same order as the former synchronous bootstrap.
-    await initializeSchema(client);
-    await ensureClientThresholdSchema(client);
-    await ensureIntegrationSchema(client);
-    await ensureLeadSchema(client);
-    await ensureUxSnapshotSchema(client);
+    // Schema already exists here: runCoreMigrations() ran before this lock was taken. Data work only, in the same
+    // relative order as the former synchronous bootstrap.
+    await normalizeIntegrationRows(client);
     await ensureClientMembershipsBackfill(client);
     await seedDefaults(client);
     await importLegacySqliteData(client);
@@ -1203,7 +826,7 @@ async function runCoreInitialization() {
 let coreInitialization: Promise<void> | null = null;
 
 /**
- * Creates/updates the core schema, runs the one-time backfill and seeds the bootstrap users. Idempotent and memoized:
+ * Applies the pending core migrations (db/migrations/*_core_*.sql), runs the one-time backfill and seeds the bootstrap users. Idempotent and memoized:
  * every caller shares one promise, so it runs once per process. server.ts awaits it before listening, and every
  * pooled query issued through getCoreDb() awaits it too, so tests and scripts that only import this module still
  * get the schema. A failed attempt is not cached, so the next call retries.
