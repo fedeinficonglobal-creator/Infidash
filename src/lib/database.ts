@@ -1,10 +1,11 @@
 import * as crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { UserFacingError } from './userFacingError.js';
 import { coreAll, coreGet, coreRun, getCorePool, type CoreQueryable } from './corePool.js';
+import { createBackupFile, type BackupResult } from './databaseBackup.js';
 import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.js';
 import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
@@ -257,226 +258,6 @@ const isProduction = process.env.NODE_ENV === 'production';
 const defaultBackupDir = isProduction ? '/data/backups' : path.join(process.cwd(), 'data', 'backups');
 const backupDir = process.env.INFIDASH_BACKUP_DIR ?? defaultBackupDir;
 
-interface DbRunResult {
-  changes: number;
-}
-
-interface PreparedStatement {
-  get(...params: unknown[]): unknown;
-  all(...params: unknown[]): unknown[];
-  run(...params: unknown[]): DbRunResult;
-}
-
-interface AppDatabase {
-  kind: 'postgres';
-  prepare(sql: string): PreparedStatement;
-  exec(sql: string): void;
-  tableColumns(tableName: string): string[];
-  backup(filePath: string): Promise<void>;
-}
-
-let database: AppDatabase | null = null;
-
-function ensureDirectoryExists(filePath: string) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-function sanitizeBackupLabel(label?: string | null) {
-  if (!label) {
-    return 'manual';
-  }
-
-  return label
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'manual';
-}
-
-function escapeSqlLiteral(value: unknown) {
-  if (value === null || value === undefined) {
-    return 'NULL';
-  }
-
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? String(value) : 'NULL';
-  }
-
-  if (typeof value === 'boolean') {
-    return value ? 'TRUE' : 'FALSE';
-  }
-
-  if (value instanceof Date) {
-    return `'${value.toISOString().replace(/'/g, "''")}'`;
-  }
-
-  if (typeof value === 'object') {
-    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
-  }
-
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function inlineSqlParams(sql: string, params: unknown[]) {
-  if (params.length === 1 && params[0] && typeof params[0] === 'object' && !Array.isArray(params[0]) && !(params[0] instanceof Date)) {
-    const record = params[0] as Record<string, unknown>;
-    return sql.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (_, key: string) => escapeSqlLiteral(record[key]));
-  }
-
-  let index = 0;
-  return sql.replace(/\?/g, () => {
-    if (index >= params.length) {
-      throw new Error(`Missing SQL parameter at position ${index + 1}`);
-    }
-
-    const value = params[index];
-    index += 1;
-    return escapeSqlLiteral(value);
-  });
-}
-
-function getPostgresConnectionString() {
-  const connectionString = process.env.DATABASE_URL ?? process.env.INFIDASH_DATABASE_URL ?? '';
-  return connectionString.trim() || null;
-}
-
-function getPostgresClientEnv() {
-  const env = { ...process.env };
-  if (!env.PGSSLMODE && env.DATABASE_SSL) {
-    env.PGSSLMODE = env.DATABASE_SSL;
-  }
-  if (!env.PGCONNECT_TIMEOUT) {
-    env.PGCONNECT_TIMEOUT = '5';
-  }
-  return env;
-}
-
-function runPostgresCommand(connectionString: string, sql: string) {
-  const result = spawnSync(
-    'psql',
-    [
-      '-X',
-      '--no-psqlrc',
-      '--set',
-      'ON_ERROR_STOP=1',
-      '--tuples-only',
-      '--no-align',
-      '--dbname',
-      connectionString,
-      '-c',
-      sql,
-    ],
-    {
-      encoding: 'utf8',
-      env: getPostgresClientEnv(),
-    }
-  );
-
-  if (result.status !== 0) {
-    const message = (result.stderr || result.stdout || 'unknown postgres error').trim();
-    throw new Error(message);
-  }
-
-  return (result.stdout || '').trim();
-}
-
-function runPostgresQuery<T = unknown>(connectionString: string, sql: string): T[] {
-  const wrapped = `SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) AS data FROM (${sql}) AS t`;
-  const raw = runPostgresCommand(connectionString, wrapped);
-  if (!raw) {
-    return [];
-  }
-
-  const parsed = JSON.parse(raw) as T[];
-  return Array.isArray(parsed) ? parsed : [];
-}
-
-function createPostgresDatabase(connectionString: string): AppDatabase {
-  return {
-    kind: 'postgres',
-    prepare(sql) {
-      return {
-        get: (...params: unknown[]) => {
-          const finalSql = inlineSqlParams(sql, params);
-          const rows = runPostgresQuery<Record<string, unknown>>(connectionString, finalSql);
-          return rows[0] ?? undefined;
-        },
-        all: (...params: unknown[]) => {
-          const finalSql = inlineSqlParams(sql, params);
-          return runPostgresQuery<Record<string, unknown>>(connectionString, finalSql);
-        },
-        run: (...params: unknown[]) => {
-          const finalSql = inlineSqlParams(sql, params).trim().replace(/;\s*$/, '');
-          const normalized = finalSql.replace(/\s+$/, '');
-          const dmlMatch = /^(insert|update|delete)\b/i.test(normalized);
-          if (!dmlMatch) {
-            runPostgresCommand(connectionString, normalized);
-            return { changes: 0 };
-          }
-
-          const wrapped = `WITH affected AS (${normalized} RETURNING 1) SELECT COUNT(*)::int AS changes FROM affected`;
-          const raw = runPostgresCommand(connectionString, wrapped);
-          return { changes: Number(raw || 0) };
-        },
-      };
-    },
-    exec(sql) {
-      runPostgresCommand(connectionString, sql);
-    },
-    tableColumns(tableName) {
-      const rows = runPostgresQuery<{ column_name: string }>(
-        connectionString,
-        `
-          SELECT column_name
-          FROM information_schema.columns
-          WHERE table_schema = current_schema()
-            AND table_name = ${escapeSqlLiteral(tableName)}
-          ORDER BY ordinal_position
-        `,
-      );
-      return rows.map((row) => row.column_name);
-    },
-    async backup(filePath) {
-      ensureDirectoryExists(filePath);
-      const result = spawnSync(
-        'pg_dump',
-        [
-          '--dbname',
-          connectionString,
-          '--format=plain',
-          '--no-owner',
-          '--no-privileges',
-        ],
-        {
-          encoding: 'utf8',
-          env: getPostgresClientEnv(),
-          stdio: ['ignore', 'pipe', 'pipe'],
-        }
-      );
-
-      if (result.status !== 0) {
-        const message = (result.stderr || result.stdout || 'unknown pg_dump error').trim();
-        throw new Error(message);
-      }
-
-      fs.writeFileSync(filePath, result.stdout || '', 'utf8');
-    },
-  };
-}
-
-function createDatabase() {
-  const connectionString = getPostgresConnectionString();
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is required to start Infidash');
-  }
-
-  runPostgresCommand(connectionString, 'SELECT 1');
-  return createPostgresDatabase(connectionString);
-}
-
 const defaultLegacySqlitePath = path.join(process.cwd(), 'data', 'infidash.sqlite');
 const testLegacySqlitePath = process.env.INFIDASH_TEST_SUITE === 'api'
   ? process.env.INFIDASH_TEST_LEGACY_SQLITE_PATH
@@ -499,7 +280,28 @@ const legacySqliteTables = [
 
 type LegacySqliteDump = Partial<Record<(typeof legacySqliteTables)[number], Array<Record<string, unknown>>>>;
 
-function readLegacySqliteDump(): LegacySqliteDump | null {
+interface CommandResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Async child process runner (never blocks the event loop). */
+function runCommand(command: string, args: string[]): Promise<CommandResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function readLegacySqliteDump(): Promise<LegacySqliteDump | null> {
   if (!fs.existsSync(legacySqlitePath)) {
     return null;
   }
@@ -526,13 +328,13 @@ for table in tables:
 print(json.dumps(out))
 `;
 
-  const result = spawnSync('python', ['-c', script, legacySqlitePath], { encoding: 'utf8' });
-  if (result.status !== 0) {
+  const result = await runCommand('python', ['-c', script, legacySqlitePath]);
+  if (result.code !== 0) {
     const message = (result.stderr || result.stdout || 'unknown sqlite export error').trim();
     throw new Error(message);
   }
 
-  const raw = (result.stdout || '').trim();
+  const raw = result.stdout.trim();
   if (!raw) {
     return null;
   }
@@ -540,12 +342,17 @@ print(json.dumps(out))
   return JSON.parse(raw) as LegacySqliteDump;
 }
 
-function importLegacySqliteData(db: AppDatabase) {
+/** `$1, $2, …, $count` for building parameterized column lists. */
+function placeholders(count: number) {
+  return Array.from({ length: count }, (_, index) => `$${index + 1}`).join(', ');
+}
+
+async function importLegacySqliteData(db: CoreQueryable) {
   if (process.env.NODE_ENV === 'production' || process.env.INFIDASH_SKIP_LEGACY_SQLITE_IMPORT === '1') {
     return;
   }
 
-  const dump = readLegacySqliteDump();
+  const dump = await readLegacySqliteDump();
   if (!dump) {
     return;
   }
@@ -566,24 +373,22 @@ function importLegacySqliteData(db: AppDatabase) {
   const userIdMap = new Map<string, string>();
   const clientIdMap = new Map<string, string>();
 
-  const getOrgIdBySlug = (slug: string) => {
-    const row = db.prepare(`SELECT id FROM organizations WHERE slug = ?`).get(slug) as { id: string } | undefined;
+  const getOrgIdBySlug = async (slug: string) => {
+    const row = await coreGet<{ id: string }>(db, `SELECT id FROM organizations WHERE slug = $1`, [slug]);
     return row?.id ?? null;
   };
 
-  const getUserIdByEmail = (email: string) => {
-    const row = db.prepare(`SELECT id FROM users WHERE email = ?`).get(email) as { id: string } | undefined;
+  const getUserIdByEmail = async (email: string) => {
+    const row = await coreGet<{ id: string }>(db, `SELECT id FROM users WHERE email = $1`, [email]);
     return row?.id ?? null;
   };
 
-  const getClientIdBySlug = (slug: string) => {
-    const row = db.prepare(`SELECT id FROM clients WHERE slug = ?`).get(slug) as { id: string } | undefined;
+  const getClientIdBySlug = async (slug: string) => {
+    const row = await coreGet<{ id: string }>(db, `SELECT id FROM clients WHERE slug = $1`, [slug]);
     return row?.id ?? null;
   };
 
-  const insertOrganization = db.prepare(
-    `INSERT INTO organizations (id, name, slug, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(slug) DO NOTHING`
-  );
+  const insertOrganization = `INSERT INTO organizations (id, name, slug, created_at) VALUES (${placeholders(4)}) ON CONFLICT(slug) DO NOTHING`;
   for (const row of dump.organizations ?? []) {
     const slug = String(row.slug ?? '').trim();
     if (!slug) {
@@ -591,24 +396,22 @@ function importLegacySqliteData(db: AppDatabase) {
     }
 
     const legacyId = String(row.id ?? '');
-    insertOrganization.run(
+    await coreRun(db, insertOrganization, [
       legacyId || crypto.randomUUID(),
       String(row.name ?? slug),
       slug,
       String(row.created_at ?? nowIso()),
-    );
-    const destId = getOrgIdBySlug(slug) ?? legacyId;
+    ]);
+    const destId = (await getOrgIdBySlug(slug)) ?? legacyId;
     if (legacyId && destId) {
       orgIdMap.set(legacyId, destId);
     }
     importCounts.organizations += 1;
   }
 
-  const insertUser = db.prepare(
-    `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(email) DO NOTHING`
-  );
+  const insertUser = `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
+     VALUES (${placeholders(8)})
+     ON CONFLICT(email) DO NOTHING`;
   for (const row of dump.users ?? []) {
     const email = normalizeEmail(String(row.email ?? ''));
     if (!email) {
@@ -616,7 +419,7 @@ function importLegacySqliteData(db: AppDatabase) {
     }
 
     const legacyId = String(row.id ?? '');
-    insertUser.run(
+    await coreRun(db, insertUser, [
       legacyId || crypto.randomUUID(),
       email,
       String(row.name ?? 'Usuario').trim() || 'Usuario',
@@ -625,19 +428,17 @@ function importLegacySqliteData(db: AppDatabase) {
       Number(row.active ?? 1) ? 1 : 0,
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
-    const destId = getUserIdByEmail(email) ?? legacyId;
+    ]);
+    const destId = (await getUserIdByEmail(email)) ?? legacyId;
     if (legacyId && destId) {
       userIdMap.set(legacyId, destId);
     }
     importCounts.users += 1;
   }
 
-  const insertClient = db.prepare(
-    `INSERT INTO clients (id, org_id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(slug) DO NOTHING`
-  );
+  const insertClient = `INSERT INTO clients (id, org_id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
+     VALUES (${placeholders(10)})
+     ON CONFLICT(slug) DO NOTHING`;
   for (const row of dump.clients ?? []) {
     const slug = String(row.slug ?? '').trim();
     if (!slug) {
@@ -646,8 +447,8 @@ function importLegacySqliteData(db: AppDatabase) {
 
     const legacyId = String(row.id ?? '');
     const legacyOrgId = String(row.org_id ?? '').trim();
-    const orgId = legacyOrgId ? orgIdMap.get(legacyOrgId) ?? getOrgIdBySlug(legacyOrgId) ?? legacyOrgId : null;
-    insertClient.run(
+    const orgId = legacyOrgId ? orgIdMap.get(legacyOrgId) ?? (await getOrgIdBySlug(legacyOrgId)) ?? legacyOrgId : null;
+    await coreRun(db, insertClient, [
       legacyId || crypto.randomUUID(),
       orgId,
       String(row.name ?? slug).trim() || slug,
@@ -658,20 +459,18 @@ function importLegacySqliteData(db: AppDatabase) {
       String(row.kpi_thresholds_json ?? '{}'),
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
-    const destId = getClientIdBySlug(slug) ?? legacyId;
+    ]);
+    const destId = (await getClientIdBySlug(slug)) ?? legacyId;
     if (legacyId && destId) {
       clientIdMap.set(legacyId, destId);
     }
     importCounts.clients += 1;
   }
 
-  const insertIntegration = db.prepare(
-    `INSERT INTO integrations (
+  const insertIntegration = `INSERT INTO integrations (
       id, client_id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(client_id, provider) DO NOTHING`
-  );
+    ) VALUES (${placeholders(12)})
+    ON CONFLICT(client_id, provider) DO NOTHING`;
   for (const row of dump.integrations ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
@@ -679,7 +478,7 @@ function importLegacySqliteData(db: AppDatabase) {
       continue;
     }
 
-    insertIntegration.run(
+    await coreRun(db, insertIntegration, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
       String(row.provider ?? 'clarity'),
@@ -692,16 +491,14 @@ function importLegacySqliteData(db: AppDatabase) {
       row.last_error ?? null,
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
+    ]);
     importCounts.integrations += 1;
   }
 
-  const insertDailyStat = db.prepare(
-    `INSERT INTO daily_stats (
+  const insertDailyStat = `INSERT INTO daily_stats (
       id, client_id, stat_date, revenue, roas, clicks, conversions, cpa, leads, traffic, notes, source, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(client_id, stat_date) DO NOTHING`
-  );
+    ) VALUES (${placeholders(14)})
+    ON CONFLICT(client_id, stat_date) DO NOTHING`;
   for (const row of dump.daily_stats ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
@@ -709,7 +506,7 @@ function importLegacySqliteData(db: AppDatabase) {
       continue;
     }
 
-    insertDailyStat.run(
+    await coreRun(db, insertDailyStat, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
       String(row.stat_date ?? '').trim(),
@@ -724,17 +521,15 @@ function importLegacySqliteData(db: AppDatabase) {
       String(row.source ?? 'manual'),
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
+    ]);
     importCounts.dailyStats += 1;
   }
 
-  const insertUxSnapshot = db.prepare(
-    `INSERT INTO ux_snapshots (
+  const insertUxSnapshot = `INSERT INTO ux_snapshots (
       id, client_id, snapshot_date, sessions, page_views, rage_clicks, dead_clicks, scroll_depth_avg, engaged_sessions,
       conversions, conversion_rate, notes, source, payload_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(client_id, snapshot_date) DO NOTHING`
-  );
+    ) VALUES (${placeholders(16)})
+    ON CONFLICT(client_id, snapshot_date) DO NOTHING`;
   for (const row of dump.ux_snapshots ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
@@ -742,7 +537,7 @@ function importLegacySqliteData(db: AppDatabase) {
       continue;
     }
 
-    insertUxSnapshot.run(
+    await coreRun(db, insertUxSnapshot, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
       String(row.snapshot_date ?? '').trim(),
@@ -759,16 +554,14 @@ function importLegacySqliteData(db: AppDatabase) {
       String(row.payload_json ?? '{}'),
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
+    ]);
     importCounts.uxSnapshots += 1;
   }
 
-  const insertRrssChannel = db.prepare(
-    `INSERT INTO rrss_channels (
+  const insertRrssChannel = `INSERT INTO rrss_channels (
       id, client_id, platform_key, label, is_active, sort_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(client_id, platform_key, label) DO NOTHING`
-  );
+    ) VALUES (${placeholders(8)})
+    ON CONFLICT(client_id, platform_key, label) DO NOTHING`;
   for (const row of dump.rrss_channels ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
@@ -776,7 +569,7 @@ function importLegacySqliteData(db: AppDatabase) {
       continue;
     }
 
-    insertRrssChannel.run(
+    await coreRun(db, insertRrssChannel, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
       String(row.platform_key ?? '').trim(),
@@ -785,17 +578,15 @@ function importLegacySqliteData(db: AppDatabase) {
       Number(row.sort_order ?? 0),
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
+    ]);
     importCounts.rrssChannels += 1;
   }
 
-  const insertMonthlyKpi = db.prepare(
-    `INSERT INTO monthly_kpis (
+  const insertMonthlyKpi = `INSERT INTO monthly_kpis (
       id, client_id, department_key, metric_key, month_key, target_value, target_text, actual_value, actual_text,
       status, difference_value, difference_pct, notes, closed_at, created_by_user_id, updated_by_user_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(client_id, department_key, metric_key, month_key) DO NOTHING`
-  );
+    ) VALUES (${placeholders(18)})
+    ON CONFLICT(client_id, department_key, metric_key, month_key) DO NOTHING`;
   for (const row of dump.monthly_kpis ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
@@ -808,7 +599,7 @@ function importLegacySqliteData(db: AppDatabase) {
     const createdByUserId = createdByLegacyId ? userIdMap.get(createdByLegacyId) ?? createdByLegacyId : null;
     const updatedByUserId = updatedByLegacyId ? userIdMap.get(updatedByLegacyId) ?? updatedByLegacyId : null;
 
-    insertMonthlyKpi.run(
+    await coreRun(db, insertMonthlyKpi, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
       String(row.department_key ?? 'publicidad'),
@@ -827,13 +618,11 @@ function importLegacySqliteData(db: AppDatabase) {
       updatedByUserId,
       String(row.created_at ?? nowIso()),
       String(row.updated_at ?? nowIso()),
-    );
+    ]);
     importCounts.monthlyKpis += 1;
   }
 
-  const insertAiInsight = db.prepare(
-    `INSERT INTO ai_insights (id, client_id, insight_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`
-  );
+  const insertAiInsight = `INSERT INTO ai_insights (id, client_id, insight_json, created_at) VALUES (${placeholders(4)}) ON CONFLICT(id) DO NOTHING`;
   for (const row of dump.ai_insights ?? []) {
     const legacyClientId = String(row.client_id ?? '').trim();
     const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
@@ -841,12 +630,12 @@ function importLegacySqliteData(db: AppDatabase) {
       continue;
     }
 
-    insertAiInsight.run(
+    await coreRun(db, insertAiInsight, [
       String(row.id ?? crypto.randomUUID()),
       clientId,
       String(row.insight_json ?? '{}'),
       String(row.created_at ?? nowIso()),
-    );
+    ]);
     importCounts.aiInsights += 1;
   }
 
@@ -856,29 +645,37 @@ function importLegacySqliteData(db: AppDatabase) {
   }
 }
 
-function getBackupFilePath(label?: string | null) {
-  ensureDirectoryExists(path.join(backupDir, 'backup.placeholder'));
-  const stamp = nowIso().replace(/[:.]/g, '-');
-  const safeLabel = sanitizeBackupLabel(label);
-  return path.join(backupDir, `infidash-${safeLabel}-${stamp}.sql`);
+/**
+ * Creates a pg_dump backup in the backup directory without blocking the event loop. Only the file name, label,
+ * creation time and size are returned: the internal filesystem path is never exposed to API clients.
+ */
+export async function createDatabaseBackup(label?: string | null): Promise<BackupResult> {
+  const connectionString = (process.env.DATABASE_URL ?? process.env.INFIDASH_DATABASE_URL ?? '').trim();
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required to create a backup');
+  }
+
+  return createBackupFile({ connectionString, backupDir, label });
 }
 
-export async function createDatabaseBackup(label?: string | null) {
-  const db = getDatabase();
-  const filePath = getBackupFilePath(label);
-  await db.backup(filePath);
-  const stats = fs.statSync(filePath);
-  return {
-    path: filePath,
-    label: sanitizeBackupLabel(label),
-    createdAt: nowIso(),
-    sizeBytes: stats.size,
-  };
+async function tableColumns(db: CoreQueryable, tableName: string): Promise<string[]> {
+  const rows = await coreAll<{ column_name: string }>(
+    db,
+    `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = $1
+      ORDER BY ordinal_position
+    `,
+    [tableName],
+  );
+  return rows.map((row) => row.column_name);
 }
 
-
-function initializeSchema(db: AppDatabase) {
-  db.exec(`
+async function initializeSchema(db: CoreQueryable) {
+  // One multi-statement simple query (no parameters), as the former `psql -c` call was.
+  await db.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
@@ -1140,154 +937,150 @@ function initializeSchema(db: AppDatabase) {
   `);
 }
 
-function ensureLeadSchema(db: AppDatabase) {
-  if (!db.tableColumns('leads').includes('dedupe_key')) {
-    db.exec(`ALTER TABLE leads ADD COLUMN dedupe_key TEXT`);
+async function ensureLeadSchema(db: CoreQueryable) {
+  if (!(await tableColumns(db, 'leads')).includes('dedupe_key')) {
+    await coreRun(db, `ALTER TABLE leads ADD COLUMN dedupe_key TEXT`);
   }
-  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_integration_delivery ON leads (integration_id, dedupe_key) WHERE dedupe_key IS NOT NULL`);
+  await coreRun(db, `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_integration_delivery ON leads (integration_id, dedupe_key) WHERE dedupe_key IS NOT NULL`);
 }
 
-function ensureClientMembershipsBackfill(db: AppDatabase) {
-  const marker = db.prepare(`SELECT 1 FROM schema_backfills WHERE key = ?`).get('client_memberships_v1');
+async function ensureClientMembershipsBackfill(db: CoreQueryable) {
+  const marker = await coreGet(db, `SELECT 1 FROM schema_backfills WHERE key = $1`, ['client_memberships_v1']);
   if (marker) return;
 
-  const viewers = db.prepare(`SELECT id FROM users WHERE role = 'viewer'`).all() as { id: string }[];
-  const clients = db.prepare(`SELECT id FROM clients`).all() as { id: string }[];
-  const insert = db.prepare(
-    `INSERT INTO client_memberships (id, user_id, client_id, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT (user_id, client_id) DO NOTHING`
-  );
+  const viewers = await coreAll<{ id: string }>(db, `SELECT id FROM users WHERE role = 'viewer'`);
+  const clients = await coreAll<{ id: string }>(db, `SELECT id FROM clients`);
+  const insert = `INSERT INTO client_memberships (id, user_id, client_id, created_at) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, client_id) DO NOTHING`;
   for (const viewer of viewers) {
     for (const client of clients) {
-      insert.run(crypto.randomUUID(), viewer.id, client.id, nowIso());
+      await coreRun(db, insert, [crypto.randomUUID(), viewer.id, client.id, nowIso()]);
     }
   }
 
-  db.prepare(`INSERT INTO schema_backfills (key, completed_at) VALUES (?, ?)`).run('client_memberships_v1', nowIso());
+  await coreRun(db, `INSERT INTO schema_backfills (key, completed_at) VALUES ($1, $2)`, ['client_memberships_v1', nowIso()]);
 }
 
-function ensureUxSnapshotSchema(db: AppDatabase) {
-  const existingColumns = new Set(db.tableColumns('ux_snapshots'));
-  const addColumn = (definition: string) => db.exec(`ALTER TABLE ux_snapshots ADD COLUMN ${definition}`);
+async function ensureUxSnapshotSchema(db: CoreQueryable) {
+  const existingColumns = new Set(await tableColumns(db, 'ux_snapshots'));
+  const addColumn = (definition: string) => coreRun(db, `ALTER TABLE ux_snapshots ADD COLUMN ${definition}`);
 
   if (!existingColumns.has('snapshot_date')) {
-    addColumn(`snapshot_date TEXT NOT NULL DEFAULT ''`);
+    await addColumn(`snapshot_date TEXT NOT NULL DEFAULT ''`);
   }
 
   if (!existingColumns.has('sessions')) {
-    addColumn(`sessions INTEGER NOT NULL DEFAULT 0`);
+    await addColumn(`sessions INTEGER NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('page_views')) {
-    addColumn(`page_views INTEGER NOT NULL DEFAULT 0`);
+    await addColumn(`page_views INTEGER NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('rage_clicks')) {
-    addColumn(`rage_clicks INTEGER NOT NULL DEFAULT 0`);
+    await addColumn(`rage_clicks INTEGER NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('dead_clicks')) {
-    addColumn(`dead_clicks INTEGER NOT NULL DEFAULT 0`);
+    await addColumn(`dead_clicks INTEGER NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('scroll_depth_avg')) {
-    addColumn(`scroll_depth_avg REAL NOT NULL DEFAULT 0`);
+    await addColumn(`scroll_depth_avg REAL NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('engaged_sessions')) {
-    addColumn(`engaged_sessions INTEGER NOT NULL DEFAULT 0`);
+    await addColumn(`engaged_sessions INTEGER NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('conversions')) {
-    addColumn(`conversions INTEGER NOT NULL DEFAULT 0`);
+    await addColumn(`conversions INTEGER NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('conversion_rate')) {
-    addColumn(`conversion_rate REAL NOT NULL DEFAULT 0`);
+    await addColumn(`conversion_rate REAL NOT NULL DEFAULT 0`);
   }
 
   if (!existingColumns.has('notes')) {
-    addColumn(`notes TEXT`);
+    await addColumn(`notes TEXT`);
   }
 
   if (!existingColumns.has('source')) {
-    addColumn(`source TEXT NOT NULL DEFAULT 'clarity'`);
+    await addColumn(`source TEXT NOT NULL DEFAULT 'clarity'`);
   }
 
   if (!existingColumns.has('payload_json')) {
-    addColumn(`payload_json TEXT NOT NULL DEFAULT '{}'`);
+    await addColumn(`payload_json TEXT NOT NULL DEFAULT '{}'`);
   }
 
   if (!existingColumns.has('created_at')) {
-    addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
+    await addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
   }
 
   if (!existingColumns.has('updated_at')) {
-    addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
+    await addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
   }
 }
 
-function ensureClientThresholdSchema(db: AppDatabase) {
-  if (!db.tableColumns('clients').includes('kpi_thresholds_json')) {
-    db.exec(`ALTER TABLE clients ADD COLUMN kpi_thresholds_json TEXT NOT NULL DEFAULT '{}'`);
+async function ensureClientThresholdSchema(db: CoreQueryable) {
+  if (!(await tableColumns(db, 'clients')).includes('kpi_thresholds_json')) {
+    await coreRun(db, `ALTER TABLE clients ADD COLUMN kpi_thresholds_json TEXT NOT NULL DEFAULT '{}'`);
   }
 }
 
-function ensureIntegrationSchema(db: AppDatabase) {
-  const existingColumns = new Set(db.tableColumns('integrations'));
-  const addColumn = (definition: string) => db.exec(`ALTER TABLE integrations ADD COLUMN ${definition}`);
+async function ensureIntegrationSchema(db: CoreQueryable) {
+  const existingColumns = new Set(await tableColumns(db, 'integrations'));
+  const addColumn = (definition: string) => coreRun(db, `ALTER TABLE integrations ADD COLUMN ${definition}`);
 
   if (!existingColumns.has('provider')) {
-    addColumn(`provider TEXT`);
+    await addColumn(`provider TEXT`);
   }
 
   if (!existingColumns.has('label')) {
-    addColumn(`label TEXT`);
+    await addColumn(`label TEXT`);
   }
 
   if (!existingColumns.has('status')) {
-    addColumn(`status TEXT NOT NULL DEFAULT 'pending'`);
+    await addColumn(`status TEXT NOT NULL DEFAULT 'pending'`);
   }
 
   if (!existingColumns.has('config_json')) {
-    addColumn(`config_json TEXT NOT NULL DEFAULT '{}'`);
+    await addColumn(`config_json TEXT NOT NULL DEFAULT '{}'`);
   }
 
   if (!existingColumns.has('credentials_json')) {
-    addColumn(`credentials_json TEXT NOT NULL DEFAULT '{}'`);
+    await addColumn(`credentials_json TEXT NOT NULL DEFAULT '{}'`);
   }
 
   if (!existingColumns.has('last_error')) {
-    addColumn(`last_error TEXT`);
+    await addColumn(`last_error TEXT`);
   }
 
   if (!existingColumns.has('created_at')) {
-    addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
+    await addColumn(`created_at TEXT NOT NULL DEFAULT ''`);
   }
 
   if (!existingColumns.has('updated_at')) {
-    addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
+    await addColumn(`updated_at TEXT NOT NULL DEFAULT ''`);
   }
 
   if (!existingColumns.has('is_active')) {
-    addColumn(`is_active INTEGER NOT NULL DEFAULT 1`);
+    await addColumn(`is_active INTEGER NOT NULL DEFAULT 1`);
   }
 
   if (!existingColumns.has('last_sync')) {
-    addColumn(`last_sync TEXT`);
+    await addColumn(`last_sync TEXT`);
   }
 
   if (!existingColumns.has('webhook_secret')) {
-    addColumn(`webhook_secret TEXT`);
+    await addColumn(`webhook_secret TEXT`);
   }
 
   const hasTypeColumn = existingColumns.has('type');
-  const rows = db.prepare(`SELECT id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at${hasTypeColumn ? ', type' : ''} FROM integrations`).all() as Array<Record<string, unknown>>;
-  const updateRow = db.prepare(
-    `UPDATE integrations
-     SET provider = ?, label = ?, status = ?, config_json = ?, credentials_json = ?, is_active = ?, last_sync = ?, last_error = ?, created_at = ?, updated_at = ?
-     WHERE id = ?`
-  );
+  const rows = await coreAll<Record<string, unknown>>(db, `SELECT id, provider, label, status, config_json, credentials_json, is_active, last_sync, last_error, created_at, updated_at${hasTypeColumn ? ', type' : ''} FROM integrations`);
+  const updateRow = `UPDATE integrations
+     SET provider = $1, label = $2, status = $3, config_json = $4, credentials_json = $5, is_active = $6, last_sync = $7, last_error = $8, created_at = $9, updated_at = $10
+     WHERE id = $11`;
 
   for (const row of rows) {
     const rawProvider = String(row.provider ?? row.type ?? '').trim().toLowerCase();
@@ -1316,7 +1109,7 @@ function ensureIntegrationSchema(db: AppDatabase) {
     const label = String(row.label ?? '').trim() || buildIntegrationDisplayName(definition, config);
     const now = nowIso();
 
-    updateRow.run(
+    await coreRun(db, updateRow, [
       provider,
       label,
       status,
@@ -1328,45 +1121,46 @@ function ensureIntegrationSchema(db: AppDatabase) {
       String(row.created_at ?? '') || now,
       String(row.updated_at ?? '') || now,
       String(row.id),
-    );
+    ]);
   }
 }
 
-function seedDefaults(db: AppDatabase) {
+async function seedDefaults(db: CoreQueryable) {
   const timestamp = nowIso();
 
-  const organization = db.prepare(`SELECT id FROM organizations WHERE slug = ?`).get('infidash') as { id: string } | undefined;
+  const organization = await coreGet<{ id: string }>(db, `SELECT id FROM organizations WHERE slug = $1`, ['infidash']);
   const orgId = organization?.id ?? crypto.randomUUID();
   if (!organization) {
-    db.prepare(
-      `INSERT INTO organizations (id, name, slug, created_at) VALUES (?, ?, ?, ?)`
-    ).run(orgId, 'Infidash', 'infidash', timestamp);
+    await coreRun(
+      db,
+      `INSERT INTO organizations (id, name, slug, created_at) VALUES ($1, $2, $3, $4)`,
+      [orgId, 'Infidash', 'infidash', timestamp],
+    );
   }
 
   // No se seedan clientes de demostración: el panel debe arrancar vacío y
   // poblarse solo con datos reales creados por usuarios o sincronizados desde backend.
 
-  const existingAdmin = db.prepare(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`).get();
+  const existingAdmin = await coreGet(db, `SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
   const users = getBootstrapUsers(process.env, Boolean(existingAdmin));
   const defaultAccountsWarning = getDefaultAccountsWarning(process.env, users);
   if (defaultAccountsWarning) console.warn(defaultAccountsWarning);
 
-  const userExists = db.prepare(`SELECT id FROM users WHERE email = ?`);
-  const insertUser = db.prepare(
-    `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
-  );
-
   for (const user of users) {
-    if (!userExists.get(user.email)) {
-      insertUser.run(
-        crypto.randomUUID(),
-        user.email,
-        user.name,
-        hashPassword(user.password),
-        user.role,
-        timestamp,
-        timestamp,
+    if (!(await coreGet(db, `SELECT id FROM users WHERE email = $1`, [user.email]))) {
+      await coreRun(
+        db,
+        `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 1, $6, $7)`,
+        [
+          crypto.randomUUID(),
+          user.email,
+          user.name,
+          hashPassword(user.password),
+          user.role,
+          timestamp,
+          timestamp,
+        ],
       );
     }
   }
@@ -1376,29 +1170,69 @@ function seedDefaults(db: AppDatabase) {
   // sincronización de Clarity.
 }
 
-export function getDatabase() {
-  if (!database) {
-    database = createDatabase();
-    initializeSchema(database);
-    ensureClientThresholdSchema(database);
-    ensureIntegrationSchema(database);
-    ensureLeadSchema(database);
-    ensureUxSnapshotSchema(database);
-    ensureClientMembershipsBackfill(database);
-    seedDefaults(database);
-    importLegacySqliteData(database);
+// Arbitrary constant, distinct from the editorial migration lock: serializes concurrent boots of the core schema.
+const CORE_SCHEMA_LOCK_ID = 4_790_321_772;
+
+async function runCoreInitialization() {
+  const client = await getCorePool().connect();
+  let releaseError: Error | undefined;
+  try {
+    // Session-level advisory lock on one dedicated connection: a second instance booting at the same time waits
+    // here and then finds the schema, backfill marker and seed users already in place.
+    await client.query('SELECT pg_advisory_lock($1)', [CORE_SCHEMA_LOCK_ID]);
+    // Same order as the former synchronous bootstrap.
+    await initializeSchema(client);
+    await ensureClientThresholdSchema(client);
+    await ensureIntegrationSchema(client);
+    await ensureLeadSchema(client);
+    await ensureUxSnapshotSchema(client);
+    await ensureClientMembershipsBackfill(client);
+    await seedDefaults(client);
+    await importLegacySqliteData(client);
+  } finally {
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [CORE_SCHEMA_LOCK_ID]);
+    } catch (error) {
+      // A connection that cannot unlock is broken: destroy it instead of returning it to the pool.
+      releaseError = error instanceof Error ? error : new Error(String(error));
+    }
+    client.release(releaseError);
+  }
+}
+
+let coreInitialization: Promise<void> | null = null;
+
+/**
+ * Creates/updates the core schema, runs the one-time backfill and seeds the bootstrap users. Idempotent and memoized:
+ * every caller shares one promise, so it runs once per process. server.ts awaits it before listening, and every
+ * pooled query issued through getCoreDb() awaits it too, so tests and scripts that only import this module still
+ * get the schema. A failed attempt is not cached, so the next call retries.
+ */
+export function initializeCoreDatabase(): Promise<void> {
+  if (!coreInitialization) {
+    coreInitialization = runCoreInitialization().catch((error) => {
+      coreInitialization = null;
+      throw error;
+    });
   }
 
-  return database;
+  return coreInitialization;
 }
 
 /**
- * Async, parameterized pool for the modules already migrated off the psql shim (users, auth, sessions).
- * Calling getDatabase() first guarantees the schema bootstrap has run before the first pooled query.
+ * Pool-backed queryable for every exported data function. It awaits initializeCoreDatabase() before each query
+ * (a resolved memoized promise after the first call), which keeps the guarantee the former synchronous bootstrap gave
+ * without changing any call site. initializeCoreDatabase itself talks to the raw pool, so there is no recursion.
  */
+const readyCoreDb: CoreQueryable = {
+  async query(text, values) {
+    await initializeCoreDatabase();
+    return getCorePool().query(text, values);
+  },
+};
+
 function getCoreDb(): CoreQueryable {
-  getDatabase();
-  return getCorePool();
+  return readyCoreDb;
 }
 
 async function getClientIdsForUser(db: CoreQueryable, userId: string, role: UserRole): Promise<string[] | null> {
@@ -1711,6 +1545,17 @@ export async function revokeSessionByToken(token: string) {
 /** Revokes every session of a user (logout everywhere). */
 export async function revokeAllSessionsForUser(userId: string) {
   await coreRun(getCoreDb(), `DELETE FROM sessions WHERE user_id = $1`, [userId]);
+}
+
+/**
+ * Deletes every session that has expired at `now` and returns how many rows were removed. Expired sessions are
+ * otherwise only deleted when their own token is presented, so abandoned ones would accumulate forever.
+ * `expires_at` is always written with toISOString() (fixed-width UTC), so comparing the TEXT values lexicographically
+ * equals comparing the instants; `<=` matches getSessionByToken, which treats an expiry equal to now as expired.
+ */
+export async function purgeExpiredSessions(now = new Date()): Promise<number> {
+  const result = await coreRun(getCoreDb(), `DELETE FROM sessions WHERE expires_at <= $1`, [now.toISOString()]);
+  return result.changes;
 }
 
 export async function getSessionByToken(token: string) {

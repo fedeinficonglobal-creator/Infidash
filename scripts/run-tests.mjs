@@ -160,7 +160,7 @@ if (suite === 'db' || suite === 'api') {
 }
 
 // node:test runs multiple test files in parallel by default. The db-tier files share one
-// live Postgres database and each call getDatabase() -> initializeSchema(), whose
+// live Postgres database and each run initializeCoreDatabase() (now serialized by an advisory lock; kept sequential regardless), whose
 // `CREATE TABLE IF NOT EXISTS` statements are not safe against true concurrent execution
 // (two files bootstrapping at once can both pass the existence check and then race to
 // create the same table, failing with "duplicate key value violates unique constraint

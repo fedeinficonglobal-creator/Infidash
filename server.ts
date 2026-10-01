@@ -66,7 +66,8 @@ import {
   updateUserRole,
   upsertDailyStat,
   upsertUxSnapshot,
-  getDatabase,
+  initializeCoreDatabase,
+  purgeExpiredSessions,
   type UserRole,
 } from './src/lib/database.js';
 import { canAccessClient } from './src/lib/auth.js';
@@ -74,7 +75,7 @@ import { fetchClaritySnapshots } from './src/lib/claritySync.js';
 import { hasClarityMetric } from './src/lib/clarityAvailability.js';
 import { contentRoutes } from './src/server/content/routes.js';
 import { closeEditorialPool, getEditorialPool } from './src/server/content/postgres.js';
-import { closeCorePool } from './src/lib/corePool.js';
+import { closeCorePool, getCorePool } from './src/lib/corePool.js';
 import { runEditorialMigrations } from './src/server/content/migrations.js';
 import { testWordPressConnection } from './src/lib/wordpressProbe.js';
 import { createHealthCheck, registerHealthRoute } from './src/server/health.js';
@@ -374,18 +375,18 @@ function startClaritySyncScheduler() {
     });
   };
 
-  // First run is delayed so the psql-backed sync (blocking, via spawnSync)
-  // doesn't compete with the platform's startup health check right after listen().
+  // First run is delayed so the sync's database work doesn't compete with the platform's
+  // startup health check right after listen().
   const initialDelayMs = 10_000;
   setTimeout(run, initialDelayMs);
   globalState.__infidashClaritySyncInterval = setInterval(run, safeInterval);
 }
 
 // Real health check: async SELECT 1 through the editorial pg.Pool (2s timeout). `?deep=1` also reports editorial
-// migrations and runs the core SELECT 1 through the psql shim; that one blocks the event loop, so it is deep-only.
+// migrations and runs an async SELECT 1 on the core pool (same timeout), so a core-only outage shows up there.
 registerHealthRoute(app, createHealthCheck({
   pool: { query: (sql: string) => getEditorialPool().query(sql) },
-  coreCheck: () => { getDatabase().prepare('SELECT 1').get(); },
+  coreCheck: async () => { await getCorePool().query('SELECT 1'); },
 }));
 
 app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, async (req: AnyFastifyRequest, reply: FastifyReply) => {
@@ -1195,6 +1196,28 @@ for (const [action, active] of [['disable', false], ['enable', true]] as const) 
   });
 }
 
+const SESSION_PURGE_INTERVAL_MS = 60 * 60 * 1000;
+
+// Expired sessions are otherwise deleted only when their own token is presented. Hourly purge, first run delayed
+// (like the other schedulers) so it never competes with the startup health check; failures are logged, never thrown.
+function startSessionPurgeScheduler() {
+  if (process.env.NODE_ENV === 'test') return;
+  const globalState = globalThis as typeof globalThis & { __infidashSessionPurgeInterval?: ReturnType<typeof setInterval> };
+  if (globalState.__infidashSessionPurgeInterval) return;
+
+  const run = () => {
+    purgeExpiredSessions().then((removed) => {
+      if (removed > 0) console.log('[infidash] sesiones caducadas eliminadas', removed);
+    }).catch((error) => {
+      console.error('[infidash] session purge failed', error instanceof Error ? error.message : error);
+    });
+  };
+
+  setTimeout(run, 30_000).unref();
+  globalState.__infidashSessionPurgeInterval = setInterval(run, SESSION_PURGE_INTERVAL_MS);
+  globalState.__infidashSessionPurgeInterval.unref();
+}
+
 function startMonthlyKpiCloseScheduler() {
   if (process.env.NODE_ENV === 'test' || process.env.INFIDASH_MONTHLY_AUTO_CLOSE !== '1') return;
   const globalState = globalThis as typeof globalThis & { __infidashMonthlyCloseTimer?: ReturnType<typeof setTimeout> };
@@ -1756,15 +1779,17 @@ app.setNotFoundHandler((request: AnyFastifyRequest, reply: FastifyReply) => {
 if (process.env.NODE_ENV !== 'test') {
   startClaritySyncScheduler();
   startMonthlyKpiCloseScheduler();
+  startSessionPurgeScheduler();
 }
 
 if (shouldServeHttp(process.env)) {
   void (async () => {
+    // Create/upgrade the core schema first (advisory-locked, idempotent): the editorial schema references core
+    // tables (public.clients, users…), and a failure here stops the boot loudly instead of serving 500s.
+    await initializeCoreDatabase();
     // Apply pending editorial migrations before serving, so new code never runs against an old schema.
     // A failing migration stops the boot loudly instead of serving 500s.
     if (shouldRunEditorialMigrations(process.env)) {
-      // The editorial schema references core tables (public.clients, users…), so create those first.
-      getDatabase();
       const migrations = await runEditorialMigrations(getEditorialPool());
       if (migrations.applied.length) console.log('[infidash] migraciones editoriales aplicadas', migrations.applied);
     }

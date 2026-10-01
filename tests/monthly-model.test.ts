@@ -2,14 +2,15 @@ import './helpers/isolated-harness-required.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { coreSqlExec } from './helpers/coreSql.js';
 
 test('lead pagination reaches records beyond 200 and counts filtered rows without exposing raw payloads', async () => {
-  const { createClient, getDatabase, listLeadsByClient } = await import('../src/lib/database.js');
+  const { createClient, listLeadsByClient } = await import('../src/lib/database.js');
   const client = await createClient({ name: `Leads paginados ${Date.now()}` });
   const values = Array.from({ length: 205 }, (_, index) =>
     `('${randomUUID()}', '${client.id}', 'WordPress', 'Lead ${index}', 'new', '{"private":"hidden"}', '2026-05-18T12:00:00.000Z', '2026-05-18T12:00:00.000Z', '2026-05-18T12:00:00.000Z')`
   ).join(',');
-  getDatabase().exec(`INSERT INTO leads (id, client_id, source, name, status, raw_payload_json, received_at, created_at, updated_at) VALUES ${values}`);
+  await coreSqlExec(`INSERT INTO leads (id, client_id, source, name, status, raw_payload_json, received_at, created_at, updated_at) VALUES ${values}`);
   const page = await listLeadsByClient(client.id, { limit: 50, offset: 200, status: null, source: 'WordPress' });
   assert.equal(page.total, 205);
   assert.equal(page.openCount, 205);
