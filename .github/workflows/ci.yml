@@ -17,6 +17,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Non-blocking for the first week after it was introduced (audit remediation W0.4);
+      # then drop continue-on-error so a new high-severity advisory fails the build.
+      - run: npm audit --audit-level=high
+        continue-on-error: true
       - run: npm run lint
       - run: npm test
       - run: npm run build
