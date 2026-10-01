@@ -222,12 +222,12 @@ test('strings that look like NULL, numbers or booleans stay strings; null and un
   const asUndefined = await createClient({ name: `Literal ${unique()}` });
   const read = async (id: string) => (await listClients({ clientIds: [id] }))[0]?.industry;
 
-  assert.equal(read(asNullText.id), 'NULL');
-  assert.equal(read(asNumberText.id), '007');
-  assert.equal(read(asBooleanText.id), 'true');
-  assert.equal(read(asEmpty.id), '');
-  assert.equal(read(asNull.id), null);
-  assert.equal(read(asUndefined.id), null);
+  assert.equal(await read(asNullText.id), 'NULL');
+  assert.equal(await read(asNumberText.id), '007');
+  assert.equal(await read(asBooleanText.id), 'true');
+  assert.equal(await read(asEmpty.id), '');
+  assert.equal(await read(asNull.id), null);
+  assert.equal(await read(asUndefined.id), null);
 });
 
 // ---------------------------------------------------------------- daily stats
