@@ -20,7 +20,9 @@
     "content:import": "tsx scripts/import-content-hub.ts"
   },
   "dependencies": {
+    "@fastify/helmet": "^13.1.1",
     "@fastify/multipart": "9.4.0",
+    "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.5",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",

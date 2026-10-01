@@ -109,3 +109,14 @@ test('logout and logout-all require a session', async () => {
     assert.equal(response.json().code, 'UNAUTHENTICATED');
   }
 });
+
+test('the real app sends security headers on a JSON 404 and is not rate limited under NODE_ENV=test', async () => {
+  for (let i = 0; i < 3; i += 1) {
+    const response = await app.inject({ method: 'GET', url: '/api/does-not-exist' });
+    assert.equal(response.statusCode, 404);
+    assert.deepEqual(response.json(), { error: 'Ruta no encontrada', code: 'NOT_FOUND' });
+    assert.ok(response.headers['strict-transport-security']);
+    assert.ok(response.headers['x-frame-options']);
+    assert.match(String(response.headers['content-security-policy-report-only']), /default-src 'self'/);
+  }
+});

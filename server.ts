@@ -1,6 +1,7 @@
 // @ts-nocheck
 import fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { leadsRouteConfig, loginRouteConfig, registerSecurity, resolveTrustProxy } from './src/server/security.js';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -95,6 +96,8 @@ import { isOperationalPlanDomain, isPlanPeriod, normalizeOperationalPlanRows } f
 const app = fastify({
   logger: false,
   bodyLimit: 1_000_000,
+  // Behind a reverse proxy (EasyPanel/Traefik) set INFIDASH_TRUST_PROXY so req.ip is the real client address.
+  trustProxy: resolveTrustProxy(process.env),
 });
 
 // One shared GA4 service-account credential for every client (per-client config is only a Property ID).
@@ -134,6 +137,9 @@ const loginThrottle = new LoginThrottle();
 
 // Must be registered before any plugin so every encapsulated route inherits it.
 registerErrorHandling(app);
+// Security headers + rate limiting. Registered before every route so headers also cover static files,
+// the SPA fallback and error responses.
+await registerSecurity(app, process.env);
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
   const rawBody = typeof body === 'string' ? body.trim() : '';
@@ -395,7 +401,7 @@ app.get('/api/health', (_req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.send({ status: 'ok' });
 });
 
-app.post('/api/auth/login', (req: AnyFastifyRequest, reply: FastifyReply) => {
+app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, (req: AnyFastifyRequest, reply: FastifyReply) => {
   const { email, password } = (req.body ?? {}) as any;
 
   if (typeof email !== 'string' || typeof password !== 'string') {
@@ -1119,7 +1125,7 @@ function pickLeadField(payload: Record<string, any>, candidates: string[]) {
 
 // Public endpoint: no session. Auth is the unguessable per-integration webhook token itself
 // (WordPress form plugins like Fluent Forms / Contact Form 7 POST here on submit).
-app.post('/api/public/leads/:token', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+app.post('/api/public/leads/:token', { config: leadsRouteConfig(process.env) }, async (req: AnyFastifyRequest, reply: FastifyReply) => {
   const token = String((req.params as any).token ?? '').trim();
   const integration = token ? getIntegrationByWebhookSecret(token) : null;
   if (!integration || integration.provider !== 'wordpress') {
