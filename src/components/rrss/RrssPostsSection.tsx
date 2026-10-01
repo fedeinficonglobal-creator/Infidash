@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Clock3, LoaderCircle, Plus, RefreshCw, Searc
 import { useClientStore } from '../../store/useClientStore.js';
 import { useRrssStore } from '../../store/useRrssStore.js';
 import { canRunJob, contentRefreshDelayMs, formatEditorialDate, splitPlanInputs, statusLabel } from '../../lib/content.js';
-import { RRSS_FORMATS, draftsSummary, formatLabel } from '../../lib/rrss.js';
+import { RRSS_FORMATS, draftsSummary, formatLabel, rrssIdeaDisplayStatus } from '../../lib/rrss.js';
 import type { EditorialReadiness } from '../../services/contentApi.js';
 import type { RrssFormat, RrssNetwork } from '../../services/rrssApi.js';
 import { cn } from '../../lib/utils.js';
@@ -170,7 +170,7 @@ export function RrssPostsSection({ clientId }: { clientId: string }) {
             <td className="px-4 py-3"><button type="button" onClick={() => void select(token, item.id)} className="text-left font-bold text-slate-800 hover:text-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/30">{item.title}</button></td>
             <td className="px-4 py-3 text-slate-600">{formatLabel(item.format)}</td>
             <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{item.networks.length ? item.networks.map((network) => <NetworkBadge key={network} network={network} />) : <span className="text-xs text-slate-400">—</span>}</div></td>
-            <td className="px-4 py-3"><ContentStatusBadge status={item.status} /></td>
+            <td className="px-4 py-3"><ContentStatusBadge status={rrssIdeaDisplayStatus(item.status, item.socialPosts)} /></td>
             <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{draftsSummary(item.socialPosts ?? [])}</td>
           </tr>)}</tbody></table></div>}
     </div>

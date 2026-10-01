@@ -9,7 +9,7 @@ export type SocialPostStatus = 'review' | 'approved' | 'scheduled' | 'discarded'
 export interface SocialMedia { url: string; type?: 'image' | 'video'; name?: string; }
 
 /** Compact draft summary embedded in each idea of the RRSS listing. */
-export interface SocialPostSummary { id: string; accountId: string; network: SocialNetwork; status: SocialPostStatus; }
+export interface SocialPostSummary { id: string; accountId: string; network: SocialNetwork; status: SocialPostStatus; publicationStatus?: string | null; }
 
 /** An RRSS idea: a plan item of an `rrss` calendar. */
 export interface RrssIdea {

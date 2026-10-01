@@ -249,8 +249,10 @@ export class EditorialApiRepository {
     if (filters.cursor) { values.push(filters.cursor.at, filters.cursor.id); where.push(`(p.created_at, p.id) > ($${values.length - 1}, $${values.length}::uuid)`); }
     values.push(filters.limit + 1);
     const columns = kind === 'rrss'
-      ? `COALESCE((SELECT jsonb_agg(jsonb_build_object('id', sp.id, 'accountId', sp.account_id, 'network', sp.network, 'status', sp.status) ORDER BY sp.created_at, sp.id)
-          FROM editorial.social_posts sp WHERE sp.client_id = p.client_id AND sp.plan_item_id = p.id), '[]'::jsonb) social_posts`
+      ? `COALESCE((SELECT jsonb_agg(jsonb_build_object('id', sp.id, 'accountId', sp.account_id, 'network', sp.network, 'status', sp.status, 'publicationStatus', pub.status) ORDER BY sp.created_at, sp.id)
+          FROM editorial.social_posts sp
+          LEFT JOIN editorial.publications pub ON pub.client_id = sp.client_id AND pub.id = sp.publication_id
+          WHERE sp.client_id = p.client_id AND sp.plan_item_id = p.id), '[]'::jsonb) social_posts`
       : `ci.id content_id, ci.status content_status, ci.title content_title, ci.version content_version,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', pub.id, 'status', pub.status, 'desiredScheduledAt', pub.desired_scheduled_at, 'confirmedScheduledAt', pub.confirmed_scheduled_at))
           FROM editorial.contents content_for_publication JOIN editorial.publications pub ON pub.client_id = content_for_publication.client_id AND pub.content_id = content_for_publication.id

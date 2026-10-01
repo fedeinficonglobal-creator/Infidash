@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test, { afterEach } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -6,7 +7,7 @@ import { MemoryRouter } from 'react-router';
 import { RrssTab } from '../src/components/RrssTab.tsx';
 import { RrssToolbar } from '../src/components/rrss/RrssPostsSection.tsx';
 import { SocialPostCard } from '../src/components/rrss/SocialPostCard.tsx';
-import { canGeneratePosts, canSchedulePost, draftsSummary, mediaKind, moveMediaItem, networkFromInstanceKey, preselectAccountIds, removeMediaItem, socialPostDisplayStatus, socialPostStatusLabel, validateCreativeFile } from '../src/lib/rrss.ts';
+import { canGeneratePosts, canSchedulePost, draftsSummary, mediaKind, moveMediaItem, networkFromInstanceKey, preselectAccountIds, removeMediaItem, rrssIdeaDisplayStatus, socialPostDisplayStatus, socialPostStatusLabel, validateCreativeFile } from '../src/lib/rrss.ts';
 import { useRrssStore } from '../src/store/useRrssStore.ts';
 import type { SocialPost } from '../src/services/rrssApi.ts';
 import type { Client } from '../src/store/useClientStore.ts';
@@ -355,4 +356,21 @@ test('a draft card renders the copy with a counter, media thumbnails and the act
   assert.match(uploading, /clip\.mp4/);
   assert.match(uploading, /animate-spin/);
   assert.match(uploading, /anim\.gif[\s\S]*Formato no admitido/);
+});
+
+test('the idea badge follows its drafts: published beats scheduled beats the idea status', () => {
+  assert.equal(rrssIdeaDisplayStatus('review', []), 'review');
+  assert.equal(rrssIdeaDisplayStatus('review', [{ status: 'review' }, { status: 'approved' }]), 'review');
+  assert.equal(rrssIdeaDisplayStatus('review', [{ status: 'review' }, { status: 'scheduled', publicationStatus: 'scheduled' }]), 'scheduled');
+  assert.equal(rrssIdeaDisplayStatus('review', [{ status: 'scheduled' }]), 'scheduled', 'list summaries may lack the publication status');
+  assert.equal(rrssIdeaDisplayStatus('review', [{ status: 'scheduled', publicationStatus: 'scheduled' }, { status: 'scheduled', publicationStatus: 'published' }]), 'published');
+  assert.equal(rrssIdeaDisplayStatus('review', [{ status: 'scheduled', publicationStatus: 'cancelled' }]), 'review', 'a cancelled publication does not keep the idea scheduled');
+  assert.equal(rrssIdeaDisplayStatus('approved', [{ status: 'discarded' }]), 'approved');
+});
+
+test('the idea header and the ideas list both badge the derived status', () => {
+  const panel = readFileSync('src/components/rrss/RrssIdeaPanel.tsx', 'utf8');
+  const list = readFileSync('src/components/rrss/RrssPostsSection.tsx', 'utf8');
+  assert.match(panel, /ContentStatusBadge status=\{rrssIdeaDisplayStatus\(idea\.status, socialPosts\)\}/);
+  assert.match(list, /ContentStatusBadge status=\{rrssIdeaDisplayStatus\(item\.status, item\.socialPosts\)\}/);
 });
