@@ -276,7 +276,6 @@ const legacySqliteTables = [
   'ux_snapshots',
   'rrss_channels',
   'monthly_kpis',
-  'ai_insights',
 ] as const;
 
 type LegacySqliteDump = Partial<Record<(typeof legacySqliteTables)[number], Array<Record<string, unknown>>>>;
@@ -367,7 +366,6 @@ async function importLegacySqliteData(db: CoreQueryable) {
     uxSnapshots: 0,
     rrssChannels: 0,
     monthlyKpis: 0,
-    aiInsights: 0,
   };
 
   const orgIdMap = new Map<string, string>();
@@ -621,23 +619,6 @@ async function importLegacySqliteData(db: CoreQueryable) {
       String(row.updated_at ?? nowIso()),
     ]);
     importCounts.monthlyKpis += 1;
-  }
-
-  const insertAiInsight = `INSERT INTO ai_insights (id, client_id, insight_json, created_at) VALUES (${placeholders(4)}) ON CONFLICT(id) DO NOTHING`;
-  for (const row of dump.ai_insights ?? []) {
-    const legacyClientId = String(row.client_id ?? '').trim();
-    const clientId = legacyClientId ? clientIdMap.get(legacyClientId) ?? legacyClientId : String(row.client_id ?? '');
-    if (!clientId) {
-      continue;
-    }
-
-    await coreRun(db, insertAiInsight, [
-      String(row.id ?? crypto.randomUUID()),
-      clientId,
-      String(row.insight_json ?? '{}'),
-      String(row.created_at ?? nowIso()),
-    ]);
-    importCounts.aiInsights += 1;
   }
 
   const importedAnything = Object.values(importCounts).some((count) => count > 0);

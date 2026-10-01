@@ -25,9 +25,11 @@ const EXPECTED_COLUMNS: Record<string, Array<[string, string]>> = {
   monthly_kpis: [['id', 'text'], ['client_id', 'text'], ['department_key', 'text'], ['metric_key', 'text'], ['month_key', 'text'], ['target_value', 'real'], ['target_text', 'text'], ['actual_value', 'real'], ['actual_text', 'text'], ['status', 'text'], ['difference_value', 'real'], ['difference_pct', 'real'], ['notes', 'text'], ['closed_at', 'text'], ['created_by_user_id', 'text'], ['updated_by_user_id', 'text'], ['created_at', 'text'], ['updated_at', 'text']],
   monthly_kpi_cycles: [['client_id', 'text'], ['month_key', 'text'], ['closed_at', 'text'], ['closed_by_user_id', 'text'], ['close_token', 'text'], ['reopened_at', 'text'], ['reopened_by_user_id', 'text'], ['reopen_reason', 'text'], ['created_at', 'text'], ['updated_at', 'text']],
   monthly_kpi_events: [['id', 'text'], ['kpi_id', 'text'], ['client_id', 'text'], ['month_key', 'text'], ['action', 'text'], ['actor_user_id', 'text'], ['reason', 'text'], ['occurred_at', 'text'], ['snapshot_json', 'text']],
-  ai_insights: [['id', 'text'], ['client_id', 'text'], ['insight_json', 'text'], ['created_at', 'text']],
   leads: [['id', 'text'], ['client_id', 'text'], ['integration_id', 'text'], ['source', 'text'], ['name', 'text'], ['email', 'text'], ['phone', 'text'], ['message', 'text'], ['status', 'text'], ['dedupe_key', 'text'], ['raw_payload_json', 'text'], ['received_at', 'text'], ['created_at', 'text'], ['updated_at', 'text']],
 };
+
+// Created by 0004 and dropped again by 0005: only present in a schema where the baseline alone was applied.
+const AI_INSIGHTS_COLUMNS: Array<[string, string]> = [['id', 'text'], ['client_id', 'text'], ['insight_json', 'text'], ['created_at', 'text']];
 
 const EXPECTED_INDEXES = ['idx_client_memberships_user', 'idx_report_runs_client_generated', 'idx_monthly_kpi_events_kpi_time', 'idx_leads_client_received_id', 'idx_leads_integration_delivery'];
 
@@ -35,7 +37,7 @@ const migrationsDirectory = path.resolve(process.cwd(), 'db', 'migrations');
 
 type Queryable = { query(text: string, values?: unknown[]): Promise<{ rows: any[] }> };
 
-async function assertCoreSchema(db: Queryable, schema: string) {
+async function assertCoreSchema(db: Queryable, schema: string, options: { baselineOnly: boolean }) {
   const columns = await db.query(
     `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = $1`,
     [schema],
@@ -45,6 +47,11 @@ async function assertCoreSchema(db: Queryable, schema: string) {
     for (const [column, dataType] of expected) {
       assert.equal(actual.get(`${table}.${column}`), dataType, `${table}.${column}`);
     }
+  }
+
+  for (const [column, dataType] of AI_INSIGHTS_COLUMNS) {
+    if (options.baselineOnly) assert.equal(actual.get(`ai_insights.${column}`), dataType, `ai_insights.${column}`);
+    else assert.equal(actual.get(`ai_insights.${column}`), undefined, `ai_insights.${column} must be dropped by 0005`);
   }
 
   const indexes = await db.query(`SELECT indexname FROM pg_indexes WHERE schemaname = $1`, [schema]);
@@ -67,9 +74,9 @@ test('the core migration is applied by the runner, twice, and creates every core
     assert.deepEqual(third.applied, []);
 
     const schema = (await pool.query('SELECT current_schema() AS schema')).rows[0].schema;
-    await assertCoreSchema(pool, schema);
-    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version = '0004_core_baseline.sql'`);
-    assert.equal(registry.rows.length, 1);
+    await assertCoreSchema(pool, schema, { baselineOnly: false });
+    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql')`);
+    assert.equal(registry.rows.length, 2);
   } finally {
     await closeCorePool();
   }
@@ -85,15 +92,15 @@ test('the baseline SQL builds the full schema on an empty schema and is a no-op 
     await client.query(`CREATE SCHEMA ${schema}`);
     await client.query(`SET search_path TO ${schema}`);
     await client.query(sql);
-    await assertCoreSchema(client, schema);
+    await assertCoreSchema(client, schema, { baselineOnly: true });
     await client.query(sql);
-    await assertCoreSchema(client, schema);
+    await assertCoreSchema(client, schema, { baselineOnly: true });
 
     // A legacy ux_snapshots table (created before most columns existed) is upgraded in place, not recreated.
     await client.query(`DROP TABLE ux_snapshots CASCADE`);
     await client.query(`CREATE TABLE ux_snapshots (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE)`);
     await client.query(sql);
-    await assertCoreSchema(client, schema);
+    await assertCoreSchema(client, schema, { baselineOnly: true });
   } finally {
     try {
       await client.query('SET search_path TO DEFAULT');
