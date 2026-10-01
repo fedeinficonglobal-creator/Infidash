@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { getEditorialPool, withEditorialTransaction } from './postgres.js';
 import { ContentApiError, JOB_KINDS, RRSS_FORMATS, RRSS_NETWORKS, encodeCursor, networkFromInstanceKey, normalizeRrssNetworks, MAX_SOCIAL_MEDIA_ITEMS, normalizeSocialMedia, redactSecrets, requestHash, requireSocialCopy, sanitizeError, type CalendarKind, type SocialMediaItem } from './contracts.js';
-import { assertContentTransition, assertPlanTransition, assertPublicationTransition, assertSocialPostTransition } from './transitions.js';
+import { assertContentTransition, assertPlanTransition, assertPublicationTransition, assertSocialPostTransition, planStatusAfterManualDraft } from './transitions.js';
 import type { ContentStatus, PlanItemStatus, PublicationStatus, SocialPostStatus } from './types.js';
 
 type Filters = { clientId?: string; clientIds?: string[]; from?: string; to?: string; status?: string; format?: string; search?: string; includeUndated?: boolean; cursor?: { at: string; id: string } | null; limit: number };
@@ -618,6 +618,42 @@ export class EditorialApiRepository {
        WHERE sp.plan_item_id=$1 ORDER BY sp.created_at,sp.id`, [planItemId],
     );
     return result.rows.map(socialPostFromRow);
+  }
+
+  /**
+   * «Nuevo borrador»: one manual draft (no AI, no media yet) for an active Postiz account of the
+   * idea's client. At most one draft per (idea, account), whatever its status. A proposed/approved
+   * idea moves to review, since it now has a draft to review.
+   */
+  async createManualSocialPost(input: { clientId: string; planItemId: string; accountId: string; copy: string }, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      const planResult = await client.query(
+        `SELECT p.*,c.kind calendar_kind FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id=p.client_id AND c.id=p.calendar_id
+         WHERE p.client_id=$1 AND p.id=$2 FOR UPDATE OF p`, [input.clientId, input.planItemId],
+      );
+      const item = planResult.rows[0] as any;
+      if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+      if (item.calendar_kind !== 'rrss') throw new ContentApiError(409, 'INVALID_TARGET', 'Solo se pueden crear borradores para ideas de redes sociales');
+      if (item.status === 'generating') throw new ContentApiError(409, 'GENERATION_IN_PROGRESS', 'La idea se está generando con IA; espera a que termine o márcala como fallida antes de crear un borrador');
+      const accountResult = await client.query(
+        `SELECT id,instance_key,label FROM editorial.publishing_accounts WHERE client_id=$1 AND id::text=$2 AND active=TRUE AND provider='postiz' FOR SHARE`,
+        [input.clientId, input.accountId],
+      );
+      const account = accountResult.rows[0] as any;
+      if (!account) throw new ContentApiError(409, 'ACCOUNT_NOT_AVAILABLE', 'La cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
+      const inserted = await client.query(
+        `INSERT INTO editorial.social_posts (id,client_id,plan_item_id,account_id,network,copy,media,status,generation_job_id)
+         VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,'review',NULL)
+         ON CONFLICT (client_id,plan_item_id,account_id) DO NOTHING RETURNING *`,
+        [randomUUID(), input.clientId, input.planItemId, account.id, networkFromInstanceKey(account.instance_key), input.copy],
+      );
+      const row = inserted.rows[0] as any;
+      if (!row) throw new ContentApiError(409, 'SOCIAL_POST_EXISTS', 'Ya existe un borrador para esa cuenta; edítalo');
+      const nextStatus = planStatusAfterManualDraft(item.status);
+      if (nextStatus) await client.query(`UPDATE editorial.plan_items SET status=$3,version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`, [input.clientId, input.planItemId, nextStatus]);
+      await this.auditWith(client, input.clientId, 'social_post', row.id, 'social_post.created', actorId, { manual: true, planItemId: input.planItemId, accountId: account.id, previousPlanStatus: item.status });
+      return socialPostFromRow({ ...row, account_label: account.label });
+    }, this.pool);
   }
 
   /** Editing a draft (copy and/or media) always leaves it in review, so an approved post must be approved again. */

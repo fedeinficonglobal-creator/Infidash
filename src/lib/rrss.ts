@@ -125,3 +125,25 @@ export function removeMediaItem<T>(media: readonly T[], index: number): T[] {
 export function socialScheduleKey(post: Pick<SocialPost, 'id' | 'version'>, desiredScheduledAt: string, externalUrl?: string) {
   return `social-schedule:${post.id}:${post.version}:${desiredScheduledAt}:${externalUrl ?? ''}`;
 }
+
+/**
+ * Accounts offered by «Nuevo borrador»: active Postiz accounts with no draft for the idea yet (any
+ * draft, whatever its status, blocks its account), plus the reason when none is left.
+ */
+export function manualDraftAccounts<T extends { id: string; provider: string; active: boolean }>(accounts: readonly T[], posts: ReadonlyArray<Pick<SocialPost, 'accountId'>>) {
+  const postiz = accounts.filter((account) => account.provider === 'postiz' && account.active);
+  const taken = new Set(posts.map((post) => post.accountId));
+  const available = postiz.filter((account) => !taken.has(account.id));
+  const emptyReason = !postiz.length ? 'No hay cuentas de Postiz activas' : !available.length ? 'Todas las cuentas ya tienen borrador' : null;
+  return { accounts: available, emptyReason };
+}
+
+/** «Subir creatividad para todos» targets: the idea's editable drafts (review or approved), in order. */
+export function bulkUploadTargets<T extends Pick<SocialPost, 'status'>>(posts: readonly T[]): T[] {
+  return posts.filter(canEditPost);
+}
+
+/** The draft's media with `item` appended at the end, or null when it already contains that URL. */
+export function appendMediaItem(media: readonly SocialMedia[], item: SocialMedia): SocialMedia[] | null {
+  return media.some((current) => current.url === item.url) ? null : [...media, item];
+}
