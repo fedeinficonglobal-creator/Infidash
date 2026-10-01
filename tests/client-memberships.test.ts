@@ -8,36 +8,36 @@ test('a new viewer defaults to zero clients, and getSessionByToken reflects gran
   const clientB = createClient({ name: `Membership B ${Date.now()}` });
   const email = `viewer-${Date.now()}@infidash.local`;
 
-  const created = createUser({ email, name: 'Viewer', password: 'temporal-1234', role: 'viewer' });
+  const created = await createUser({ email, name: 'Viewer', password: 'temporal-1234', role: 'viewer' });
   assert.deepEqual(created.clientIds, []);
 
-  const login = authenticateUser(email, 'temporal-1234');
+  const login = await authenticateUser(email, 'temporal-1234');
   assert.ok(login);
-  const session = getSessionByToken(login!.token);
+  const session = await getSessionByToken(login!.token);
   assert.deepEqual(session?.user.clientIds, []);
 
-  updateUserRole(created.id, { clientIds: [clientA.id, clientB.id] });
-  const afterGrant = getSessionByToken(login!.token);
+  await updateUserRole(created.id, { clientIds: [clientA.id, clientB.id] });
+  const afterGrant = await getSessionByToken(login!.token);
   assert.deepEqual(new Set(afterGrant?.user.clientIds), new Set([clientA.id, clientB.id]));
 
-  updateUserRole(created.id, { clientIds: [clientA.id] });
-  const afterRevoke = getSessionByToken(login!.token);
+  await updateUserRole(created.id, { clientIds: [clientA.id] });
+  const afterRevoke = await getSessionByToken(login!.token);
   assert.deepEqual(afterRevoke?.user.clientIds, [clientA.id]);
 });
 
 test('admins always report clientIds:null and promoting a viewer to admin clears memberships', async () => {
   const { createClient, createUser, updateUserRole } = await import('../src/lib/database.js');
   const client = createClient({ name: `Membership Promotion ${Date.now()}` });
-  const viewer = createUser({ email: `promoted-${Date.now()}@infidash.local`, name: 'Promoted', password: 'temporal-1234', role: 'viewer', clientIds: [client.id] });
+  const viewer = await createUser({ email: `promoted-${Date.now()}@infidash.local`, name: 'Promoted', password: 'temporal-1234', role: 'viewer', clientIds: [client.id] });
   assert.deepEqual(viewer.clientIds, [client.id]);
 
-  const admin = createUser({ email: `admin-${Date.now()}@infidash.local`, name: 'Admin', password: 'temporal-1234', role: 'admin' });
+  const admin = await createUser({ email: `admin-${Date.now()}@infidash.local`, name: 'Admin', password: 'temporal-1234', role: 'admin' });
   assert.equal(admin.clientIds, null);
 
-  const promoted = updateUserRole(viewer.id, { role: 'admin' });
+  const promoted = await updateUserRole(viewer.id, { role: 'admin' });
   assert.equal(promoted?.clientIds, null);
 
-  const demoted = updateUserRole(viewer.id, { role: 'viewer' });
+  const demoted = await updateUserRole(viewer.id, { role: 'viewer' });
   assert.deepEqual(demoted?.clientIds, [], 'demoting back to viewer must not resurrect the memberships that existed before promotion');
 });
 

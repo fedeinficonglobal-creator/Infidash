@@ -74,6 +74,7 @@ import { fetchClaritySnapshots } from './src/lib/claritySync.js';
 import { hasClarityMetric } from './src/lib/clarityAvailability.js';
 import { contentRoutes } from './src/server/content/routes.js';
 import { closeEditorialPool, getEditorialPool } from './src/server/content/postgres.js';
+import { closeCorePool } from './src/lib/corePool.js';
 import { runEditorialMigrations } from './src/server/content/migrations.js';
 import { testWordPressConnection } from './src/lib/wordpressProbe.js';
 import { createHealthCheck, registerHealthRoute } from './src/server/health.js';
@@ -165,11 +166,12 @@ const distPath = path.resolve(process.cwd(), 'dist');
 const indexHtmlPath = path.join(distPath, 'index.html');
 
 app.register(contentRoutes, {
-  resolveHumanSession: (token) => getSessionByToken(token) as any,
+  resolveHumanSession: (token) => getSessionByToken(token),
 });
 
 app.addHook('onClose', async () => {
   await closeEditorialPool();
+  await closeCorePool();
 });
 
 type AnyRouteGeneric = { Body: any; Params: any; Querystring: any; Headers: any };
@@ -213,14 +215,14 @@ function getBearerToken(req: AnyFastifyRequest) {
   return null;
 }
 
-function requireSession(req: AnyFastifyRequest, reply: FastifyReply, roles?: UserRole[]) {
+async function requireSession(req: AnyFastifyRequest, reply: FastifyReply, roles?: UserRole[]) {
   const token = getBearerToken(req);
   if (!token) {
     sendError(reply, 401, 'Sesión no autenticada', 'UNAUTHENTICATED');
     return null;
   }
 
-  const session = getSessionByToken(token) as any;
+  const session = await getSessionByToken(token) as any;
   if (!session) {
     sendError(reply, 401, 'Sesión expirada o inválida', 'INVALID_SESSION');
     return null;
@@ -384,7 +386,7 @@ registerHealthRoute(app, createHealthCheck({
   coreCheck: () => { getDatabase().prepare('SELECT 1').get(); },
 }));
 
-app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, (req: AnyFastifyRequest, reply: FastifyReply) => {
+app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, async (req: AnyFastifyRequest, reply: FastifyReply) => {
   const { email, password } = (req.body ?? {}) as any;
 
   if (typeof email !== 'string' || typeof password !== 'string') {
@@ -397,7 +399,7 @@ app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, (req: Any
     return sendError(reply, 429, 'Demasiados intentos. Espera antes de volver a intentarlo.', 'LOGIN_RATE_LIMITED');
   }
 
-  const result = authenticateUser(email, password);
+  const result = await authenticateUser(email, password);
   if (!result) {
     loginThrottle.recordFailure(req.ip);
     return sendError(reply, 401, 'Credenciales inválidas', 'INVALID_CREDENTIALS');
@@ -407,8 +409,8 @@ app.post('/api/auth/login', { config: loginRouteConfig(process.env) }, (req: Any
   return reply.send(result);
 });
 
-app.get('/api/auth/me', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply);
+app.get('/api/auth/me', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply);
   if (!session) {
     return;
   }
@@ -416,38 +418,38 @@ app.get('/api/auth/me', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.send(session);
 });
 
-app.post('/api/auth/logout', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply);
+app.post('/api/auth/logout', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply);
   if (!session) {
     return;
   }
 
   const token = getBearerToken(req);
-  if (token) revokeSessionByToken(token);
+  if (token) await revokeSessionByToken(token);
   return reply.code(204).send();
 });
 
-app.post('/api/auth/logout-all', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply);
+app.post('/api/auth/logout-all', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply);
   if (!session) {
     return;
   }
 
-  revokeAllSessionsForUser(session.user.id);
+  await revokeAllSessionsForUser(session.user.id);
   return reply.code(204).send();
 });
 
-app.get('/api/users', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.get('/api/users', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
 
-  return reply.send({ users: listUsers() });
+  return reply.send({ users: await listUsers() });
 });
 
-app.post('/api/users', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/users', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -461,12 +463,12 @@ app.post('/api/users', (req: AnyFastifyRequest, reply: FastifyReply) => {
   }
 
   const normalizedRole: UserRole = role === 'viewer' ? 'viewer' : 'admin';
-  const user = createUser({ email, name, password, role: normalizedRole, clientIds });
+  const user = await createUser({ email, name, password, role: normalizedRole, clientIds });
   return reply.code(201).send({ user });
 });
 
-app.patch('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.patch('/api/users/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -476,7 +478,7 @@ app.patch('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return sendError(reply, 400, 'clientIds debe ser una lista de texto', 'INVALID_PAYLOAD');
   }
 
-  const updated = updateUserRole((req.params as any).id, {
+  const updated = await updateUserRole((req.params as any).id, {
     role: (req.body as any)?.role === 'viewer' ? 'viewer' : (req.body as any)?.role === 'admin' ? 'admin' : undefined,
     active: typeof (req.body as any)?.active === 'boolean' ? (req.body as any).active : undefined,
     name: typeof (req.body as any)?.name === 'string' ? (req.body as any).name : undefined,
@@ -490,8 +492,8 @@ app.patch('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.send({ user: updated });
 });
 
-app.delete('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.delete('/api/users/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -500,17 +502,17 @@ app.delete('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
     return sendError(reply, 400, 'No puedes eliminar tu propia cuenta', 'SELF_DELETE_FORBIDDEN');
   }
 
-  const userToDelete = (listUsers() as any[]).find((user: any) => user.id === (req.params as any).id);
+  const userToDelete = ((await listUsers()) as any[]).find((user: any) => user.id === (req.params as any).id);
   if (!userToDelete) {
     return sendError(reply, 404, 'Usuario no encontrado', 'NOT_FOUND');
   }
 
-  const adminCount = listUsers().filter((user) => user.role === 'admin').length;
+  const adminCount = (await listUsers()).filter((user) => user.role === 'admin').length;
   if (userToDelete.role === 'admin' && adminCount <= 1) {
     return sendError(reply, 409, 'No puedes eliminar el último administrador', 'LAST_ADMIN_FORBIDDEN');
   }
 
-  const deleted = deleteUser((req.params as any).id);
+  const deleted = await deleteUser((req.params as any).id);
   if (!deleted) {
     return sendError(reply, 404, 'Usuario no encontrado', 'NOT_FOUND');
   }
@@ -518,8 +520,8 @@ app.delete('/api/users/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.code(204).send();
 });
 
-app.get('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -533,8 +535,8 @@ app.get('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.send({ clients });
 });
 
-app.get('/api/clients/:slug', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:slug', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -550,8 +552,8 @@ app.get('/api/clients/:slug', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.send({ client });
 });
 
-app.get('/api/clients/:clientId/dashboard', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/dashboard', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -576,8 +578,8 @@ app.get('/api/clients/:clientId/dashboard', (req: AnyFastifyRequest, reply: Fast
   });
 });
 
-app.post('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/clients', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -598,8 +600,8 @@ app.post('/api/clients', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.code(201).send({ client });
 });
 
-app.patch('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.patch('/api/clients/:clientId', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -632,8 +634,8 @@ app.patch('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyReply
   return reply.send({ client });
 });
 
-app.delete('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.delete('/api/clients/:clientId', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -646,8 +648,8 @@ app.delete('/api/clients/:clientId', (req: AnyFastifyRequest, reply: FastifyRepl
   return reply.code(204).send();
 });
 
-app.get('/api/clients/:clientId/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/integrations', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -660,8 +662,8 @@ app.get('/api/clients/:clientId/integrations', (req: AnyFastifyRequest, reply: F
   return reply.send({ integrations: clientIntegrations });
 });
 
-app.post('/api/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/integrations', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -694,8 +696,8 @@ app.post('/api/integrations', (req: AnyFastifyRequest, reply: FastifyReply) => {
   }
 });
 
-app.patch('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.patch('/api/integrations/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -726,7 +728,7 @@ app.patch('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply)
 });
 
 app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -832,7 +834,7 @@ app.post('/api/integrations/:id/test', async (req: AnyFastifyRequest, reply: Fas
 });
 
 app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
@@ -868,7 +870,7 @@ app.get('/api/integrations/:id/woocommerce/sales-preview', async (req: AnyFastif
 });
 
 app.post('/api/integrations/:id/woocommerce/sales-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['admin'])) return;
+  if (!await requireSession(req, reply, ['admin'])) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'woocommerce') return sendError(reply, 404, 'Integración WooCommerce no encontrada', 'NOT_FOUND');
@@ -893,8 +895,8 @@ app.post('/api/integrations/:id/woocommerce/sales-sync', async (req: AnyFastifyR
   }
 });
 
-app.get('/api/integrations/:id/woocommerce/sales-snapshot', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/integrations/:id/woocommerce/sales-snapshot', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'private, no-store');
   const integration = getIntegrationById((req.params as any).id);
@@ -915,14 +917,14 @@ app.get('/api/integrations/:id/woocommerce/sales-snapshot', (req: AnyFastifyRequ
   }
 });
 
-app.get('/api/integrations/ga4/service-account', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+app.get('/api/integrations/ga4/service-account', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!await requireSession(req, reply, ['viewer', 'admin'])) return;
   if (!ga4Service) return sendError(reply, 503, 'GA4 no está configurado en el servidor', 'GA4_NOT_CONFIGURED');
   return reply.send({ email: ga4Service.clientEmail });
 });
 
 app.get('/api/integrations/:id/ga4/traffic-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
@@ -945,7 +947,7 @@ app.get('/api/integrations/:id/ga4/traffic-preview', async (req: AnyFastifyReque
 });
 
 app.post('/api/integrations/:id/ga4/traffic-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['admin'])) return;
+  if (!await requireSession(req, reply, ['admin'])) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'ga4') return sendError(reply, 404, 'Integración GA4 no encontrada', 'NOT_FOUND');
@@ -969,8 +971,8 @@ app.post('/api/integrations/:id/ga4/traffic-sync', async (req: AnyFastifyRequest
   }
 });
 
-app.get('/api/integrations/:id/ga4/traffic-snapshot', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/integrations/:id/ga4/traffic-snapshot', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'private, no-store');
   const integration = getIntegrationById((req.params as any).id);
@@ -992,14 +994,14 @@ app.get('/api/integrations/:id/ga4/traffic-snapshot', (req: AnyFastifyRequest, r
   });
 });
 
-app.get('/api/integrations/google-ads/manager-account', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['viewer', 'admin'])) return;
+app.get('/api/integrations/google-ads/manager-account', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!await requireSession(req, reply, ['viewer', 'admin'])) return;
   if (!googleAdsService) return sendError(reply, 503, 'Google Ads no está configurado en el servidor', 'GOOGLE_ADS_NOT_CONFIGURED');
   return reply.send({ loginCustomerId: googleAdsService.loginCustomerId });
 });
 
 app.get('/api/integrations/:id/google-ads/campaigns-preview', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
@@ -1022,7 +1024,7 @@ app.get('/api/integrations/:id/google-ads/campaigns-preview', async (req: AnyFas
 });
 
 app.post('/api/integrations/:id/google-ads/campaigns-sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['admin'])) return;
+  if (!await requireSession(req, reply, ['admin'])) return;
   reply.header('Cache-Control', 'no-store');
   const integration = getIntegrationById((req.params as any).id);
   if (!integration || integration.provider !== 'google_ads') return sendError(reply, 404, 'Integración Google Ads no encontrada', 'NOT_FOUND');
@@ -1043,8 +1045,8 @@ app.post('/api/integrations/:id/google-ads/campaigns-sync', async (req: AnyFasti
   }
 });
 
-app.get('/api/integrations/:id/google-ads/campaigns-snapshot', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/integrations/:id/google-ads/campaigns-snapshot', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   reply.header('Cache-Control', 'private, no-store');
   const integration = getIntegrationById((req.params as any).id);
@@ -1065,7 +1067,7 @@ app.get('/api/integrations/:id/google-ads/campaigns-snapshot', (req: AnyFastifyR
 });
 
 app.post('/api/integrations/:id/sync', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1164,8 +1166,8 @@ app.post('/api/public/leads/:token', { config: leadsRouteConfig(process.env) }, 
   return reply.code(result.duplicate ? 200 : 201).send({ ok: true, leadId: result.lead.id, duplicate: result.duplicate });
 });
 
-app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/leads', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -1186,8 +1188,8 @@ app.get('/api/leads', (req: AnyFastifyRequest, reply: FastifyReply) => {
 });
 
 for (const [action, active] of [['disable', false], ['enable', true]] as const) {
-  app.post(`/api/integrations/:id/${action}`, (req: AnyFastifyRequest, reply: FastifyReply) => {
-    if (!requireSession(req, reply, ['admin'])) return;
+  app.post(`/api/integrations/:id/${action}`, async (req: AnyFastifyRequest, reply: FastifyReply) => {
+    if (!await requireSession(req, reply, ['admin'])) return;
     const integration = setClientIntegrationActive(String((req.params as any).id), active);
     if (!integration) return sendError(reply, 404, 'Integración no encontrada', 'NOT_FOUND');
     return reply.send({ integration });
@@ -1218,15 +1220,15 @@ function startMonthlyKpiCloseScheduler() {
   schedule(Math.min(10_000, nextMadridCloseInstant(new Date()).getTime() - Date.now()));
 }
 
-app.post('/api/integrations/:id/rotate-webhook', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['admin'])) return;
+app.post('/api/integrations/:id/rotate-webhook', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!await requireSession(req, reply, ['admin'])) return;
   const integration = rotateClientIntegrationWebhook(String((req.params as any).id));
   if (!integration) return sendError(reply, 404, 'Webhook de WordPress no encontrado', 'NOT_FOUND');
   return reply.send({ integration });
 });
 
-app.delete('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.delete('/api/integrations/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1239,8 +1241,8 @@ app.delete('/api/integrations/:id', (req: AnyFastifyRequest, reply: FastifyReply
   return reply.code(204).send();
 });
 
-app.get('/api/daily-stats', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/daily-stats', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -1256,8 +1258,8 @@ app.get('/api/daily-stats', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.send({ stats: listDailyStats(undefined, { clientIds: scope }) });
 });
 
-app.get('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -1273,8 +1275,8 @@ app.get('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) =>
   return reply.send({ stat });
 });
 
-app.post('/api/daily-stats', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/daily-stats', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1301,8 +1303,8 @@ app.post('/api/daily-stats', (req: AnyFastifyRequest, reply: FastifyReply) => {
   return reply.code(201).send({ stat });
 });
 
-app.put('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.put('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1329,8 +1331,8 @@ app.put('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) =>
   return reply.send({ stat });
 });
 
-app.delete('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.delete('/api/daily-stats/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1343,8 +1345,8 @@ app.delete('/api/daily-stats/:id', (req: AnyFastifyRequest, reply: FastifyReply)
   return reply.code(204).send();
 });
 
-app.get('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/ux-snapshots', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -1355,8 +1357,8 @@ app.get('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: F
   return reply.send({ snapshots: listUxSnapshots((req.params as any).clientId) });
 });
 
-app.post('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/clients/:clientId/ux-snapshots', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1389,8 +1391,8 @@ app.post('/api/clients/:clientId/ux-snapshots', (req: AnyFastifyRequest, reply: 
   return reply.code(201).send({ snapshot });
 });
 
-app.get('/api/clients/:clientId/operational-plans/:domain', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   const { clientId, domain } = req.params as { clientId: string; domain: unknown };
   const periodKey = (req.query as any)?.period;
@@ -1400,8 +1402,8 @@ app.get('/api/clients/:clientId/operational-plans/:domain', (req: AnyFastifyRequ
   return reply.send({ plan: getOperationalPlan(clientId, domain, periodKey) });
 });
 
-app.put('/api/clients/:clientId/operational-plans/:domain', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.put('/api/clients/:clientId/operational-plans/:domain', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) return;
   const { clientId, domain } = req.params as { clientId: string; domain: unknown };
   const { periodKey, version, rows } = (req.body ?? {}) as any;
@@ -1417,8 +1419,8 @@ app.put('/api/clients/:clientId/operational-plans/:domain', (req: AnyFastifyRequ
   return reply.send({ plan: saved });
 });
 
-app.get('/api/clients/:clientId/rrss-channels', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/rrss-channels', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -1429,8 +1431,8 @@ app.get('/api/clients/:clientId/rrss-channels', (req: AnyFastifyRequest, reply: 
   return reply.send({ channels: listRrssChannels((req.params as any).clientId) });
 });
 
-app.post('/api/clients/:clientId/rrss-channels', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/clients/:clientId/rrss-channels', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1455,8 +1457,8 @@ app.post('/api/clients/:clientId/rrss-channels', (req: AnyFastifyRequest, reply:
   return reply.code(201).send({ channel });
 });
 
-app.put('/api/rrss-channels/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.put('/api/rrss-channels/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1477,8 +1479,8 @@ app.put('/api/rrss-channels/:id', (req: AnyFastifyRequest, reply: FastifyReply) 
   return reply.send({ channel });
 });
 
-app.get('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/monthly-kpis', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
@@ -1491,7 +1493,7 @@ app.get('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: F
 });
 
 app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
@@ -1512,8 +1514,8 @@ app.get('/api/clients/:clientId/reports/daily.pdf', async (req: AnyFastifyReques
   }
 });
 
-app.get('/api/clients/:clientId/report-runs', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
@@ -1527,7 +1529,7 @@ app.get('/api/clients/:clientId/report-runs', (req: AnyFastifyRequest, reply: Fa
 });
 
 app.post('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
@@ -1544,8 +1546,8 @@ app.post('/api/clients/:clientId/report-runs', async (req: AnyFastifyRequest, re
   }
 });
 
-app.get('/api/clients/:clientId/report-runs/:id/daily.pdf', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/report-runs/:id/daily.pdf', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
@@ -1558,7 +1560,7 @@ app.get('/api/clients/:clientId/report-runs/:id/daily.pdf', (req: AnyFastifyRequ
 });
 
 app.post('/api/clients/:clientId/report-runs/:id/send', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
@@ -1576,16 +1578,16 @@ app.post('/api/clients/:clientId/report-runs/:id/send', async (req: AnyFastifyRe
   return reply.send({ run: getReportRun(clientId, run.id) });
 });
 
-app.get('/api/clients/:clientId/monthly-kpi-cycles', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/clients/:clientId/monthly-kpi-cycles', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) return;
   const clientId = String((req.params as any).clientId);
   if (!requireClientAccess(reply, session, clientId)) return;
   return reply.send({ cycles: listMonthlyKpiCycles(clientId) });
 });
 
-app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/clients/:clientId/monthly-kpis', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1626,8 +1628,8 @@ app.post('/api/clients/:clientId/monthly-kpis', (req: AnyFastifyRequest, reply: 
   return reply.code(201).send({ kpi });
 });
 
-app.put('/api/monthly-kpis/:id', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.put('/api/monthly-kpis/:id', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1668,8 +1670,8 @@ app.put('/api/monthly-kpis/:id', (req: AnyFastifyRequest, reply: FastifyReply) =
   return reply.send({ kpi });
 });
 
-app.post('/api/monthly-kpis/:id/close', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/monthly-kpis/:id/close', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1682,8 +1684,8 @@ app.post('/api/monthly-kpis/:id/close', (req: AnyFastifyRequest, reply: FastifyR
   return reply.send({ kpi: getMonthlyKpiById(existing.id) });
 });
 
-app.post('/api/monthly-kpis/:id/reopen', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+app.post('/api/monthly-kpis/:id/reopen', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) return;
   const reason = (req.body as any)?.reason;
   if (typeof reason !== 'string' || !reason.trim() || reason.trim().length > 500) {
@@ -1700,15 +1702,15 @@ app.post('/api/monthly-kpis/:id/reopen', (req: AnyFastifyRequest, reply: Fastify
   }
 });
 
-app.get('/api/monthly-kpis/:id/events', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  if (!requireSession(req, reply, ['admin'])) return;
+app.get('/api/monthly-kpis/:id/events', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  if (!await requireSession(req, reply, ['admin'])) return;
   const id = String((req.params as any).id);
   if (!getMonthlyKpiById(id)) return sendError(reply, 404, 'KPI no encontrado', 'NOT_FOUND');
   return reply.send({ events: listMonthlyKpiEvents(id) });
 });
 
 app.post('/api/admin/backup', async (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['admin']);
+  const session = await requireSession(req, reply, ['admin']);
   if (!session) {
     return;
   }
@@ -1722,8 +1724,8 @@ app.post('/api/admin/backup', async (req: AnyFastifyRequest, reply: FastifyReply
   }
 });
 
-app.get('/api/dashboard/summary', (req: AnyFastifyRequest, reply: FastifyReply) => {
-  const session = requireSession(req, reply, ['viewer', 'admin']);
+app.get('/api/dashboard/summary', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
     return;
   }
