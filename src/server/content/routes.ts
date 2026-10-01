@@ -1,9 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import fastifyMultipart from '@fastify/multipart';
 import { EditorialApiRepository } from './apiRepository.js';
 import { getEditorialPool } from './postgres.js';
 import { authenticateServiceToken, serviceCan, type ServicePrincipal } from './serviceAuth.js';
-import { CALENDAR_STATUSES, CONTENT_STATUSES, ContentApiError, JOB_KINDS, PLAN_STATUSES, PUBLICATION_STATUSES, RRSS_FORMATS, assertEnum, decodeCursor, normalizeRrssNetworks, normalizeSocialMedia, optionalString, parseLimit, redactSecrets, requireObject, requirePositiveVersion, requireSocialCopy, requireString, sanitizeError } from './contracts.js';
+import { CALENDAR_STATUSES, CONTENT_STATUSES, ContentApiError, JOB_KINDS, PLAN_STATUSES, PUBLICATION_STATUSES, RRSS_FORMATS, assertEnum, decodeCursor, normalizeRrssNetworks, MAX_SOCIAL_MEDIA_ITEMS, normalizeSocialMedia, optionalString, parseLimit, redactSecrets, requireObject, requirePositiveVersion, requireSocialCopy, requireString, sanitizeError } from './contracts.js';
 import { canAccessClient } from '../../lib/auth.js';
+import { createPostizUploader, postizConfigFromEnv } from './postizUpload.js';
+import { MAX_CREATIVE_BYTES, readCreative } from './creativeUpload.js';
 
 type HumanSession = { user: { id: string; role: 'admin' | 'viewer'; clientIds: string[] | null } };
 type Request = FastifyRequest<{ Body: any; Params: any; Querystring: any; Headers: any }>;
@@ -15,6 +18,8 @@ export interface ContentRoutesOptions {
   repository?: EditorialApiRepository;
   resolveHumanSession: (token: string) => HumanSession | null | Promise<HumanSession | null>;
   authenticateService?: (token: string) => ServicePrincipal | null | Promise<ServicePrincipal | null>;
+  /** Postiz upload wiring; env defaults to process.env (read per request) and fetchImpl to fetch. Injectable for tests. */
+  postiz?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch };
 }
 
 function bearer(request: Request) {
@@ -70,6 +75,8 @@ function listFilters(query: Record<string, any>) {
 export async function contentRoutes(app: FastifyInstance, options: ContentRoutesOptions) {
   const repository = options.repository ?? new EditorialApiRepository();
   const serviceAuthenticator = options.authenticateService ?? ((token: string) => authenticateServiceToken(getEditorialPool(), token));
+  // Scoped to this plugin: only the creative upload route consumes multipart bodies; JSON routes are unaffected.
+  await app.register(fastifyMultipart, { limits: { fileSize: MAX_CREATIVE_BYTES, files: 1, fields: 0, parts: 1 } });
 
   async function requireHuman(request: Request, role: 'viewer' | 'admin' = 'viewer') {
     const token = humanToken(request);
@@ -250,6 +257,25 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
       idempotencyKey: requireString(body.idempotencyKey, 'idempotencyKey', 300),
     }, session.user.id);
     return reply.code(scheduled.replayed ? 200 : 202).send(scheduled);
+  }));
+
+  app.post('/api/social-posts/:id/media', route(async (request, reply) => {
+    const { session, id, post } = await socialPostForAdmin(request);
+    // Cheap checks first so a refused upload never reaches Postiz; appendSocialPostMedia re-checks under lock.
+    if (post.status === 'scheduled' || post.status === 'discarded') throw new ContentApiError(409, 'INVALID_TRANSITION', 'No se pueden añadir creatividades a un post programado o descartado');
+    if (Array.isArray(post.media) && post.media.length >= MAX_SOCIAL_MEDIA_ITEMS) throw new ContentApiError(409, 'MEDIA_LIMIT', `El post ya tiene el máximo de ${MAX_SOCIAL_MEDIA_ITEMS} archivos`);
+    const config = postizConfigFromEnv(options.postiz?.env ?? process.env);
+    if (!config) throw new ContentApiError(503, 'POSTIZ_NOT_CONFIGURED', 'La subida de creatividades no está disponible: falta configurar Postiz (POSTIZ_API_URL y POSTIZ_API_KEY) en el servidor');
+    if (!request.isMultipart()) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Envía el archivo como multipart/form-data en el campo file');
+    const part = await request.file();
+    if (!part || part.fieldname !== 'file') {
+      part?.file.resume();
+      throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Falta el archivo en el campo file');
+    }
+    const creative = await readCreative(part);
+    const uploaded = await createPostizUploader(config, options.postiz?.fetchImpl ?? fetch)({ buffer: creative.buffer, filename: creative.name, mimetype: creative.mimetype });
+    const socialPost = await repository.appendSocialPostMedia(id, { url: uploaded.url, type: creative.kind, name: creative.name }, session.user.id);
+    return reply.send({ socialPost });
   }));
 
   app.get('/api/content/items/:id', route(async (request, reply) => {

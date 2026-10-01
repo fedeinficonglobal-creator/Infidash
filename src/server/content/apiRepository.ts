@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { getEditorialPool, withEditorialTransaction } from './postgres.js';
-import { ContentApiError, JOB_KINDS, RRSS_FORMATS, RRSS_NETWORKS, encodeCursor, networkFromInstanceKey, normalizeRrssNetworks, normalizeSocialMedia, redactSecrets, requestHash, requireSocialCopy, sanitizeError, type CalendarKind } from './contracts.js';
+import { ContentApiError, JOB_KINDS, RRSS_FORMATS, RRSS_NETWORKS, encodeCursor, networkFromInstanceKey, normalizeRrssNetworks, MAX_SOCIAL_MEDIA_ITEMS, normalizeSocialMedia, redactSecrets, requestHash, requireSocialCopy, sanitizeError, type CalendarKind, type SocialMediaItem } from './contracts.js';
 import { assertContentTransition, assertPlanTransition, assertPublicationTransition, assertSocialPostTransition } from './transitions.js';
 import type { ContentStatus, PlanItemStatus, PublicationStatus, SocialPostStatus } from './types.js';
 
@@ -159,6 +159,7 @@ function socialPostFromRow(row: any) {
     media: Array.isArray(row.media) ? row.media : [],
     status: row.status,
     publicationId: row.publication_id ?? null,
+    ...(row.publication_status !== undefined ? { publicationStatus: row.publication_status ?? null, publicationScheduledAt: row.publication_scheduled_at ?? null } : {}),
     generationJobId: row.generation_job_id ?? null,
     version: row.version,
     createdAt: row.created_at,
@@ -609,14 +610,16 @@ export class EditorialApiRepository {
 
   async listSocialPosts(planItemId: string) {
     const result = await this.pool.query(
-      `SELECT sp.*,a.label account_label FROM editorial.social_posts sp JOIN editorial.publishing_accounts a ON a.client_id=sp.client_id AND a.id=sp.account_id
+      `SELECT sp.*,a.label account_label,pub.status publication_status,pub.confirmed_scheduled_at publication_scheduled_at
+       FROM editorial.social_posts sp JOIN editorial.publishing_accounts a ON a.client_id=sp.client_id AND a.id=sp.account_id
+       LEFT JOIN editorial.publications pub ON pub.client_id=sp.client_id AND pub.id=sp.publication_id
        WHERE sp.plan_item_id=$1 ORDER BY sp.created_at,sp.id`, [planItemId],
     );
     return result.rows.map(socialPostFromRow);
   }
 
   /** Editing a draft (copy and/or media) always leaves it in review, so an approved post must be approved again. */
-  async patchSocialPost(id: string, input: { copy?: string; media?: Array<{ url: string }>; expectedVersion: number }, actorId: string) {
+  async patchSocialPost(id: string, input: { copy?: string; media?: SocialMediaItem[]; expectedVersion: number }, actorId: string) {
     if (input.copy === undefined && input.media === undefined) throw new ContentApiError(400, 'INVALID_PAYLOAD', 'Indica copy o media');
     return withEditorialTransaction(async (client) => {
       const row = await this.lockSocialPost(client, id, input.expectedVersion);
@@ -626,6 +629,25 @@ export class EditorialApiRepository {
         [id, input.copy ?? null, input.media === undefined ? null : json(input.media)],
       );
       await this.auditWith(client, row.client_id, 'social_post', id, 'social_post.updated', actorId, { previousStatus: row.status, previousVersion: row.version });
+      return socialPostFromRow(result.rows[0]);
+    }, this.pool);
+  }
+
+  /**
+   * Appends one uploaded creative (already stored in Postiz) to a draft. Like any edit it leaves the
+   * draft in review and bumps its version; scheduled/discarded drafts and full galleries are refused.
+   */
+  async appendSocialPostMedia(id: string, item: SocialMediaItem, actorId: string) {
+    return withEditorialTransaction(async (client) => {
+      const row = await this.lockSocialPost(client, id, undefined);
+      assertSocialPostTransition(row.status as SocialPostStatus, 'review');
+      const media = Array.isArray(row.media) ? row.media : [];
+      if (media.length >= MAX_SOCIAL_MEDIA_ITEMS) throw new ContentApiError(409, 'MEDIA_LIMIT', `El post ya tiene el máximo de ${MAX_SOCIAL_MEDIA_ITEMS} archivos`);
+      const result = await client.query(
+        `UPDATE editorial.social_posts SET media=$2::jsonb,status='review',version=version+1,updated_at=now() WHERE id=$1 RETURNING *`,
+        [id, json([...media, item])],
+      );
+      await this.auditWith(client, row.client_id, 'social_post', id, 'social_post.media_added', actorId, { previousStatus: row.status, previousVersion: row.version, url: item.url, type: item.type ?? null });
       return socialPostFromRow(result.rows[0]);
     }, this.pool);
   }
@@ -678,7 +700,7 @@ export class EditorialApiRepository {
       const post = locked.rows[0] as any;
       if (!post) throw new ContentApiError(404, 'NOT_FOUND', 'Post no encontrado');
       if (post.version !== input.expectedVersion) throw new ContentApiError(409, 'STALE_VERSION', 'El post fue modificado antes de programarse');
-      if (post.status !== 'approved') throw new ContentApiError(409, 'INVALID_TRANSITION', 'Solo se pueden programar posts aprobados');
+      await this.assertSchedulable(client, input.clientId, post, actorId);
       const content = await this.ensureRrssContent(client, input.clientId, plan, post, actorId);
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`publication:${content.id}:${post.account_id}:primary`]);
       const accountResult = await client.query("SELECT * FROM editorial.publishing_accounts WHERE client_id=$1 AND id=$2 AND active=TRUE AND provider='postiz' FOR SHARE", [input.clientId, post.account_id]);
@@ -690,6 +712,27 @@ export class EditorialApiRepository {
       await this.auditWith(client, input.clientId, 'social_post', id, 'social_post.scheduled', actorId, { publicationId, jobId: (queued.job as any).id, desiredScheduledAt: input.desiredScheduledAt });
       return { socialPost: socialPostFromRow(updated.rows[0]), ...queued, replayed: false };
     }, this.pool);
+  }
+
+  /**
+   * An approved draft can be scheduled; so can a scheduled one whose publication was cancelled or
+   * failed (re-queued into the next occurrence slot). A failed publication is closed as cancelled
+   * first, so the occurrence chain only keeps cancelled rows behind the new one.
+   */
+  private async assertSchedulable(client: PoolClient, clientId: string, post: any, actorId: string) {
+    if (post.status === 'approved') return;
+    if (post.status === 'scheduled' && post.publication_id) {
+      const current = await client.query('SELECT id,status FROM editorial.publications WHERE client_id=$1 AND id=$2 FOR UPDATE', [clientId, post.publication_id]);
+      const publication = current.rows[0] as any;
+      if (!publication || publication.status === 'cancelled') return;
+      if (publication.status === 'failed') {
+        assertPublicationTransition('failed', 'cancelled');
+        await client.query(`UPDATE editorial.publications SET status='cancelled',version=version+1,updated_at=now() WHERE client_id=$1 AND id=$2`, [clientId, publication.id]);
+        await this.auditWith(client, clientId, 'publication', publication.id, 'publication.superseded', actorId, { previousStatus: 'failed', socialPostId: post.id });
+        return;
+      }
+    }
+    throw new ContentApiError(409, 'INVALID_TRANSITION', 'Solo se pueden programar posts aprobados o con la publicación cancelada o fallida');
   }
 
   /** The approved system content every publication of an RRSS idea points at, created on the first schedule. */

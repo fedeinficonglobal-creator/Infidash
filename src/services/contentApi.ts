@@ -121,10 +121,11 @@ export function camelize<T>(value: unknown): T {
   return value as T;
 }
 
-async function request<T>(path: string, token: string, options: RequestInit = {}) {
+/** Authenticated JSON request; a FormData body is sent as-is so the browser sets the multipart boundary. */
+export async function request<T>(path: string, token: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers ?? {});
   headers.set('Authorization', `Bearer ${token}`);
-  if (options.body) headers.set('Content-Type', 'application/json');
+  if (options.body && !(typeof FormData !== 'undefined' && options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const response = await fetch(path, { ...options, headers });
   if (response.status === 204) return undefined as T;
   const payload = await response.json().catch(() => null) as { error?: string; code?: string } | null;
@@ -132,7 +133,7 @@ async function request<T>(path: string, token: string, options: RequestInit = {}
   return camelize<T>(payload);
 }
 
-function queryString(input: Record<string, string | number | boolean | null | undefined>) {
+export function queryString(input: Record<string, string | number | boolean | null | undefined>) {
   const query = new URLSearchParams();
   Object.entries(input).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== '') query.set(key, String(value)); });
   const encoded = query.toString();

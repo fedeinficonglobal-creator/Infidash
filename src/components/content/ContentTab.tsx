@@ -8,13 +8,10 @@ import { canCancelPublication, canReschedulePublication, canRunJob, contentRefre
 import type { PlanItem } from '../../services/contentApi.js';
 import { cn } from '../../lib/utils.js';
 import { ContentStatusBadge } from './ContentStatusBadge.js';
+import { Button, Field } from './controls.js';
 import { EditorialJobsPanel } from './EditorialJobsPanel.js';
 
 const PLAN_STATUSES = ['proposed', 'approved', 'generating', 'review', 'ready', 'generation_failed', 'archived'];
-
-function Button({ children, className, ...props }: { children?: unknown; className?: string; [key: string]: unknown }) {
-  return <button {...props} className={cn('inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-primary/40', className)}>{children}</button>;
-}
 
 function SummaryCards() {
   const summary = useContentStore((state) => state.summary);
@@ -114,11 +111,6 @@ function Timeline({ content, publications, jobs, item }: { content: ReturnType<t
   const events = [...(content?.revisions ?? []).map((revision) => ({ id: revision.id, at: revision.createdAt, title: `Revisión ${revision.revisionNumber}`, detail: revision.authorType === 'user' ? 'Edición manual' : 'Generada por automatización' })), ...jobsForTimeline(jobs, item.id, content?.id ?? null, publications.map((publication) => publication.id)).map((job) => ({ id: job.id, at: job.updatedAt, title: statusLabel(job.status), detail: `Trabajo ${job.kind}` }))].sort((a, b) => b.at.localeCompare(a.at));
   if (!events.length) return <Empty label="Sin actividad registrada" />;
   return <div className="space-y-0">{events.map((event) => <div key={event.id} className="relative border-l-2 border-slate-200 pb-5 pl-5"><span className="absolute -left-2 top-0 size-3.5 rounded-full border-2 border-white bg-brand-primary" /><p className="text-sm font-bold text-slate-800">{event.title}</p><p className="text-xs text-slate-500">{event.detail} · {formatEditorialDate(event.at)}</p></div>)}</div>;
-}
-
-function Field({ label, value, onChange, disabled, multiline, rows = 4, type = 'text', required, maxLength }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; multiline?: boolean; rows?: number; type?: string; required?: boolean; maxLength?: number }) {
-  const className = 'mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 disabled:bg-slate-100 disabled:text-slate-500';
-  return <label className="block text-xs font-bold text-slate-500">{label}{multiline ? <textarea rows={rows} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required} maxLength={maxLength} className={className} /> : <input type={type} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} required={required} maxLength={maxLength} className={className} />}</label>;
 }
 
 function CreatePanel({ onClose }: { onClose: () => void }) {
