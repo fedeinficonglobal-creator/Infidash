@@ -1,4 +1,5 @@
 import { nowIso } from './auth.js';
+import { UserFacingError } from './userFacingError.js';
 
 const DEFAULT_CLARITY_EXPORT_URL = 'https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1';
 
@@ -88,7 +89,7 @@ function parseSnapshotItem(item: unknown, fallbackDate: string): ParsedClaritySn
   const metrics = extractCandidateObject(pickValue(record, ['metrics', 'summary', 'data', 'values']));
   const legacyFields = ['sessions', 'sessionCount', 'visitors', 'uniqueVisitors', 'pageViews', 'rageClicks', 'deadClicks', 'scrollDepthAvg'];
   if (!legacyFields.some((field) => record[field] !== undefined || metrics[field] !== undefined)) {
-    throw new Error('La exportación de Clarity no contiene métricas reconocibles');
+    throw new UserFacingError('La exportación de Clarity no contiene métricas reconocibles');
   }
 
   const payload = Object.keys(record).length > 0 ? record : extractCandidateObject(metrics);
@@ -173,7 +174,7 @@ function normalizeClarityExport(items: unknown[], clientId: string, snapshotDate
   for (const item of items) {
     const record = extractCandidateObject(item);
     if (typeof record.metricName !== 'string' || !Array.isArray(record.information)) {
-      throw new Error('La exportación de Clarity tiene un formato de métricas desconocido');
+      throw new UserFacingError('La exportación de Clarity tiene un formato de métricas desconocido');
     }
     const rows = record.information.map((row) => extractCandidateObject(row));
     const name = record.metricName.toLowerCase();
@@ -182,7 +183,7 @@ function normalizeClarityExport(items: unknown[], clientId: string, snapshotDate
 
   const sessions = sumClarityMetric(metrics.get('traffic') ?? [], 'totalSessionCount');
   if (sessions === null) {
-    throw new Error('La exportación de Clarity no contiene sesiones de Traffic válidas');
+    throw new UserFacingError('La exportación de Clarity no contiene sesiones de Traffic válidas');
   }
 
   const rageClicks = sumClarityMetric(metrics.get('rageclickcount') ?? [], 'subTotal');
@@ -302,7 +303,7 @@ export async function fetchClaritySnapshots(
 
     const responseText = await response.text();
     if (!response.ok) {
-      throw new Error(`Análisis/UX respondió ${response.status}: ${responseText.slice(0, 200) || 'sin cuerpo'}`);
+      throw new UserFacingError(`Análisis/UX respondió ${response.status}: ${responseText.slice(0, 200) || 'sin cuerpo'}`);
     }
 
     let payload: unknown = null;
@@ -315,7 +316,7 @@ export async function fetchClaritySnapshots(
     }
 
     if (!getPayloadItems(payload).length) {
-      throw new Error('Clarity devolvió una exportación vacía; no se ha guardado un snapshot');
+      throw new UserFacingError('Clarity devolvió una exportación vacía; no se ha guardado un snapshot');
     }
 
     return normalizeClaritySnapshots(payload, context.clientId);

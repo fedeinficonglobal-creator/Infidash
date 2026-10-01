@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { UserFacingError } from './userFacingError.js';
 
 export type LeadFormProvider = 'fluent_forms' | 'contact_form_7';
 
@@ -23,15 +24,15 @@ export function readLeadDeliveryIdentity(payload: Record<string, unknown>): Lead
   const formId = payload.infidash_form_id;
   if (provider === undefined && deliveryId === undefined && formId === undefined) return null;
   if (provider !== 'fluent_forms' && provider !== 'contact_form_7') {
-    throw new Error('infidash_provider debe ser fluent_forms o contact_form_7');
+    throw new UserFacingError('infidash_provider debe ser fluent_forms o contact_form_7');
   }
   const normalizedDeliveryId = normalizeIdentifier(deliveryId);
   if (!normalizedDeliveryId) {
-    throw new Error('infidash_delivery_id debe ser un identificador de envío válido');
+    throw new UserFacingError('infidash_delivery_id debe ser un identificador de envío válido');
   }
   const normalizedFormId = normalizeIdentifier(formId);
   if (!normalizedFormId) {
-    throw new Error('infidash_form_id debe ser un identificador de formulario válido');
+    throw new UserFacingError('infidash_form_id debe ser un identificador de formulario válido');
   }
   return { provider, formId: normalizedFormId, deliveryId: normalizedDeliveryId };
 }

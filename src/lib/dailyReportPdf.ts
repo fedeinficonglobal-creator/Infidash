@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { fileURLToPath } from 'node:url';
+import { UserFacingError } from './userFacingError.js';
 
 const regularFont = fileURLToPath(new URL('../../assets/fonts/DejaVuSans.ttf', import.meta.url));
 const boldFont = fileURLToPath(new URL('../../assets/fonts/DejaVuSans-Bold.ttf', import.meta.url));
@@ -16,10 +17,10 @@ function daysInclusive(from: string, to: string) {
   const end = Date.parse(`${to}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) ||
       !Number.isFinite(start) || !Number.isFinite(end) || end < start || end - start > 366 * 86_400_000) {
-    throw new Error('Selecciona un periodo válido de hasta 367 días');
+    throw new UserFacingError('Selecciona un periodo válido de hasta 367 días');
   }
   if (new Date(start).toISOString().slice(0, 10) !== from || new Date(end).toISOString().slice(0, 10) !== to) {
-    throw new Error('Selecciona fechas de calendario válidas');
+    throw new UserFacingError('Selecciona fechas de calendario válidas');
   }
   return Math.round((end - start) / 86_400_000) + 1;
 }

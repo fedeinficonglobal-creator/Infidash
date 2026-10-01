@@ -3,7 +3,8 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
-import { getBootstrapUsers } from './bootstrapUsers.js';
+import { UserFacingError } from './userFacingError.js';
+import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.js';
 import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, parseKpiThresholdsJson, type KpiThresholds } from './kpiThresholds.js';
@@ -1345,6 +1346,8 @@ function seedDefaults(db: AppDatabase) {
 
   const existingAdmin = db.prepare(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`).get();
   const users = getBootstrapUsers(process.env, Boolean(existingAdmin));
+  const defaultAccountsWarning = getDefaultAccountsWarning(process.env, users);
+  if (defaultAccountsWarning) console.warn(defaultAccountsWarning);
 
   const userExists = db.prepare(`SELECT id FROM users WHERE email = ?`);
   const insertUser = db.prepare(
@@ -1681,6 +1684,16 @@ export function authenticateUser(email: string, password: string): LoginResult |
   return { token, user: rowToUser(row) };
 }
 
+/** Revokes one session (logout). Idempotent: an unknown or already expired token is a no-op. */
+export function revokeSessionByToken(token: string) {
+  getDatabase().prepare(`DELETE FROM sessions WHERE token_hash = ?`).run(hashToken(token));
+}
+
+/** Revokes every session of a user (logout everywhere). */
+export function revokeAllSessionsForUser(userId: string) {
+  getDatabase().prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+}
+
 export function getSessionByToken(token: string) {
   const db = getDatabase();
   const row = db.prepare(
@@ -1849,7 +1862,7 @@ export function saveClientIntegration(input: IntegrationInput) {
 
   const definition = getIntegrationProviderDefinition(provider);
   if (!definition) {
-    throw new Error(`Proveedor de integración no soportado: ${provider}`);
+    throw new UserFacingError(`Proveedor de integración no soportado: ${provider}`);
   }
 
   const previousConfig = existing ? normalizeIntegrationSection(definition.configFields, parseJsonRecord(existing.config_json ?? '{}')) : {};
@@ -1857,10 +1870,10 @@ export function saveClientIntegration(input: IntegrationInput) {
   const config = normalizeIntegrationSection(definition.configFields, { ...previousConfig, ...(input.config ?? {}) });
   if (provider === 'woocommerce') parseWooRefundPolicy(config.refundPolicy);
   if (provider === 'ga4' && config.propertyId && !/^\d+$/.test(config.propertyId)) {
-    throw new Error('El Property ID de GA4 debe ser numérico');
+    throw new UserFacingError('El Property ID de GA4 debe ser numérico');
   }
   if (provider === 'google_ads' && config.customerId && !/^\d+$/.test(config.customerId)) {
-    throw new Error('El Customer ID de Google Ads debe ser numérico, sin guiones');
+    throw new UserFacingError('El Customer ID de Google Ads debe ser numérico, sin guiones');
   }
   const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...(input.credentials ?? {}) });
   const missingFields = listMissingIntegrationFields(definition, config, credentials);
@@ -1981,7 +1994,7 @@ export function getWooCommerceSalesSnapshot(input: Pick<WooCommerceSalesSnapshot
     .get(input.integrationId, input.sourceKey, input.from, input.to) as any;
   if (!row) return null;
   const orders = typeof row.orders_json === 'string' ? JSON.parse(row.orders_json) : row.orders_json;
-  if (!Array.isArray(orders)) throw new Error('El resumen WooCommerce guardado no es válido');
+  if (!Array.isArray(orders)) throw new UserFacingError('El resumen WooCommerce guardado no es válido');
   return { integrationId: row.integration_id, sourceKey: row.source_key, from: row.purchase_from,
     to: row.purchase_to, orders, syncedAt: row.synced_at };
 }
@@ -2023,7 +2036,7 @@ export function getGa4Snapshot(input: Pick<Ga4TrafficSnapshot, 'integrationId' |
   const topPages = parseJson(row.top_pages_json);
   const landingPages = parseJson(row.landing_pages_json);
   if (![sessionsSeries, trafficSources, topPages, landingPages].every(Array.isArray)) {
-    throw new Error('El resumen GA4 guardado no es válido');
+    throw new UserFacingError('El resumen GA4 guardado no es válido');
   }
   return {
     integrationId: row.integration_id, propertyId: row.property_id, from: row.period_from, to: row.period_to,
@@ -2059,7 +2072,7 @@ export function getGoogleAdsSnapshot(input: Pick<GoogleAdsSnapshot, 'integration
     .get(input.integrationId, input.customerId, input.from, input.to) as any;
   if (!row) return null;
   const campaigns = typeof row.campaigns_json === 'string' ? JSON.parse(row.campaigns_json) : row.campaigns_json;
-  if (!Array.isArray(campaigns)) throw new Error('El resumen de Google Ads guardado no es válido');
+  if (!Array.isArray(campaigns)) throw new UserFacingError('El resumen de Google Ads guardado no es válido');
   return {
     integrationId: row.integration_id, customerId: row.customer_id, from: row.period_from, to: row.period_to,
     campaigns, currencyCode: row.currency_code, syncedAt: row.synced_at,
@@ -2581,7 +2594,7 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
   }
   nextMonthKey(input.monthKey);
   if (getMonthlyKpiCycleRow(input.clientId, input.monthKey)?.closed_at) {
-    throw new Error('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
+    throw new UserFacingError('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
   }
 
   const timestamp = nowIso();
@@ -2595,10 +2608,10 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
       ) as any);
 
   if (existing?.client_id !== undefined && existing.client_id !== input.clientId) {
-    throw new Error('El KPI no pertenece a este cliente');
+    throw new UserFacingError('El KPI no pertenece a este cliente');
   }
   if (existing?.closed_at) {
-    throw new Error('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
+    throw new UserFacingError('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
   }
 
   const record = {
@@ -2649,7 +2662,7 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
       record.client_id,
       record.month_key,
     );
-    if (update.changes === 0) throw new Error('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
+    if (update.changes === 0) throw new UserFacingError('El KPI está cerrado; un administrador debe reabrirlo antes de modificarlo');
   } else {
     const insert = db.prepare(
       `INSERT INTO monthly_kpis (
@@ -2679,7 +2692,7 @@ export function saveMonthlyKpi(input: MonthlyKpiInput) {
       record.client_id,
       record.month_key,
     );
-    if (insert.changes === 0) throw new Error('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
+    if (insert.changes === 0) throw new UserFacingError('El mes está cerrado; un administrador debe reabrirlo antes de modificarlo');
   }
 
   const saved = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(record.id) as any;
@@ -2772,9 +2785,9 @@ export function closeMonthlyKpiCycle(clientId: string, monthKey: string, actorUs
 
 export function reopenMonthlyKpiCycle(clientId: string, monthKey: string, actorUserId: string, reason: string) {
   const normalizedReason = reason.trim();
-  if (!normalizedReason || normalizedReason.length > 500) throw new Error('La reapertura requiere un motivo de hasta 500 caracteres');
+  if (!normalizedReason || normalizedReason.length > 500) throw new UserFacingError('La reapertura requiere un motivo de hasta 500 caracteres');
   const current = getMonthlyKpiCycleRow(clientId, monthKey);
-  if (current && !current.closed_at) throw new Error('El ciclo ya está abierto');
+  if (current && !current.closed_at) throw new UserFacingError('El ciclo ya está abierto');
   if (!current && !listMonthlyKpis(clientId, monthKey).some((kpi) => kpi.closedAt)) return null;
   const timestamp = nowIso();
   getDatabase().prepare(`WITH cycle AS (
@@ -2823,11 +2836,11 @@ export function closeDueMonthlyKpiCycles(now = new Date(), onlyClientId?: string
 
 export function reopenMonthlyKpi(id: string, actorUserId: string, reason: string) {
   const normalizedReason = reason.trim();
-  if (!normalizedReason || normalizedReason.length > 500) throw new Error('La reapertura requiere un motivo de hasta 500 caracteres');
+  if (!normalizedReason || normalizedReason.length > 500) throw new UserFacingError('La reapertura requiere un motivo de hasta 500 caracteres');
   const db = getDatabase();
   const existing = db.prepare(`SELECT * FROM monthly_kpis WHERE id = ?`).get(id) as any;
   if (!existing) return null;
-  if (!existing.closed_at) throw new Error('El KPI ya está abierto');
+  if (!existing.closed_at) throw new UserFacingError('El KPI ya está abierto');
   const timestamp = nowIso();
   db.prepare(`WITH changed AS (
     UPDATE monthly_kpis SET closed_at = NULL, updated_at = ? WHERE id = ? AND closed_at IS NOT NULL RETURNING *
