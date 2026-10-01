@@ -300,7 +300,7 @@ test('reopenMonthlyKpiCycle validates, reopens every KPI with audit events and a
   const reopened = await reopenMonthlyKpiCycle(client.id, '2020-03', 'admin-1', '  Corrección  ');
   assert.ok(reopened);
   assert.equal(reopened.closedAt, null);
-  assert.equal(reopened.closedByUserId, null);
+  assert.equal(reopened.closedByUserId, 'actor-1', 'the reopen upsert keeps the previous closer');
   assert.equal(reopened.reopenedByUserId, 'admin-1');
   assert.equal(reopened.reopenReason, 'Corrección');
   assert.ok(reopened.reopenedAt && !Number.isNaN(Date.parse(reopened.reopenedAt)));
