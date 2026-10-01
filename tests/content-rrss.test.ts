@@ -101,6 +101,30 @@ test('blog plan item listings, calendar lists and the summary only include blog 
   assert.match(publications.sql, /kind='rrss'/);
 });
 
+test('the workflow context separates blog plan items from RRSS ideas', async () => {
+  const blogItem = { id: 'blog-1', title: 'Guía', status: 'approved', planned_at: '2026-10-05T08:00:00.000Z' };
+  const rrssItem = { id: 'rrss-1', title: 'Reel de verano', status: 'proposed', planned_at: '2026-10-06T08:00:00.000Z', format: 'reel', networks: ['instagram'] };
+  const { pool, statements } = poolWithClient((sql) => {
+    if (sql.includes("kind='rrss'") && sql.includes('FROM editorial.plan_items')) return one(rrssItem);
+    if (sql.includes("kind='blog'") && sql.includes('FROM editorial.plan_items')) return one(blogItem);
+    return none;
+  });
+  const context = await new EditorialApiRepository(pool).context('client-a');
+  assert.deepEqual(context.planItems, [blogItem]);
+  assert.deepEqual(context.rrssPlanItems, [rrssItem]);
+  const plans = statements.filter(({ sql }) => sql.includes('FROM editorial.plan_items'));
+  assert.equal(plans.length, 2);
+  for (const { sql, values } of plans) {
+    assert.match(sql, /JOIN editorial\.calendars c ON c\.client_id=p\.client_id AND c\.id=p\.calendar_id/);
+    assert.match(sql, /ORDER BY p\.planned_at DESC NULLS LAST LIMIT 200/);
+    assert.deepEqual(values, ['client-a']);
+  }
+  const blog = plans.find(({ sql }) => sql.includes("c.kind='blog'"))!;
+  assert.match(blog.sql, /SELECT p\.id,p\.title,p\.status,p\.planned_at FROM/);
+  const rrss = plans.find(({ sql }) => sql.includes("c.kind='rrss'"))!;
+  assert.match(rrss.sql, /SELECT p\.id,p\.title,p\.status,p\.planned_at,p\.format,p\.networks FROM/);
+});
+
 test('creating a blog plan item refuses an RRSS calendar', async () => {
   const rrss = poolWithClient((sql) => sql.includes('SELECT kind FROM editorial.calendars') ? one({ kind: 'rrss' }) : none);
   await assert.rejects(() => new EditorialApiRepository(rrss.pool).createPlanItem({ clientId: 'client-a', calendarId: 'calendar-rrss', title: 'Tema' }, 'user-1'), (error: any) => error.statusCode === 409 && error.code === 'INVALID_TARGET');
@@ -254,8 +278,28 @@ test('generate_rrss moves an approved RRSS idea to generating with a server-buil
       { id: ACCOUNT_GMB.id, instanceKey: 'inficonglobal-gmb', network: 'gmb', label: 'GMB Inficon', externalAccountId: 'cmt-gmb' },
       { id: ACCOUNT_IG.id, instanceKey: 'inficonglobal-instagram', network: 'instagram', label: 'Instagram Inficon', externalAccountId: 'cmt-ig' },
     ],
+    generateImage: true,
   });
   assert.equal(captured.hash, requestHash({ kind: 'generate_rrss', targetId: 'item-1', expectedVersion: 3, payload: input.payload }));
+});
+
+test('generate_rrss keeps an explicit generateImage choice and rejects a non-boolean one', async () => {
+  const off = rrssJobPool();
+  await new EditorialApiRepository(off.pool).createJob(rrssJobInput({ accountIds: [ACCOUNT_GMB.id, ACCOUNT_IG.id], generateImage: false }), 'user-1');
+  assert.equal(off.captured.job.generateImage, false);
+  const on = rrssJobPool();
+  await new EditorialApiRepository(on.pool).createJob(rrssJobInput({ accountIds: [ACCOUNT_GMB.id, ACCOUNT_IG.id], generateImage: true }), 'user-1');
+  assert.equal(on.captured.job.generateImage, true);
+  for (const generateImage of ['false', 0, 1, {}, []]) {
+    const { pool, statements } = rrssJobPool();
+    await assert.rejects(
+      () => new EditorialApiRepository(pool).createJob(rrssJobInput({ accountIds: [ACCOUNT_GMB.id, ACCOUNT_IG.id], generateImage }), 'user-1'),
+      (error: any) => error.statusCode === 400 && error.code === 'INVALID_PAYLOAD' && /generateImage/.test(error.message),
+      JSON.stringify(generateImage),
+    );
+    assert.equal(statements.some(({ sql }) => sql.includes('INSERT INTO editorial.jobs')), false);
+    assert.equal(statements.some(({ sql }) => sql.includes('UPDATE editorial.plan_items')), false);
+  }
 });
 
 test('generate_rrss refuses blog items, missing or foreign accounts and invalid plan item states', async () => {
@@ -307,6 +351,23 @@ test('claim rebuilds the generate_rrss payload from the database on every attemp
   assert.deepEqual(writes[0].accountIds, [ACCOUNT_GMB.id]);
   assert.deepEqual(writes[0].accounts, [{ id: ACCOUNT_GMB.id, instanceKey: 'inficonglobal-gmb', network: 'gmb', label: 'GMB renombrada', externalAccountId: 'cmt-gmb' }]);
   assert.equal(claimed.payload.planItem.title, 'Título actualizado');
+  assert.equal(writes[0].generateImage, true, 'older payloads without the flag default to generating an image');
+});
+
+test('claim keeps generateImage false across the payload rebuild', async () => {
+  const writes: any[] = [];
+  const { pool } = poolWithClient((sql, values) => {
+    if (sql.includes('SELECT j.* FROM editorial.jobs')) return one({ id: 'job-rrss', client_id: 'client-a', kind: 'generate_rrss', target_id: 'item-1', payload: { accountIds: [ACCOUNT_GMB.id], generateImage: false } });
+    if (sql.includes('SELECT status FROM editorial.plan_items')) return one({ status: 'generating' });
+    if (sql.includes('SELECT * FROM editorial.plan_items')) return one(RRSS_ITEM);
+    if (sql.includes('FROM editorial.publishing_accounts')) return one(ACCOUNT_GMB);
+    if (sql.includes('UPDATE editorial.jobs SET payload')) { writes.push(JSON.parse(String(values[1]))); return { rows: [], rowCount: 1 }; }
+    if (sql.includes("UPDATE editorial.jobs SET status='running'")) return one({ id: 'job-rrss', payload: writes[0] });
+    return none;
+  });
+  const claimed: any = await new EditorialApiRepository(pool).claimJob({ leaseSeconds: 60, executionId: 'run-1' }, ['*']);
+  assert.equal(writes[0].generateImage, false);
+  assert.equal(claimed.payload.generateImage, false);
 });
 
 // ---------------------------------------------------------------------------

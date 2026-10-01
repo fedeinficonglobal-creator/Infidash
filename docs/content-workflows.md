@@ -13,6 +13,8 @@ Los exports de `workflows/content` son la base versionada y sanitizada del pilot
 | `inficon-global/reschedule.v1.json` | Borra la publicación anterior en Postiz y crea otra en la nueva fecha (Postiz no tiene endpoint de actualización). Mismo enrutado de fallos que `publish`: `failed` antes de escribir en Postiz y `unknown` después. |
 | `inficon-global/cancel.v1.json` | Borra la publicación en Postiz (un 404 cuenta como ya cancelada). Los fallos son `failed` salvo que el DELETE ya se haya ejecutado; entonces son `unknown` con el `postizPostId`. |
 | `reconcile.v1.json` | Consulta la API real de Postiz por intervalo, contrasta el ID y registra `scheduled`, `published`, `failed`, `cancelled` o `unknown`. Sin `postizPostId` no consulta Postiz: cierra la publicación como `failed` (`POSTIZ_ID_MISSING`) para comprobarla y reenviarla. Sus fallos se informan como `failed` y se reintentan sin tocar el estado de la publicación. |
+| `rrss-plan.v1.json` | Compartido por todos los clientes (`generate_rrss_plan`). Lee `payload.rrss` y `editorial_config` (sin valores de cliente), consulta Google Trends y la estacionalidad en SerpAPI y las ideas existentes del contexto, y propone `postsPerWeek × weeksHorizon` ideas de redes con formato y redes. Las fuentes degradan a `Sin datos: …`; el núcleo informa `failed`. |
+| `rrss-generate.v1.json` | Compartido por todos los clientes (`generate_rrss`). Escribe un texto por red con una sola llamada a OpenAI y, si `payload.generateImage` no es `false`, una imagen IA nueva por cuenta subida a Postiz. Devuelve un borrador `socialPosts` por cuenta para revisarlo en Infidash. Cualquier fallo de imagen deja el post sin medio; el resto de fallos son `failed`. |
 
 Los exports de cliente contienen los nodos externos reales de los exports fuente. Se han retirado triggers antiguos, SQL directo, Sheets, backfill, credenciales e IDs de instalación. Las referencias rotas `calendario editorial2` y `Webhook inficon1` ya no existen. Los workflows toman el trabajo reservado y el contexto de Infidash, y escriben exclusivamente mediante `result` y `events`.
 
@@ -26,6 +28,21 @@ Conservar una copia inactiva de cada export original durante el montaje. Los nod
 4. En `reconcile.v1`, configurar la URL y token de la API de Postiz. El normalizador admite las colecciones `posts`, `data`, `items` o un array, pero debe contrastarse con la versión instalada.
 
 Cada operación externa larga renueva el lease antes y después. Las ramas de error confirmado terminan el trabajo como `failed`. En publicación, un 4xx determinista se considera rechazo; timeout, 408, 409, 429, error de red o respuesta sin confirmación terminan como `unknown` y exigen reconciliación antes de reenviar.
+
+## Workflows de redes sociales (compartidos)
+
+`rrss-plan.v1.json` y `rrss-generate.v1.json` no dependen del cliente: se importan una sola vez y el mismo ID de workflow se guarda como binding de todos los clientes. El pipeline de redes es independiente del blog: el plan del blog (`plan.v1`) solo propone artículos y el contexto separa `planItems` (ideas del blog) de `rrssPlanItems` (ideas de redes).
+
+- **`generate_rrss_plan`** (`rrss-plan.v1`): `Validar trabajo` → `Heartbeat inicial` (1800 s) → `Cargar contexto Infidash` → `⚙️ Configuración RRSS`. El tema sale de `payload.rrss.topic`, `editorial_config.rrss.topic` o `editorial_config.topic` (sin tema falla); las redes son obligatorias; `postsPerWeek` vale 3 y `weeksHorizon` 4 por defecto. Las tres fuentes (Trends, estacionalidad e ideas existentes) son opcionales. `🤖 IA: Plan de Redes` → `📝 Parsear Plan JSON` → `Heartbeat tras IA` → `Normalizar resultado del plan RRSS` filtra redes y formatos, data cada idea desde `periodStart` y usa `sourceKey` `rrss-plan:<job>:<n>`.
+- **`generate_rrss`** (`rrss-generate.v1`): `Validar trabajo` → `Heartbeat antes de IA` (1500 s) → `Cargar contexto Infidash` → `Preparar posts` → `🤖 IA: Textos por red` → `Parsear textos` → `Un item por cuenta` → bucle `Recorrer cuentas` (una cuenta por iteración) → `¿Generar imagen?` → `Generar imagen IA` → `Convertir imagen a binario` → `Subir imagen a Postiz` → `Preparar post`. Con `generateImage: false` el bucle salta la cadena de imagen. Los errores de los tres nodos de imagen llegan a `Preparar post` sin medio. Al terminar el bucle: `Agregar posts` → `Heartbeat tras IA` (600 s) → `Normalizar resultado RRSS` → `Guardar resultado Infidash`. Subir una imagen a Postiz no publica nada, así que todos los fallos son `failed`.
+
+Después de importar, enlazar:
+
+1. La credencial nativa de OpenAI («OpenAi account») en `OpenAI — Análisis` y `OpenAI — Plan de Redes` (plan) y en `OpenAI — Textos por red` (posts).
+2. La credencial Postiz del nodo comunitario en `Subir imagen a Postiz`.
+3. Las imágenes usan la misma llamada HTTP que `generate.v1`/`publish.v1`, con la cabecera `Authorization: Bearer $env.OPENAI_API_KEY` y sin credencial de n8n.
+
+Variables de entorno del servicio n8n: `INFIDASH_INTERNAL_API_URL`, `INFIDASH_SERVICE_TOKEN` (scopes `jobs:claim`, `jobs:result` y `context:read` para los clientes que usen redes), `SERPAPI_API_KEY` y `OPENAI_API_KEY`. Para cada cliente con redes, añadir a `editorial.client_settings.workflow_bindings` las claves `generate_rrss_plan` y `generate_rrss` con los IDs de estos dos workflows, y configurar `editorial_config.rrss` (tema, keywords, redes, publicaciones por semana) y `brandName`.
 
 ## Contrato autosaneable de trabajos
 

@@ -17,7 +17,7 @@ function jsonFiles(dir: string): string[] {
 const workflowFiles = jsonFiles(workflowRoot).filter((path) => /\.v1\.json$/.test(path));
 
 test('exports n8n v1 are sanitized and all connection references resolve', () => {
-  assert.equal(workflowFiles.length, 7);
+  assert.equal(workflowFiles.length, 9);
   for (const path of workflowFiles) {
     const source = readFileSync(path, 'utf8');
     const workflow = JSON.parse(source);
@@ -107,7 +107,7 @@ test('client manifest documents only the available pilot and uses environment re
   assert.deepEqual(manifest.clients.map((client: any) => client.key), ['inficon-global']);
   assert.equal(manifest.clients[0].enabled, false);
   assert.match(manifest.clients[0].clientIdEnv, /^[A-Z][A-Z0-9_]+$/);
-  assert.deepEqual(Object.keys(manifest.clients[0].workflowBindings).sort(), ['generate_content', 'generate_plan', 'publish', 'reconcile']);
+  assert.deepEqual(Object.keys(manifest.clients[0].workflowBindings).sort(), ['generate_content', 'generate_plan', 'generate_rrss', 'generate_rrss_plan', 'publish', 'reconcile']);
   for (const binding of Object.values<any>(manifest.clients[0].workflowBindings)) assert.match(binding.workflowIdEnv, /^N8N_WORKFLOW_/);
 });
 
@@ -128,7 +128,7 @@ function edgesInto(workflow: any, to: string) {
 }
 type Items = Array<Record<string, unknown>>;
 /** Nodes absent from `nodes` behave like n8n nodes that never executed: referencing them throws. */
-function runCode(workflow: any, name: string, { nodes = {}, input = [] }: { nodes?: Record<string, Items>; input?: Items } = {}): any[] {
+function runCode(workflow: any, name: string, { nodes = {}, input = [], runIndex = 0 }: { nodes?: Record<string, Items>; input?: Items; runIndex?: number } = {}): any[] {
   const wrap = (rows: Items) => rows.map((json) => ({ json }));
   const $ = (ref: string) => {
     if (!(ref in nodes)) throw new Error(`Node '${ref}' hasn't been executed`);
@@ -137,15 +137,15 @@ function runCode(workflow: any, name: string, { nodes = {}, input = [] }: { node
   };
   const inputItems = wrap(input);
   const $input = { first: () => inputItems[0], all: () => inputItems, get item() { return inputItems[0]; } };
-  return new Function('$', '$input', '$json', '$execution', nodeNamed(workflow, name).parameters.jsCode)($, $input, inputItems[0]?.json, { id: 'exec-1' });
+  return new Function('$', '$input', '$json', '$execution', '$runIndex', nodeNamed(workflow, name).parameters.jsCode)($, $input, inputItems[0]?.json, { id: 'exec-1' }, runIndex);
 }
 const JOB = { id: 'job-1', client_id: 'client-a', target_id: 'target-1', leaseToken: 'lease-1' };
 
-const EXEMPT_TYPES = /executeWorkflowTrigger|\.merge$|\.if$|\.wait$|\.aggregate$|\.set$|stickyNote|lmChat|\.tool/;
+const EXEMPT_TYPES = /executeWorkflowTrigger|\.merge$|\.if$|\.wait$|\.aggregate$|\.set$|\.splitInBatches$|stickyNote|lmChat|\.tool/;
 const TERMINAL_REPORTS = new Set(['Guardar fallo Infidash', 'Guardar fallo o unknown', 'Guardar unknown Infidash', 'Guardar resultado cancelacion']);
 
 test('every child-workflow node that can fail routes its error output somewhere instead of crashing silently', () => {
-  for (const path of ['inficon-global/plan.v1.json', 'inficon-global/generate.v1.json', 'inficon-global/publish.v1.json', 'inficon-global/reschedule.v1.json', 'inficon-global/cancel.v1.json', 'reconcile.v1.json']) {
+  for (const path of ['inficon-global/plan.v1.json', 'inficon-global/generate.v1.json', 'inficon-global/publish.v1.json', 'inficon-global/reschedule.v1.json', 'inficon-global/cancel.v1.json', 'reconcile.v1.json', 'rrss-plan.v1.json', 'rrss-generate.v1.json']) {
     const workflow = loadWorkflow(path);
     for (const node of workflow.nodes) {
       if (EXEMPT_TYPES.test(node.type) || TERMINAL_REPORTS.has(node.name) || /^(Preparar fallo|Sin datos:)/.test(node.name)) continue;
@@ -488,4 +488,328 @@ test('the generate workflow is a client-agnostic template driven by editorial_co
   const writer = nodeNamed(generate, 'SEO Content Writer2').parameters.messages.values[0].content;
   assert.match(writer, /redactor SEO senior de \{\{ \$json\.brandName \}\}\*\*, empresa del sector \*\*\{\{ \$json\.sector \}\}\*\*/);
   assert.match(writer, /Puedes mencionar a \*\*\{\{ \$json\.brandName \}\}\*\*/);
+});
+
+test('the blog plan only proposes blog articles because social media has its own plan', () => {
+  const prompt = nodeNamed(loadWorkflow('inficon-global/plan.v1.json'), '🤖 IA: Plan de Contenidos').parameters.text;
+  assert.match(prompt, /"format": "blog"/);
+  assert.doesNotMatch(prompt, /reel\|post\|blog/);
+  assert.doesNotMatch(prompt, /"channel"/);
+  assert.match(prompt, /solo para artículos del blog/);
+});
+
+// ── RRSS workflows: shared by every client ────────────────────────────────────────────────────────
+
+const RRSS_PLAN = 'rrss-plan.v1.json';
+const RRSS_GENERATE = 'rrss-generate.v1.json';
+/** Evaluates the `{{ … }}` expression of an n8n parameter against stubbed node outputs. */
+function evaluateExpression(expression: string, nodes: Record<string, Items>) {
+  const body = expression.replace(/^=\{\{\s*/, '').replace(/\s*\}\}$/, '');
+  const $ = (ref: string) => {
+    if (!(ref in nodes)) throw new Error(`Node '${ref}' hasn't been executed`);
+    return { first: () => ({ json: nodes[ref][0] }) };
+  };
+  return new Function('$', `return (${body});`)($);
+}
+
+test('RRSS workflows are shared templates with no client-specific values or extra data sources', () => {
+  for (const path of [RRSS_PLAN, RRSS_GENERATE]) {
+    const raw = readFileSync(join(workflowRoot, path), 'utf8');
+    for (const hardcoded of [/inficon/i, /https?:\/\/(?!api\.openai\.com|serpapi\.com)[a-z0-9.-]+/i, /cmt[a-z0-9]{6,}/i, /\b\d{6,}\b/, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i]) {
+      assert.doesNotMatch(raw, hardcoded, `${path} must not contain ${hardcoded}`);
+    }
+    const workflow = JSON.parse(raw);
+    for (const key of ['id', 'versionId', 'meta', 'tags', 'pinData']) assert.equal(key in workflow, false, `${path} must not contain ${key}`);
+    assert.equal(workflow.settings?.errorWorkflow, undefined, `${path} must not pin an error workflow`);
+    assert.doesNotMatch(raw, /googleAnalytics|googleSearchConsole|SERPROBOT|r\.jina\.ai|n8n-nodes-base\.wordpress/, `${path} uses only the lean RRSS sources`);
+    assert.match(raw, /INFIDASH_SERVICE_TOKEN/);
+    assert.match(raw, /\/api\/internal\/content\/clients\//);
+    assert.match(raw, /\/heartbeat/);
+  }
+  assert.equal(loadWorkflow(RRSS_PLAN).name, 'Content v1 - RRSS - Generate plan');
+  assert.equal(loadWorkflow(RRSS_GENERATE).name, 'Content v1 - RRSS - Generate posts');
+});
+
+const RRSS_PLAN_JOB = (payload: Record<string, unknown> = {}) => ({ ...JOB, kind: 'generate_rrss_plan', target_id: 'calendar-rrss', payload: { schemaVersion: 1, periodStart: '2026-10-05', calendarId: 'calendar-rrss', calendar_id: 'calendar-rrss', rrss: { topic: 'Clínica dental', keywords: ['ortodoncia'], networks: ['instagram', 'gmb'], postsPerWeek: 2, weeksHorizon: 2 }, ...payload } });
+
+test('rrss-plan validates the generate_rrss_plan contract and keeps the plan lifecycle', () => {
+  const plan = loadWorkflow(RRSS_PLAN);
+  const [accepted] = runCode(plan, 'Validar trabajo', { input: [{ job: RRSS_PLAN_JOB() }] });
+  assert.equal(accepted.json.job.target_id, 'calendar-rrss');
+  assert.equal(accepted.json.job.payload.calendarId, 'calendar-rrss');
+  assert.throws(() => runCode(plan, 'Validar trabajo', { input: [{ job: { ...RRSS_PLAN_JOB(), kind: 'generate_plan' } }] }), /Contrato generate_rrss_plan v1 invalido/);
+  assert.throws(() => runCode(plan, 'Validar trabajo', { input: [{ job: { ...RRSS_PLAN_JOB(), leaseToken: undefined } }] }), /Contrato generate_rrss_plan v1 invalido/);
+  assert.throws(() => runCode(plan, 'Validar trabajo', { input: [{ job: { ...RRSS_PLAN_JOB(), target_id: 'calendar-rrss', payload: { calendarId: 'other' } } }] }), /calendarId debe coincidir/);
+
+  assert.deepEqual(targets(plan, 'Trabajo recibido'), ['Validar trabajo']);
+  assert.deepEqual(targets(plan, 'Validar trabajo'), ['Heartbeat inicial']);
+  assert.deepEqual(targets(plan, 'Heartbeat inicial'), ['Cargar contexto Infidash']);
+  assert.deepEqual(targets(plan, 'Cargar contexto Infidash'), ['⚙️ Configuración RRSS']);
+  assert.match(nodeNamed(plan, 'Heartbeat inicial').parameters.body, /leaseSeconds: 1800/);
+  assert.match(nodeNamed(plan, 'Heartbeat tras IA').parameters.body, /leaseSeconds: 600/);
+  assert.deepEqual(targets(plan, '🤖 IA: Plan de Redes'), ['📝 Parsear Plan JSON']);
+  assert.deepEqual(targets(plan, '📝 Parsear Plan JSON'), ['Heartbeat tras IA']);
+  assert.deepEqual(targets(plan, 'Heartbeat tras IA'), ['Normalizar resultado del plan RRSS']);
+  assert.deepEqual(targets(plan, 'Normalizar resultado del plan RRSS'), ['Guardar resultado Infidash']);
+  for (const name of ['Validar trabajo', 'Heartbeat inicial', 'Cargar contexto Infidash', '⚙️ Configuración RRSS', '🧩 Preparar Contexto IA', '🤖 IA: Plan de Redes', '📝 Parsear Plan JSON', 'Heartbeat tras IA', 'Normalizar resultado del plan RRSS', 'Guardar resultado Infidash']) {
+    assert.deepEqual(targets(plan, name, 1), ['Preparar fallo confirmado'], name);
+  }
+  const reporters = new Set(edgesInto(plan, 'Preparar fallo confirmado').map((edge) => edge.from));
+  assert.equal(reporters.size, 10, 'only the sequential core reports failed; sources degrade to stubs');
+  assert.match(nodeNamed(plan, 'Guardar resultado Infidash').parameters.body, /planItems:\$json\.planItems/);
+  const [report] = runCode(plan, 'Preparar fallo confirmado', { nodes: { 'Trabajo recibido': [{ job: RRSS_PLAN_JOB() }] }, input: [{ error: 'Contrato generate_rrss_plan v1 invalido' }] });
+  assert.equal(report.json.status, 'failed');
+  assert.equal(report.json.jobId, 'job-1');
+});
+
+test('rrss-plan configuration reads only editorial_config and the job payload', () => {
+  const plan = loadWorkflow(RRSS_PLAN);
+  const run = (payloadRrss: Record<string, unknown> | undefined, config: Record<string, unknown> | null) => runCode(plan, '⚙️ Configuración RRSS', {
+    nodes: { 'Validar trabajo': [{ job: { ...RRSS_PLAN_JOB(), payload: { periodStart: '2026-10-05', rrss: payloadRrss } } }], 'Cargar contexto Infidash': [{ settings: { editorial_config: config } }] },
+  })[0].json;
+  const full = run({ topic: ' Payload ', keywords: ['a', ' b '], networks: ['instagram', 'tiktok', 'gmb', 'instagram'], postsPerWeek: 5, weeksHorizon: 3 }, { topic: 'Blog', brandName: 'Sonrisas', country: 'MX', rrss: { topic: 'Config RRSS' } });
+  assert.equal(full.topic, 'Payload');
+  assert.deepEqual(full.keywords_list, ['a', 'b']);
+  assert.equal(full.keywords, 'a, b');
+  assert.deepEqual(full.networks, ['instagram', 'gmb'], 'unknown networks are dropped and duplicates collapsed');
+  assert.equal(full.postsPerWeek, 5);
+  assert.equal(full.weeksHorizon, 3);
+  assert.equal(full.totalPosts, 15);
+  assert.equal(full.country, 'MX');
+  assert.equal(full.brandName, 'Sonrisas');
+  assert.equal(full.periodStart, '2026-10-05');
+
+  const fromConfig = run({ topic: '', networks: [] }, { topic: 'Blog', rrss: { topic: 'Config RRSS', networks: ['facebook'], postsPerWeek: null } });
+  assert.equal(fromConfig.topic, 'Config RRSS');
+  assert.deepEqual(fromConfig.networks, ['facebook']);
+  assert.equal(fromConfig.postsPerWeek, 3, 'postsPerWeek defaults to 3');
+  assert.equal(fromConfig.weeksHorizon, 4, 'weeksHorizon defaults to 4');
+  assert.equal(fromConfig.country, 'ES');
+  assert.equal(fromConfig.brandName, 'Config RRSS', 'brandName falls back to the topic');
+  assert.deepEqual(fromConfig.keywords_list, ['Config RRSS'], 'keywords fall back to the topic so SerpAPI never gets an empty q');
+
+  assert.equal(run(undefined, { topic: 'Blog', rrss: { networks: ['gmb'] } }).topic, 'Blog');
+  assert.throws(() => run(undefined, { rrss: { networks: ['gmb'] } }), /Falta el tema del plan de redes/);
+  assert.throws(() => run(undefined, null), /Falta el tema del plan de redes/);
+  assert.throws(() => run({ topic: 'X', networks: ['tiktok'] }, {}), /Faltan las redes sociales del plan de redes/);
+});
+
+const RRSS_MERGE_INPUTS: Record<number, string> = { 0: 'trends', 1: 'seasonal', 2: 'existing_ideas' };
+
+test('rrss-plan data sources are optional and feed stubs into the same merge input', () => {
+  const plan = loadWorkflow(RRSS_PLAN);
+  assert.deepEqual(targets(plan, '⚙️ Configuración RRSS').sort(), ['📈 A: Google Trends', '📚 C: Ideas existentes', '🌍 B: Estacionalidad — SerpAPI'].sort());
+  const merge = edgesInto(plan, '🔗 Merge Análisis');
+  assert.equal(nodeNamed(plan, '🔗 Merge Análisis').parameters.numberInputs, 3);
+  for (const [input, analysisType] of Object.entries(RRSS_MERGE_INPUTS)) {
+    assert.ok(merge.some((edge) => edge.input === Number(input) && !edge.from.startsWith('Sin datos:')), `merge input ${input} has a success feeder`);
+    const stubs = merge.filter((edge) => edge.input === Number(input) && edge.from.startsWith('Sin datos:'));
+    assert.equal(stubs.length, 1, `merge input ${input} has exactly one stub`);
+    const [stub] = runCode(plan, stubs[0].from, { input: [{ error: { message: 'HTTP 500' } }] });
+    assert.equal(stub.json.analysis_type, analysisType);
+    assert.equal(stub.json.unavailable, true);
+    assert.equal(stub.json.error, 'HTTP 500');
+  }
+  for (const source of ['📈 A: Google Trends', '📈 A: Procesar Tendencias', '🤖 Agente IA: Tendencias', '📝 Parsear IA Tendencias', '🌍 B: Estacionalidad — SerpAPI', '🌍 B: Procesar Estacionalidad', '🤖 Agente IA: Estacionalidad', '📝 Parsear IA Estacionalidad', '📚 C: Ideas existentes']) {
+    const [stub] = targets(plan, source, 1);
+    assert.ok(stub?.startsWith('Sin datos:'), `${source} degrades to a stub, got ${stub}`);
+  }
+  const trends = nodeNamed(plan, '📈 A: Google Trends').parameters.queryParameters.parameters;
+  assert.ok(trends.some((param: any) => param.name === 'data_type' && param.value === 'RELATED_QUERIES'));
+  assert.ok(trends.some((param: any) => param.name === 'api_key' && param.value === '={{ $env.SERPAPI_API_KEY }}'));
+  const seasonal = nodeNamed(plan, '🌍 B: Estacionalidad — SerpAPI').parameters.queryParameters.parameters;
+  assert.ok(seasonal.some((param: any) => param.name === 'data_type' && param.value === 'TIMESERIES'));
+
+  const [ideas] = runCode(plan, '📚 C: Ideas existentes', { nodes: { 'Cargar contexto Infidash': [{ rrssPlanItems: [{ id: 'r1', title: 'Reel de verano', status: 'proposed', planned_at: '2026-10-06', format: 'reel', networks: ['instagram'] }], planItems: [{ id: 'b1', title: 'Guía de ortodoncia', status: 'approved', planned_at: null }] }] } });
+  assert.equal(ideas.json.analysis_type, 'existing_ideas');
+  assert.deepEqual(ideas.json.used_titles, ['Reel de verano']);
+  assert.deepEqual(ideas.json.blog_articles.map((article: any) => article.title), ['Guía de ortodoncia']);
+
+  const stubs = Object.values(RRSS_MERGE_INPUTS).map((analysisType) => ({ analysis_type: analysisType, unavailable: true, error: 'HTTP 500', insights: `Sin datos disponibles de ${analysisType}` }));
+  const config = runCode(plan, '⚙️ Configuración RRSS', { nodes: { 'Validar trabajo': [{ job: RRSS_PLAN_JOB() }], 'Cargar contexto Infidash': [{ settings: { editorial_config: {} } }] } })[0].json;
+  const [context] = runCode(plan, '🧩 Preparar Contexto IA', { input: stubs, nodes: { '⚙️ Configuración RRSS': [config] } });
+  assert.match(context.json.trends_data, /Fuente no disponible/);
+  assert.match(context.json.existing_ideas_data, /Fuente no disponible/);
+  assert.equal(context.json.config.networks, 'instagram, gmb');
+  assert.equal(context.json.config.totalPosts, 4);
+  const prompt = nodeNamed(plan, '🤖 IA: Plan de Redes').parameters.text;
+  for (const fragment of [/\{\{ \$json\.config\.totalPosts \}\}/, /\{\{ \$json\.config\.networks \}\}/, /\{\{ \$json\.config\.periodStart \}\}/, /\{\{ \$json\.config\.brandName \}\}/, /"format": "post\|reel\|carousel\|story"/, /"networks"/, /"plannedAt"/, /"content_plan"/]) assert.match(prompt, fragment);
+});
+
+test('the RRSS plan normalizer filters networks and formats, dates from periodStart and builds source keys', () => {
+  const plan = loadWorkflow(RRSS_PLAN);
+  const job = RRSS_PLAN_JOB();
+  const config = { networks: ['instagram', 'gmb'], periodStart: '2026-10-05' };
+  const parsed = { success: true, plan: { summary: 'Resumen', content_plan: [
+    { week: 1, theme: 'Prevención', posts: [
+      { title: ' Reel de higiene ', day: 'martes', format: 'reel', networks: ['instagram', 'tiktok'], keywords: ['higiene'], cta: 'Pide cita', priority: 'alta', rationale: 'Educativo' },
+      { title: 'Carrusel', plannedAt: '2026-10-08T10:00:00+02:00', format: 'video', networks: ['facebook'] },
+    ] },
+    { week: 2, posts: [{ title: 'Story', day: 'miércoles', format: 'STORY', networks: 'gmb' }] },
+  ] } };
+  const [result] = runCode(plan, 'Normalizar resultado del plan RRSS', { nodes: { 'Validar trabajo': [{ job }], '⚙️ Configuración RRSS': [config], '📝 Parsear Plan JSON': [parsed] } });
+  assert.deepEqual(Object.keys(result.json).sort(), ['clientId', 'jobId', 'leaseToken', 'planItems', 'result', 'schemaVersion', 'status']);
+  assert.equal(result.json.status, 'succeeded');
+  assert.equal(result.json.schemaVersion, 1);
+  assert.equal(result.json.clientId, 'client-a');
+  assert.equal(result.json.leaseToken, 'lease-1');
+  const [first, second, third] = result.json.planItems;
+  assert.deepEqual(first, { calendarId: 'calendar-rrss', title: 'Reel de higiene', theme: 'Prevención', rationale: 'Educativo', format: 'reel', networks: ['instagram'], keywords: ['higiene'], cta: 'Pide cita', priority: 'alta', plannedAt: '2026-10-06T00:00:00.000Z', sourceKey: 'rrss-plan:job-1:0' });
+  assert.equal(second.format, 'post', 'unknown formats fall back to post');
+  assert.deepEqual(second.networks, ['instagram', 'gmb'], 'no allowed network left means every allowed network');
+  assert.equal(second.plannedAt, '2026-10-08T08:00:00.000Z');
+  assert.equal(second.sourceKey, 'rrss-plan:job-1:1');
+  assert.equal(third.format, 'story');
+  assert.deepEqual(third.networks, ['gmb']);
+  assert.equal(third.plannedAt, '2026-10-14T00:00:00.000Z');
+  assert.equal(result.json.result.count, 3);
+
+  const run = (content_plan: unknown, extra: Record<string, unknown> = {}) => runCode(plan, 'Normalizar resultado del plan RRSS', { nodes: { 'Validar trabajo': [{ job }], '⚙️ Configuración RRSS': [config], '📝 Parsear Plan JSON': [{ success: true, plan: { content_plan }, ...extra }] } });
+  assert.throws(() => run([]), /El plan de redes no contiene propuestas/);
+  assert.throws(() => run([{ week: 1, posts: [] }]), /El plan de redes no contiene propuestas/);
+  assert.throws(() => run([{ week: 1, posts: [{ title: 'x', plannedAt: 'mañana' }] }]), /plannedAt debe ser ISO-8601/);
+  assert.throws(() => run([{ week: 1, posts: [{ day: 'lunes' }] }]), /Cada propuesta requiere title/);
+  assert.throws(() => runCode(plan, 'Normalizar resultado del plan RRSS', { nodes: { 'Validar trabajo': [{ job }], '⚙️ Configuración RRSS': [config], '📝 Parsear Plan JSON': [{ success: false, error: 'Unexpected token' }] } }), /Unexpected token/);
+});
+
+const RRSS_ACCOUNTS = [
+  { id: 'acc-gmb', instanceKey: 'cliente-gmb', network: 'gmb', label: 'GMB', externalAccountId: 'ext-1' },
+  { id: 'acc-ig', instanceKey: 'cliente-instagram', network: 'instagram', label: 'Instagram', externalAccountId: 'ext-2' },
+  { id: 'acc-x', instanceKey: 'cliente-blog', network: 'other', label: 'Otra', externalAccountId: 'ext-3' },
+];
+const RRSS_PLAN_ITEM = { id: 'idea-1', calendarId: 'calendar-rrss', title: 'Consejos de higiene', theme: 'Prevención', rationale: 'Educativo', format: 'carousel', keywordPrimary: 'higiene', keywords: ['higiene', 'encías'], entities: [], cta: 'Pide cita', priority: 'alta', plannedAt: '2026-10-06T08:00:00.000Z', version: 2, networks: ['gmb', 'instagram'] };
+const RRSS_JOB = (payload: Record<string, unknown> = {}) => ({ ...JOB, kind: 'generate_rrss', target_id: 'idea-1', payload: { schemaVersion: 1, planItem: RRSS_PLAN_ITEM, accountIds: RRSS_ACCOUNTS.map((account) => account.id), accounts: RRSS_ACCOUNTS, generateImage: true, ...payload } });
+const RRSS_CTX = { settings: { editorial_config: { brandName: 'Sonrisas', topic: 'Clínica dental', siteUrl: 'https://clinica.example/' } } };
+
+test('rrss-generate validates the generate_rrss contract', () => {
+  const generate = loadWorkflow(RRSS_GENERATE);
+  const [accepted] = runCode(generate, 'Validar trabajo', { input: [{ job: RRSS_JOB() }] });
+  assert.equal(accepted.json.job.id, 'job-1');
+  for (const job of [{ ...RRSS_JOB(), kind: 'generate_content' }, { ...RRSS_JOB(), target_id: undefined }, { ...RRSS_JOB(), leaseToken: undefined }, RRSS_JOB({ accounts: [] }), RRSS_JOB({ accounts: undefined }), RRSS_JOB({ planItem: { ...RRSS_PLAN_ITEM, title: ' ' } })]) {
+    assert.throws(() => runCode(generate, 'Validar trabajo', { input: [{ job }] }), /Contrato generate_rrss v1 invalido/);
+  }
+  assert.deepEqual(targets(generate, 'Trabajo recibido'), ['Validar trabajo']);
+  assert.deepEqual(targets(generate, 'Validar trabajo'), ['Heartbeat antes de IA']);
+  assert.deepEqual(targets(generate, 'Heartbeat antes de IA'), ['Cargar contexto Infidash']);
+  assert.deepEqual(targets(generate, 'Cargar contexto Infidash'), ['Preparar posts']);
+  assert.deepEqual(targets(generate, 'Preparar posts'), ['🤖 IA: Textos por red']);
+  assert.deepEqual(targets(generate, '🤖 IA: Textos por red'), ['Parsear textos']);
+  assert.deepEqual(targets(generate, 'Parsear textos'), ['Un item por cuenta']);
+  assert.match(nodeNamed(generate, 'Heartbeat antes de IA').parameters.body, /leaseSeconds: 1500/);
+  assert.match(nodeNamed(generate, 'Heartbeat tras IA').parameters.body, /leaseSeconds: 600/);
+});
+
+test('rrss-generate prepares one copy per distinct network with per-network rules', () => {
+  const generate = loadWorkflow(RRSS_GENERATE);
+  const [prepared] = runCode(generate, 'Preparar posts', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }] }, input: [RRSS_CTX] });
+  assert.equal(prepared.json.brandName, 'Sonrisas');
+  assert.equal(prepared.json.sector, 'Clínica dental');
+  assert.equal(prepared.json.siteUrl, 'https://clinica.example');
+  assert.equal(prepared.json.title, 'Consejos de higiene');
+  assert.equal(prepared.json.format, 'carousel');
+  assert.equal(prepared.json.keywords, 'higiene, encías');
+  assert.deepEqual(prepared.json.networks, ['gmb', 'instagram', 'other']);
+  const twoInstagram = RRSS_JOB({ accounts: [RRSS_ACCOUNTS[1], { ...RRSS_ACCOUNTS[1], id: 'acc-ig-2' }, { ...RRSS_ACCOUNTS[0], network: 'tiktok' }] });
+  assert.deepEqual(runCode(generate, 'Preparar posts', { nodes: { 'Validar trabajo': [{ job: twoInstagram }] }, input: [RRSS_CTX] })[0].json.networks, ['instagram', 'other']);
+  assert.equal(runCode(generate, 'Preparar posts', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }] }, input: [{ settings: { editorial_config: { topic: 'Clínica dental' } } }] })[0].json.brandName, 'Clínica dental');
+  assert.throws(() => runCode(generate, 'Preparar posts', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }] }, input: [{ settings: { editorial_config: {} } }] }), /Falta editorial_config\.brandName/);
+
+  const prompt = nodeNamed(generate, '🤖 IA: Textos por red').parameters.text;
+  for (const fragment of [/1\.400 caracteres/, /Sin hashtags/, /de 1 a 3 párrafos/, /entre 0 y 3 hashtags/, /de 5 a 10 hashtags/, /sin enlaces en el texto/, /No inventes/, /\* costo\n\* crucial\n\* adquirir\n\* calcomanía\n\* esencial/, /\$json\.networks\.includes\('gmb'\)/, /\$json\.networks\.includes\('instagram'\)/, /\$json\.networks\.includes\('facebook'\)/, /\$json\.networks\.includes\('other'\)/]) {
+    assert.match(prompt, fragment);
+  }
+});
+
+test('rrss-generate parses the per-network copy and fans out one item per account', () => {
+  const generate = loadWorkflow(RRSS_GENERATE);
+  const prepared = { networks: ['gmb', 'instagram', 'other'] };
+  const text = 'Aquí tienes:\n```json\n{"gmb":" Texto GMB ","instagram":"Texto IG #a","other":"Texto neutro","facebook":"sobra"}\n```';
+  const [parsed] = runCode(generate, 'Parsear textos', { nodes: { 'Preparar posts': [prepared] }, input: [{ text }] });
+  assert.deepEqual(parsed.json.texts, { gmb: 'Texto GMB', instagram: 'Texto IG #a', other: 'Texto neutro' });
+  assert.throws(() => runCode(generate, 'Parsear textos', { nodes: { 'Preparar posts': [prepared] }, input: [{ text: '{"gmb":"x","instagram":"y"}' }] }), /La IA no devolvio el texto para la red other/);
+  assert.throws(() => runCode(generate, 'Parsear textos', { nodes: { 'Preparar posts': [prepared] }, input: [{ text: 'no es json' }] }), /La IA no devolvio un JSON valido/);
+
+  const items = runCode(generate, 'Un item por cuenta', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }] }, input: [parsed.json] });
+  assert.deepEqual(items.map((item) => item.json), [
+    { index: 0, accountId: 'acc-gmb', network: 'gmb', label: 'GMB', copy: 'Texto GMB' },
+    { index: 1, accountId: 'acc-ig', network: 'instagram', label: 'Instagram', copy: 'Texto IG #a' },
+    { index: 2, accountId: 'acc-x', network: 'other', label: 'Otra', copy: 'Texto neutro' },
+  ]);
+});
+
+test('rrss-generate makes the AI image optional and every image failure degrades to a post without media', () => {
+  const generate = loadWorkflow(RRSS_GENERATE);
+  assert.deepEqual(targets(generate, 'Un item por cuenta'), ['Recorrer cuentas']);
+  assert.equal(nodeNamed(generate, 'Recorrer cuentas').type, 'n8n-nodes-base.splitInBatches');
+  assert.deepEqual(targets(generate, 'Recorrer cuentas', 0), ['Agregar posts'], 'done output aggregates every account once');
+  assert.deepEqual(targets(generate, 'Recorrer cuentas', 1), ['¿Generar imagen?'], 'loop output handles one account at a time');
+  assert.deepEqual(targets(generate, '¿Generar imagen?', 0), ['Generar imagen IA']);
+  assert.deepEqual(targets(generate, '¿Generar imagen?', 1), ['Preparar post'], 'generateImage false skips the whole image chain');
+  const condition = nodeNamed(generate, '¿Generar imagen?').parameters.conditions.conditions[0];
+  assert.equal(evaluateExpression(condition.leftValue, { 'Validar trabajo': [{ job: RRSS_JOB() }] }), true);
+  assert.equal(evaluateExpression(condition.leftValue, { 'Validar trabajo': [{ job: RRSS_JOB({ generateImage: undefined }) }] }), true, 'older payloads default to an image');
+  assert.equal(evaluateExpression(condition.leftValue, { 'Validar trabajo': [{ job: RRSS_JOB({ generateImage: false }) }] }), false);
+  assert.deepEqual(condition.operator, { type: 'boolean', operation: 'true', singleValue: true });
+
+  assert.deepEqual(targets(generate, 'Generar imagen IA'), ['Convertir imagen a binario']);
+  assert.deepEqual(targets(generate, 'Convertir imagen a binario'), ['Subir imagen a Postiz']);
+  assert.deepEqual(targets(generate, 'Subir imagen a Postiz'), ['Preparar post']);
+  for (const name of ['Generar imagen IA', 'Convertir imagen a binario', 'Subir imagen a Postiz']) {
+    assert.equal(nodeNamed(generate, name).onError, 'continueErrorOutput', name);
+    assert.deepEqual(targets(generate, name, 1), ['Preparar post'], `${name} errors degrade to a post without media`);
+  }
+  assert.deepEqual(targets(generate, 'Preparar post'), ['Recorrer cuentas']);
+  const image = nodeNamed(generate, 'Generar imagen IA').parameters;
+  assert.equal(image.url, 'https://api.openai.com/v1/images/generations');
+  assert.match(image.body, /gpt-image-1-mini/);
+  assert.match(image.body, /output_format: 'jpeg'/);
+  assert.match(image.body, /\$json\.network === 'instagram' \? '1024x1024' : '1536x1024'/);
+  assert.match(image.body, /sin texto superpuesto/);
+  assert.deepEqual(nodeNamed(generate, 'Subir imagen a Postiz').parameters, { operation: 'uploadFile', binaryProperty: 'data' });
+  assert.equal(nodeNamed(generate, 'Subir imagen a Postiz').type, 'n8n-nodes-postiz.postiz');
+
+  const accounts = runCode(generate, 'Un item por cuenta', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }] }, input: [{ texts: { gmb: 'G', instagram: 'I', other: 'O' } }] }).map((item) => item.json);
+  const post = (input: Items, runIndex: number) => runCode(generate, 'Preparar post', { nodes: { 'Un item por cuenta': accounts }, input, runIndex })[0].json;
+  assert.deepEqual(post([{ id: 'up-1', path: 'https://uploads.postiz.example/a.jpg' }], 1), { accountId: 'acc-ig', mediaUrl: 'https://uploads.postiz.example/a.jpg' });
+  assert.deepEqual(post([{ error: { message: 'Bad request' } }], 0), { accountId: 'acc-gmb', mediaUrl: null });
+  assert.deepEqual(post([{ path: '/uploads/a.jpg' }], 2), { accountId: 'acc-x', mediaUrl: null }, 'a relative path is not a valid media URL');
+  assert.deepEqual(post([accounts[2]], 0), { accountId: 'acc-x', mediaUrl: null }, 'the skipped-image branch carries its own accountId');
+  assert.deepEqual(post([], 1), { accountId: 'acc-ig', mediaUrl: null });
+
+  const aggregate = (input: Items) => runCode(generate, 'Agregar posts', { nodes: { 'Un item por cuenta': accounts }, input })[0].json;
+  const withImages = aggregate([{ accountId: 'acc-gmb', mediaUrl: null }, { accountId: 'acc-ig', mediaUrl: 'https://uploads.postiz.example/a.jpg' }]);
+  assert.deepEqual(withImages.socialPosts, [
+    { accountId: 'acc-gmb', copy: 'G', media: [] },
+    { accountId: 'acc-ig', copy: 'I', media: [{ url: 'https://uploads.postiz.example/a.jpg' }] },
+    { accountId: 'acc-x', copy: 'O', media: [] },
+  ], 'an account whose iteration produced nothing still gets its post');
+  assert.equal(withImages.imagesGenerated, 1);
+  const withoutImages = aggregate(accounts.map((account) => ({ accountId: account.accountId, mediaUrl: null })));
+  assert.ok(withoutImages.socialPosts.every((socialPost: any) => Array.isArray(socialPost.media) && socialPost.media.length === 0));
+});
+
+test('rrss-generate reports the exact generate_rrss result contract', () => {
+  const generate = loadWorkflow(RRSS_GENERATE);
+  assert.deepEqual(targets(generate, 'Agregar posts'), ['Heartbeat tras IA']);
+  assert.deepEqual(targets(generate, 'Heartbeat tras IA'), ['Normalizar resultado RRSS']);
+  assert.deepEqual(targets(generate, 'Normalizar resultado RRSS'), ['Guardar resultado Infidash']);
+  const socialPosts = [{ accountId: 'acc-gmb', copy: 'G', media: [] }, { accountId: 'acc-ig', copy: 'I', media: [{ url: 'https://uploads.postiz.example/a.jpg' }] }, { accountId: 'acc-x', copy: 'O', media: [] }];
+  const [result] = runCode(generate, 'Normalizar resultado RRSS', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }], 'Agregar posts': [{ socialPosts, imagesGenerated: 1 }] } });
+  assert.deepEqual(result.json, { schemaVersion: 1, clientId: 'client-a', status: 'succeeded', socialPosts, result: { workflowVersion: 1, count: 3, imagesGenerated: 1, generateImage: true }, leaseToken: 'lease-1', jobId: 'job-1' });
+  assert.throws(() => runCode(generate, 'Normalizar resultado RRSS', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }], 'Agregar posts': [{ socialPosts: [{ accountId: 'intrusa', copy: 'x', media: [] }] }] } }), /cuenta no seleccionada/);
+  assert.throws(() => runCode(generate, 'Normalizar resultado RRSS', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }], 'Agregar posts': [{ socialPosts: [{ accountId: 'acc-gmb', copy: ' ', media: [] }] }] } }), /Falta el texto del post/);
+  assert.throws(() => runCode(generate, 'Normalizar resultado RRSS', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }], 'Agregar posts': [{ socialPosts: [] }] } }), /No hay posts/);
+  const save = nodeNamed(generate, 'Guardar resultado Infidash').parameters;
+  assert.match(save.url, /\/api\/internal\/content\/jobs\/' \+ \$json\.jobId \+ '\/result/);
+  assert.match(save.body, /socialPosts:\$json\.socialPosts/);
+  assert.doesNotMatch(save.body, /jobId/);
+
+  for (const name of ['Validar trabajo', 'Heartbeat antes de IA', 'Cargar contexto Infidash', 'Preparar posts', '🤖 IA: Textos por red', 'Parsear textos', 'Un item por cuenta', 'Preparar post', 'Agregar posts', 'Heartbeat tras IA', 'Normalizar resultado RRSS', 'Guardar resultado Infidash']) {
+    assert.deepEqual(targets(generate, name, 1), ['Preparar fallo confirmado'], name);
+  }
+  const [failure] = runCode(generate, 'Preparar fallo confirmado', { nodes: { 'Validar trabajo': [{ job: RRSS_JOB() }] }, input: [{ error: { message: 'Service unavailable', httpCode: '503' } }] });
+  assert.deepEqual(failure.json, { schemaVersion: 1, clientId: 'client-a', status: 'failed', error: 'Service unavailable', result: { workflowVersion: 1, stage: 'generate_rrss' }, leaseToken: 'lease-1', jobId: 'job-1' });
+  const [early] = runCode(generate, 'Preparar fallo confirmado', { nodes: { 'Trabajo recibido': [{ job: { ...RRSS_JOB(), kind: 'otro' } }] }, input: [{ error: 'Contrato generate_rrss v1 invalido' }] });
+  assert.equal(early.json.status, 'failed');
+  assert.throws(() => runCode(generate, 'Preparar fallo confirmado', { nodes: { 'Trabajo recibido': [{ job: { id: 'job-1' } }] }, input: [{ error: 'x' }] }), /leaseToken/);
 });

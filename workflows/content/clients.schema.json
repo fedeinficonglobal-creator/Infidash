@@ -27,7 +27,9 @@
               "generate_plan": { "$ref": "#/$defs/workflowBinding" },
               "generate_content": { "$ref": "#/$defs/workflowBinding" },
               "publish": { "$ref": "#/$defs/workflowBinding" },
-              "reconcile": { "$ref": "#/$defs/workflowBinding" }
+              "reconcile": { "$ref": "#/$defs/workflowBinding" },
+              "generate_rrss_plan": { "$ref": "#/$defs/workflowBinding" },
+              "generate_rrss": { "$ref": "#/$defs/workflowBinding" }
             }
           }
         }
