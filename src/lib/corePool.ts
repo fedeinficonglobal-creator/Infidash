@@ -53,6 +53,8 @@ export function mapCorePgError(error: unknown): unknown {
   if (!(error instanceof Error)) return error;
   const { code, detail, constraint } = error as Error & { code?: unknown; detail?: unknown; constraint?: unknown };
   if (typeof code !== 'string' || !PSQL_STYLE_ERROR_CODES.has(code)) return error;
+  // Already rewritten (e.g. thrown by a helper inside a transaction callback): never prefix twice.
+  if (error.message.startsWith('ERROR:  ')) return error;
 
   const message = `ERROR:  ${error.message}${typeof detail === 'string' && detail ? `\nDETAIL:  ${detail}` : ''}`;
   return Object.assign(new Error(message, { cause: error }), {
@@ -79,4 +81,45 @@ export async function coreGet<T = Record<string, any>>(db: CoreQueryable, sql: s
 
 export async function coreRun(db: CoreQueryable, sql: string, params: unknown[] = []): Promise<{ changes: number }> {
   return { changes: (await runQuery(db, sql, params)).rowCount ?? 0 };
+}
+
+/** A pooled connection that can be returned to (or, given an error, destroyed by) its pool. */
+export interface CoreTransactionClient extends CoreQueryable {
+  release(error?: Error | boolean): void;
+}
+
+/** Minimal surface of `pg.Pool` needed to run a transaction, so tests can pass a fake. */
+export interface CoreTransactionPool {
+  connect(): Promise<CoreTransactionClient>;
+}
+
+/**
+ * Runs `fn` inside one transaction on a single pooled connection: BEGIN, then COMMIT when `fn` resolves or ROLLBACK
+ * when it (or the COMMIT) fails. The callback receives a queryable bound to that connection and must use it for every
+ * statement that has to be atomic. The connection is always released; if the ROLLBACK itself fails it is destroyed
+ * instead of being returned to the pool. Integrity errors are rethrown in the psql-style message shape.
+ */
+export async function withCoreTransaction<T>(
+  fn: (tx: CoreQueryable) => Promise<T>,
+  pool: CoreTransactionPool = getCorePool(),
+): Promise<T> {
+  const client = await pool.connect();
+  let releaseError: Error | undefined;
+  try {
+    await runQuery(client, 'BEGIN', []);
+    try {
+      const result = await fn(client);
+      await runQuery(client, 'COMMIT', []);
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        releaseError = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
+      throw mapCorePgError(error);
+    }
+  } finally {
+    client.release(releaseError);
+  }
 }

@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { UserFacingError } from './userFacingError.js';
-import { coreAll, coreGet, coreRun, getCorePool, type CoreQueryable } from './corePool.js';
+import { coreAll, coreGet, coreRun, getCorePool, withCoreTransaction, type CoreQueryable } from './corePool.js';
 import { createBackupFile, type BackupResult } from './databaseBackup.js';
 import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.js';
 import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
@@ -1235,6 +1235,12 @@ function getCoreDb(): CoreQueryable {
   return readyCoreDb;
 }
 
+/** Runs `fn` in one transaction on a dedicated pooled connection, after the core schema is ready. */
+async function runCoreTransaction<T>(fn: (tx: CoreQueryable) => Promise<T>): Promise<T> {
+  await initializeCoreDatabase();
+  return withCoreTransaction(fn);
+}
+
 async function getClientIdsForUser(db: CoreQueryable, userId: string, role: UserRole): Promise<string[] | null> {
   if (role === 'admin') return null;
   const rows = await coreAll<{ client_id: string }>(db, `SELECT client_id FROM client_memberships WHERE user_id = $1`, [userId]);
@@ -1455,15 +1461,18 @@ export async function createUser(input: { email: string; name: string; password:
     updated_at: timestamp,
   };
 
-  await coreRun(
-    db,
-    `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [record.id, record.email, record.name, record.password_hash, record.role, record.active, record.created_at, record.updated_at],
-  );
-  if (input.role === 'viewer') {
-    await setClientMemberships(db, record.id, input.clientIds ?? []);
-  }
+  // One transaction: an unknown client id must not leave an orphan user (which would also block reusing the email).
+  await runCoreTransaction(async (tx) => {
+    await coreRun(
+      tx,
+      `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [record.id, record.email, record.name, record.password_hash, record.role, record.active, record.created_at, record.updated_at],
+    );
+    if (input.role === 'viewer') {
+      await setClientMemberships(tx, record.id, input.clientIds ?? []);
+    }
+  });
   return rowToUser(db, record);
 }
 
@@ -1479,19 +1488,23 @@ export async function updateUserRole(userId: string, updates: Partial<{ role: Us
   const nextName = updates.name?.trim() || existing.name;
   const timestamp = nowIso();
 
-  await coreRun(
-    db,
-    `UPDATE users SET name = $1, role = $2, active = $3, updated_at = $4 WHERE id = $5`,
-    [nextName, nextRole, nextActive, timestamp, userId],
-  );
+  // The user update and the membership replacement commit together: a failing membership insert (unknown client id)
+  // must neither drop the previous memberships nor apply the role/name change.
+  await runCoreTransaction(async (tx) => {
+    await coreRun(
+      tx,
+      `UPDATE users SET name = $1, role = $2, active = $3, updated_at = $4 WHERE id = $5`,
+      [nextName, nextRole, nextActive, timestamp, userId],
+    );
 
-  if (nextRole === 'admin') {
-    // Membership rows only ever exist for viewers — clear them so a later
-    // demotion back to viewer never silently resurrects stale access.
-    await coreRun(db, `DELETE FROM client_memberships WHERE user_id = $1`, [userId]);
-  } else if (updates.clientIds) {
-    await setClientMemberships(db, userId, updates.clientIds);
-  }
+    if (nextRole === 'admin') {
+      // Membership rows only ever exist for viewers — clear them so a later
+      // demotion back to viewer never silently resurrects stale access.
+      await coreRun(tx, `DELETE FROM client_memberships WHERE user_id = $1`, [userId]);
+    } else if (updates.clientIds) {
+      await setClientMemberships(tx, userId, updates.clientIds);
+    }
+  });
 
   return rowToUser(db, {
     ...existing,
@@ -1509,8 +1522,10 @@ export async function deleteUser(userId: string) {
     return null;
   }
 
+  // Memberships cascade with the user, so they are read first to report the memberships the removed user had.
+  const removed = await rowToUser(db, existing);
   await coreRun(db, `DELETE FROM users WHERE id = $1`, [userId]);
-  return rowToUser(db, existing);
+  return removed;
 }
 
 export async function authenticateUser(email: string, password: string): Promise<LoginResult | null> {
@@ -1638,14 +1653,16 @@ export async function createClient(input: { name: string; industry?: string | nu
 
   // health_score is an INTEGER column: the ::numeric cast keeps PostgreSQL's assignment rounding (55.5 -> 56) that the
   // inlined numeric literal used to get, instead of failing on the text parameter "55.5".
-  await coreRun(
+  // RETURNING hands back the persisted row, so the caller sees the rounded INTEGER (56) that listClients will read.
+  const created = await coreGet(
     db,
     `INSERT INTO clients (id, name, slug, logo_url, industry, health_score, kpi_thresholds_json, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9)`,
+     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9)
+     RETURNING *`,
     [record.id, record.name, record.slug, record.logo_url, record.industry, record.health_score, record.kpi_thresholds_json, record.created_at, record.updated_at],
   );
 
-  return rowToClient(record);
+  return rowToClient(created);
 }
 
 export async function updateClient(clientId: string, input: { name?: string; industry?: string | null; logoUrl?: string | null; healthScore?: number; kpiThresholds?: Partial<KpiThresholds> | null }) {
@@ -1712,6 +1729,13 @@ export async function listClientIntegrations(clientId: string, db: CoreQueryable
   return rows.map(rowToIntegration);
 }
 
+/** Drops null/undefined/blank-string entries so they never overwrite a stored value in a spread merge. */
+function withoutBlankValues(values: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(values ?? {}).filter(([, value]) => value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '')),
+  );
+}
+
 export async function saveClientIntegration(input: IntegrationInput, db: CoreQueryable = getCoreDb()) {
   const timestamp = nowIso();
   const existingById = input.id
@@ -1743,7 +1767,9 @@ export async function saveClientIntegration(input: IntegrationInput, db: CoreQue
   if (provider === 'google_ads' && config.customerId && !/^\d+$/.test(config.customerId)) {
     throw new UserFacingError('El Customer ID de Google Ads debe ser numérico, sin guiones');
   }
-  const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...(input.credentials ?? {}) });
+  // A blank or undefined credential means "keep the stored secret": the integrations form submits every credential
+  // field and leaves untouched ones empty ("Los secretos existentes se conservan si dejas este campo vacío").
+  const credentials = normalizeIntegrationSection(definition.credentialFields, { ...previousCredentials, ...withoutBlankValues(input.credentials) });
   const missingFields = listMissingIntegrationFields(definition, config, credentials);
   const configurationUnchanged = Boolean(existing)
     && JSON.stringify(previousConfig) === JSON.stringify(config)
@@ -1988,7 +2014,8 @@ export async function insertLead(input: {
     email: input.email?.trim() || null,
     phone: input.phone?.trim() || null,
     message: input.message?.trim() || null,
-    dedupe_key: input.dedupeKey ?? null,
+    // A blank key is "no key": '' would be stored (the unique index only skips NULL) and break the next delivery.
+    dedupe_key: input.dedupeKey && input.dedupeKey.trim() ? input.dedupeKey : null,
     raw_payload_json: JSON.stringify(input.rawPayload ?? {}),
     received_at: timestamp,
     created_at: timestamp,
@@ -2073,6 +2100,17 @@ export async function testClientIntegration(id: string, db: CoreQueryable = getC
   const integration = rowToIntegration(row);
   const definition = getIntegrationProviderDefinition(integration.provider)!;
   const missingFields = listMissingIntegrationFields(definition, integration.config, Object.fromEntries(integration.secretKeys.map((key) => [key, 'present'])));
+  if (!integration.isActive) {
+    // A disabled integration is never probed: keep its status ('disabled'), error and timestamps untouched and report
+    // it as not ready, so a stray test cannot flip it to 'pending' while it stays inactive.
+    return {
+      integration,
+      ready: false,
+      missingFields,
+      summary: buildIntegrationCapabilitySummary(definition),
+    };
+  }
+
   const timestamp = nowIso();
   const status: IntegrationStatus = 'pending';
   const lastError = missingFields.length > 0
