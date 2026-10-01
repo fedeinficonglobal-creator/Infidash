@@ -244,31 +244,155 @@ test('publish validates account, copy and the GMB URL before paying for an AI im
   assert.doesNotMatch(nodeNamed(publish, 'Validar publicacion').parameters.jsCode, /account\.platform/);
 });
 
-const POSTIZ_NODES = ['Postiz Facebook', 'Postiz Instagram', 'Postiz GMB', 'Postiz Generico'];
+const POSTIZ_FLOWS = [
+  { path: 'inficon-global/publish.v1.json', prepare: 'Preparar publicacion', kind: 'publish' },
+  { path: 'inficon-global/reschedule.v1.json', prepare: 'Preparar reprogramacion', kind: 'reschedule' },
+];
+/**
+ * Settings the removed literal `n8n-nodes-postiz.postiz` nodes sent (git HEAD before phase 3b), mapped
+ * from their `settings.setting[{key, stringValue}]` fixedCollection into the public API's settings object.
+ */
+const LEGACY_POSTIZ_SETTINGS = (externalUrl: string): Record<string, Record<string, string>> => ({
+  facebook: { __type: 'facebook' },
+  instagram: { post_type: 'post' },
+  gmb: { topicType: 'STANDARD', callToActionType: 'LEARN_MORE', callToActionUrl: externalUrl },
+  other: {},
+});
+const NETWORK_INSTANCE_KEYS: Record<string, string> = { facebook: 'inficonglobal-facebook', instagram: 'inficonglobal-instagram', gmb: 'inficonglobal-gmb', other: 'inficonglobal-blog' };
+/** Runs Preparar → Construir payload Postiz for one workflow with the given job publication, context and upload result. */
+function buildPostizPayload(flow: typeof POSTIZ_FLOWS[number], { publication = {}, account = {}, settings = {}, uploaded }: { publication?: Record<string, unknown>; account?: Record<string, unknown>; settings?: Record<string, unknown>; uploaded?: Record<string, unknown> } = {}) {
+  const workflow = loadWorkflow(flow.path);
+  const job = { ...PUBLISH_JOB(publication), kind: flow.kind };
+  const ctx = POSTIZ_CTX(account, settings);
+  const nodes: Record<string, Items> = { 'Validar trabajo': [{ job }], 'Cargar contexto Infidash': [ctx] };
+  if (uploaded) nodes['Subir imagen a Postiz'] = [uploaded];
+  const [prepared] = runCode(workflow, flow.prepare, { nodes, input: [ctx] });
+  const [built] = runCode(workflow, 'Construir payload Postiz', { nodes: { ...nodes, [flow.prepare]: [prepared.json] }, input: [prepared.json] });
+  return { workflow, prepared: prepared.json, built: built.json };
+}
 
-test('Postiz network is chosen from instance_key, never from platform, and each network has its own static settings node', () => {
-  for (const path of ['inficon-global/publish.v1.json', 'inficon-global/reschedule.v1.json']) {
-    const workflow = loadWorkflow(path);
-    const prepare = path.includes('publish') ? 'Preparar publicacion' : 'Preparar reprogramacion';
-    const jobKind = path.includes('publish') ? 'publish' : 'reschedule';
-    const prepared = (instanceKey: string) => {
-      const ctx = POSTIZ_CTX({ instance_key: instanceKey }, { site_url: 'https://inficonglobal.es' });
-      return runCode(workflow, prepare, { nodes: { 'Validar trabajo': [{ job: { ...PUBLISH_JOB(), kind: jobKind } }], 'Cargar contexto Infidash': [ctx] }, input: [ctx] })[0].json;
-    };
-    assert.equal(prepared('inficonglobal-instagram').network, 'instagram', path);
-    assert.equal(prepared('inficonglobal-facebook').network, 'facebook', path);
-    assert.equal(prepared('inficonglobal-gmb').network, 'gmb', path);
-    assert.equal(prepared('inficonglobal-gmb').externalUrl, 'https://inficonglobal.es', `${path}: GMB falls back to editorial_config.site_url`);
-    assert.equal(prepared('inficonglobal-blog').network, 'other', `${path}: platform "blog" must not be mistaken for the network`);
-    assert.doesNotMatch(nodeNamed(workflow, prepare).parameters.jsCode, /account\.platform/);
-    const settings = (name: string) => nodeNamed(workflow, name).parameters.posts.post[0].settings.setting;
-    assert.deepEqual(settings('Postiz Instagram'), [{ key: 'post_type', stringValue: 'post' }]);
-    assert.deepEqual(settings('Postiz Facebook'), [{ key: '__type', stringValue: 'facebook' }]);
-    assert.ok(Array.isArray(settings('Postiz GMB')) && settings('Postiz GMB').some((setting: any) => setting.key === 'callToActionUrl'), `${path}: GMB settings must be a literal array`);
-    for (const name of POSTIZ_NODES) {
-      assert.deepEqual(targets(workflow, name), ['Capturar respuesta Postiz'], `${path}/${name}`);
-      assert.deepEqual(targets(workflow, name, 1), ['Capturar error Postiz'], `${path}/${name}`);
+test('Postiz network is chosen from instance_key, never from platform, and each network keeps its legacy settings', () => {
+  for (const flow of POSTIZ_FLOWS) {
+    for (const [network, instanceKey] of Object.entries(NETWORK_INSTANCE_KEYS)) {
+      const { prepared, built } = buildPostizPayload(flow, { account: { instance_key: instanceKey }, publication: { externalUrl: 'https://inficonglobal.es/oferta' } });
+      assert.equal(prepared.network, network, `${flow.path}/${instanceKey}`);
+      assert.deepEqual(built.body.posts[0].settings, LEGACY_POSTIZ_SETTINGS('https://inficonglobal.es/oferta')[network], `${flow.path}: ${network} settings must match the old literal Postiz node`);
     }
+    const workflow = loadWorkflow(flow.path);
+    assert.doesNotMatch(nodeNamed(workflow, flow.prepare).parameters.jsCode, /account\.platform/);
+    assert.doesNotMatch(nodeNamed(workflow, 'Construir payload Postiz').parameters.jsCode, /account\.platform/);
+  }
+});
+
+test('GMB callToActionUrl uses the job externalUrl, then editorial_config.site_url', () => {
+  for (const flow of POSTIZ_FLOWS) {
+    const explicit = buildPostizPayload(flow, { account: { instance_key: 'inficonglobal-gmb' }, publication: { externalUrl: 'https://inficonglobal.es/oferta' }, settings: { site_url: 'https://inficonglobal.es' } });
+    assert.equal(explicit.built.body.posts[0].settings.callToActionUrl, 'https://inficonglobal.es/oferta', flow.path);
+    const fallback = buildPostizPayload(flow, { account: { instance_key: 'inficonglobal-gmb' }, settings: { site_url: 'https://inficonglobal.es' } });
+    assert.equal(fallback.built.body.posts[0].settings.callToActionUrl, 'https://inficonglobal.es', `${flow.path}: GMB falls back to editorial_config.site_url`);
+    assert.throws(() => buildPostizPayload(flow, { account: { instance_key: 'inficonglobal-gmb' } }), /GMB requiere una URL/);
+  }
+});
+
+test('Construir payload Postiz sends every media item, images and videos, in order', () => {
+  const media = [
+    { url: 'https://cdn.example/a.jpg', type: 'image' },
+    { url: 'https://cdn.example/b.png', type: 'image', name: 'b.png' },
+    { url: 'https://cdn.example/c.mp4', type: 'video' },
+  ];
+  for (const flow of POSTIZ_FLOWS) {
+    const { prepared, built } = buildPostizPayload(flow, { account: { instance_key: 'inficonglobal-instagram' }, publication: { media } });
+    assert.equal(prepared.imageUrl, 'https://cdn.example/a.jpg', `${flow.path}: imageUrl stays the first item`);
+    assert.deepEqual(prepared.media.map((item: any) => item.url), media.map((item) => item.url));
+    assert.deepEqual(built.body, {
+      type: 'schedule',
+      date: '2026-10-01T09:00:00.000Z',
+      shortLink: false,
+      tags: [],
+      posts: [{
+        integration: { id: 'channel-1' },
+        value: [{ content: 'Texto', id: 'target-1', image: [
+          { id: 'img1', path: 'https://cdn.example/a.jpg' },
+          { id: 'img2', path: 'https://cdn.example/b.png' },
+          { id: 'img3', path: 'https://cdn.example/c.mp4' },
+        ] }],
+        settings: { post_type: 'post' },
+      }],
+    }, flow.path);
+    const many = Array.from({ length: 12 }, (_, index) => ({ url: `https://cdn.example/${index}.jpg` }));
+    const capped = buildPostizPayload(flow, { account: { instance_key: 'inficonglobal-facebook' }, publication: { media: [{ url: 'ftp://nope/x.jpg' }, ...many] } });
+    assert.equal(capped.built.body.posts[0].value[0].image.length, 10, `${flow.path}: at most 10 media items, only http(s)`);
+    assert.equal(capped.built.body.posts[0].value[0].image[0].path, 'https://cdn.example/0.jpg');
+  }
+});
+
+test('an empty media list falls back to the AI-uploaded image, then editorial_config.fallbackImageUrl', () => {
+  for (const flow of POSTIZ_FLOWS) {
+    const account = { instance_key: 'inficonglobal-facebook' };
+    const generated = buildPostizPayload(flow, { account, publication: { media: [] }, uploaded: { id: 'up-1', path: 'https://uploads.postiz.example/ai.jpg' }, settings: { fallbackImageUrl: 'https://cdn.example/fallback.jpg' } });
+    assert.deepEqual(generated.built.body.posts[0].value[0].image, [{ id: 'img1', path: 'https://uploads.postiz.example/ai.jpg' }], flow.path);
+    assert.equal(generated.prepared.imageUrl, 'https://uploads.postiz.example/ai.jpg');
+    const fallback = buildPostizPayload(flow, { account, publication: { media: [] }, settings: { fallbackImageUrl: 'https://cdn.example/fallback.jpg' } });
+    assert.deepEqual(fallback.built.body.posts[0].value[0].image, [{ id: 'img1', path: 'https://cdn.example/fallback.jpg' }], flow.path);
+    assert.throws(() => buildPostizPayload(flow, { account, publication: { media: [] } }), /La publicacion requiere imagen o editorial_config\.fallbackImageUrl/);
+  }
+});
+
+test('publish and reschedule create the Postiz post with one raw HTTP call to the public API', () => {
+  for (const flow of POSTIZ_FLOWS) {
+    const workflow = loadWorkflow(flow.path);
+    const postizNodes = workflow.nodes.filter((node: any) => node.type === 'n8n-nodes-postiz.postiz');
+    assert.ok(postizNodes.every((node: any) => node.parameters.operation === 'uploadFile'), `${flow.path}: only the uploadFile Postiz node may remain`);
+    assert.deepEqual(postizNodes.map((node: any) => node.name), ['Subir imagen a Postiz'], flow.path);
+    for (const removed of ['Es Facebook', 'Es Instagram', 'Es GMB', 'Postiz Facebook', 'Postiz Instagram', 'Postiz GMB', 'Postiz Generico']) {
+      assert.equal(workflow.nodes.some((node: any) => node.name === removed), false, `${flow.path} still has ${removed}`);
+    }
+    const http = nodeNamed(workflow, 'Crear post en Postiz');
+    assert.equal(http.type, 'n8n-nodes-base.httpRequest');
+    assert.equal(http.onError, 'continueErrorOutput');
+    assert.equal(http.parameters.method, 'POST');
+    assert.equal(http.parameters.url, "={{ $env.POSTIZ_INTERNAL_API_URL + '/public/v1/posts' }}");
+    assert.deepEqual(http.parameters.headerParameters.parameters, [{ name: 'Authorization', value: '={{ $env.POSTIZ_API_KEY }}' }]);
+    assert.equal(http.parameters.contentType, 'raw');
+    assert.equal(http.parameters.rawContentType, 'application/json');
+    assert.deepEqual(targets(workflow, 'Crear post en Postiz'), ['Capturar respuesta Postiz']);
+    assert.deepEqual(targets(workflow, 'Crear post en Postiz', 1), ['Capturar error Postiz']);
+    assert.deepEqual(targets(workflow, 'Construir payload Postiz', 1), ['Preparar fallo confirmado'], `${flow.path}: building the payload happens before any Postiz write`);
+    assert.deepEqual(edgesInto(workflow, 'Construir payload Postiz').map((edge) => edge.from), [flow.prepare]);
+
+    // The body expression evaluates to the exact JSON that Construir payload Postiz built.
+    const { built } = buildPostizPayload(flow, { account: { instance_key: 'inficonglobal-gmb' }, settings: { site_url: 'https://inficonglobal.es' } });
+    const expression = String(http.parameters.body).match(/^=\{\{([\s\S]*)\}\}$/);
+    assert.ok(expression, `${flow.path}: body must be a single n8n expression`);
+    const $ = (ref: string) => { assert.equal(ref, 'Construir payload Postiz'); return { first: () => ({ json: built }) }; };
+    const sent = new Function('$', '$json', `return (${expression![1]});`)($, built);
+    assert.equal(typeof sent, 'string');
+    assert.deepEqual(JSON.parse(sent), built.body);
+  }
+  const reschedule = loadWorkflow('inficon-global/reschedule.v1.json');
+  assert.deepEqual(targets(reschedule, 'Construir payload Postiz'), ['Hay publicacion anterior en Postiz'], 'reschedule builds the new post before deleting the old one');
+  assert.deepEqual(targets(reschedule, 'Hay publicacion anterior en Postiz', 0), ['Eliminar publicacion anterior en Postiz']);
+  assert.deepEqual(targets(reschedule, 'Hay publicacion anterior en Postiz', 1), ['Crear post en Postiz']);
+  assert.deepEqual(targets(reschedule, 'Eliminar publicacion anterior en Postiz', 0), ['Crear post en Postiz']);
+  assert.deepEqual(targets(reschedule, 'Eliminar publicacion anterior en Postiz', 1), ['Crear post en Postiz']);
+  const publish = loadWorkflow('inficon-global/publish.v1.json');
+  assert.deepEqual(targets(publish, 'Preparar publicacion'), ['Construir payload Postiz']);
+  assert.deepEqual(targets(publish, 'Construir payload Postiz'), ['Crear post en Postiz']);
+});
+
+test('the Postiz post id is read from the public API response and from the legacy node shape', () => {
+  for (const flow of POSTIZ_FLOWS) {
+    const workflow = loadWorkflow(flow.path);
+    const normalize = flow.kind === 'publish' ? 'Normalizar programacion' : 'Normalizar reprogramacion';
+    const prepared = { desiredScheduledAt: '2026-10-01T09:00:00.000Z', postizInstance: 'inficonglobal-gmb', accountId: 'account-1', oldPostizPostId: 'old-1' };
+    const run = (postizResponse: unknown) => runCode(workflow, normalize, { nodes: { 'Validar trabajo': [{ job: JOB }], [flow.prepare]: [prepared], 'Capturar respuesta Postiz': [{ postizResponse }] } })[0].json;
+    assert.equal(run({ postId: 'p-split', integration: 'channel-1' }).publication.postizPostId, 'p-split', `${flow.path}: n8n splits the array response into items`);
+    assert.equal(run([{ postId: 'p-array', integration: 'channel-1' }]).publication.postizPostId, 'p-array', `${flow.path}: raw array response`);
+    assert.equal(run({ id: 'p-legacy' }).publication.postizPostId, 'p-legacy', `${flow.path}: legacy node shape`);
+    assert.throws(() => run([]), /Postiz no devolvio postId/);
+    const [captured] = runCode(workflow, 'Capturar respuesta Postiz', { input: [{ postId: 'p-1', integration: 'channel-1' }] });
+    assert.deepEqual(captured.json.postizResponse, { postId: 'p-1', integration: 'channel-1' });
+    assert.doesNotMatch(JSON.stringify(workflow), /Postiz (?:Facebook|Instagram|GMB|Generico)/, `${flow.path}: no code may still reference the removed per-network nodes`);
   }
 });
 
@@ -282,9 +406,11 @@ test('publish failures after Postiz accepted the post are reported as unknown so
   const [after] = runCode(publish, 'Preparar fallo tras Postiz', { nodes: { 'Validar trabajo': [{ job: JOB }], 'Capturar respuesta Postiz': [{ postizResponse: { postId: 'post-9' } }] }, input: [{ error: { message: 'La reserva caducó' } }] });
   assert.equal(after.json.status, 'unknown');
   assert.deepEqual({ status: after.json.publication.status, postizPostId: after.json.publication.postizPostId, errorCode: after.json.publication.errorCode }, { status: 'unknown', postizPostId: 'post-9', errorCode: 'POST_WRITE_FAILURE' });
-  const [fromNetworkNode] = runCode(publish, 'Preparar fallo tras Postiz', { nodes: { 'Validar trabajo': [{ job: JOB }], 'Postiz GMB': [{ id: 'post-7' }] }, input: [{ error: 'boom' }] });
-  assert.equal(fromNetworkNode.json.publication.postizPostId, 'post-7', 'the id comes from whichever per-network Postiz node ran');
-  const [noId] = runCode(publish, 'Preparar fallo tras Postiz', { nodes: { 'Validar trabajo': [{ job: JOB }], 'Postiz Instagram': [{ error: { message: 'Bad request' } }] }, input: [{ error: 'boom' }] });
+  const [fromHttpNode] = runCode(publish, 'Preparar fallo tras Postiz', { nodes: { 'Validar trabajo': [{ job: JOB }], 'Crear post en Postiz': [{ postId: 'post-7', integration: 'channel-1' }] }, input: [{ error: 'boom' }] });
+  assert.equal(fromHttpNode.json.publication.postizPostId, 'post-7', 'the id comes from the Postiz public API response when the capture node never ran');
+  const [fromArray] = runCode(publish, 'Preparar fallo tras Postiz', { nodes: { 'Validar trabajo': [{ job: JOB }], 'Capturar respuesta Postiz': [{ postizResponse: [{ postId: 'post-8', integration: 'channel-1' }] }] }, input: [{ error: 'boom' }] });
+  assert.equal(fromArray.json.publication.postizPostId, 'post-8', 'an unsplit array response still yields the id');
+  const [noId] = runCode(publish, 'Preparar fallo tras Postiz', { nodes: { 'Validar trabajo': [{ job: JOB }], 'Crear post en Postiz': [{ error: { message: 'Bad request' } }] }, input: [{ error: 'boom' }] });
   assert.equal(noId.json.publication.postizPostId, null);
 });
 

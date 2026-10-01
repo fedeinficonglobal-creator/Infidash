@@ -181,7 +181,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const imageUrl=requested.media?.[0]?.url??generatedImagePath??ctx.settings?.editorial_config?.fallbackImageUrl;if(!imageUrl)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');const instanceKey=String(account.instance_key||'').toLowerCase();let network;if(instanceKey.includes('facebook'))network='facebook';else if(instanceKey.includes('instagram'))network='instagram';else if(instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google'))network='gmb';else network='other';let externalUrl=String(requested.externalUrl??'').trim();if(network==='gmb'){externalUrl=externalUrl||ctx.settings?.editorial_config?.site_url||'';if(!externalUrl)throw new Error('La publicacion en GMB requiere una URL (externalUrl del job o editorial_config.site_url)');}return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl,imageUrl,postizInstance:account.instance_key,network}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const ctx=$('Cargar contexto Infidash').first().json;const requested=job.payload.publication;const account=(ctx.accounts??[]).find(x=>x.id===requested.accountId&&x.provider==='postiz'&&x.active!==false);if(!account)throw new Error('Cuenta Postiz no autorizada para el cliente');if(!requested.copy)throw new Error('La publicacion requiere copy');const isHttpUrl=(value)=>typeof value==='string'&&/^https?:\\/\\//i.test(value.trim());let media=(Array.isArray(requested.media)?requested.media:[]).filter(item=>item&&isHttpUrl(item.url)).slice(0,10).map(item=>{const entry={url:item.url.trim()};if(item.type==='image'||item.type==='video')entry.type=item.type;if(item.name)entry.name=String(item.name);return entry;});if(!media.length){let generatedImagePath=null;try{generatedImagePath=$('Subir imagen a Postiz').first().json.path??null;}catch(e){generatedImagePath=null;}const fallbackUrl=generatedImagePath??ctx.settings?.editorial_config?.fallbackImageUrl;if(fallbackUrl)media=[{url:String(fallbackUrl),type:'image'}];}if(!media.length)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');const imageUrl=media[0].url;const instanceKey=String(account.instance_key||'').toLowerCase();let network;if(instanceKey.includes('facebook'))network='facebook';else if(instanceKey.includes('instagram'))network='instagram';else if(instanceKey.includes('gmb')||instanceKey.includes('business')||instanceKey.includes('google'))network='gmb';else network='other';let externalUrl=String(requested.externalUrl??'').trim();if(network==='gmb'){externalUrl=externalUrl||ctx.settings?.editorial_config?.site_url||'';if(!externalUrl)throw new Error('La publicacion en GMB requiere una URL (externalUrl del job o editorial_config.site_url)');}return [{json:{integrationId:account.external_account_id,accountId:account.id,desiredScheduledAt:requested.desiredScheduledAt,copy:requested.copy,externalUrl,imageUrl,media,postizInstance:account.instance_key,network}}];"
       },
       "id": "prepare-publish-v1",
       "name": "Preparar publicacion",
@@ -195,287 +195,46 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "net-fb-check",
-              "leftValue": "={{ $('Preparar publicacion').first().json.network }}",
-              "rightValue": "facebook",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
+        "jsCode": "// Builds the body for the Postiz public API (POST /public/v1/posts), sent by \"Crear post en Postiz\".\n// Replaces the four per-network n8n-nodes-postiz create-post nodes: their image list and settings are\n// fixedCollections that cannot be bound to a dynamic array, so N media items or videos were impossible.\n// INFERRED (verify against the live Postiz instance): the body shape {type,date,shortLink,tags,posts:[{\n// integration:{id},value:[{content,id,image:[{id,path}]}],settings}]} is derived from the Postiz node\n// parameters (integrationId, value.contentItem[].image.imageItem[{id,path}], settings.setting[{key,stringValue}])\n// and the public API CreatePostDto; each settings.setting {key,stringValue} entry becomes settings[key]=value.\n// Videos go in the same image[] list (Postiz detects the media type from the path).\nconst job=$('Validar trabajo').first().json.job;\nconst req=$('Preparar publicacion').first().json;\nconst media=(Array.isArray(req.media)?req.media:[]).filter(item=>item&&item.url).slice(0,10);\nif(!media.length)throw new Error('La publicacion requiere imagen o editorial_config.fallbackImageUrl');\nif(!req.integrationId)throw new Error('La cuenta Postiz no tiene external_account_id');\nif(req.network==='gmb'&&!req.externalUrl)throw new Error('La publicacion en GMB requiere una URL (externalUrl del job o editorial_config.site_url)');\n// Exactly the literal settings.setting arrays of the removed per-network (facebook/instagram/gmb/generic) Postiz nodes.\nconst settingsByNetwork={facebook:{__type:'facebook'},instagram:{post_type:'post'},gmb:{topicType:'STANDARD',callToActionType:'LEARN_MORE',callToActionUrl:req.externalUrl},other:{}};\nconst settings=settingsByNetwork[req.network]??settingsByNetwork.other;\nconst body={type:'schedule',date:req.desiredScheduledAt,shortLink:false,tags:[],posts:[{integration:{id:String(req.integrationId)},value:[{content:req.copy,id:job.target_id,image:media.map((item,index)=>({id:'img'+(index+1),path:item.url}))}],settings}]};\nreturn [{json:{body,network:req.network,mediaCount:media.length}}];"
       },
-      "id": "check-network-facebook-v1",
-      "name": "Es Facebook",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
+      "id": "build-postiz-payload-publish-v1",
+      "name": "Construir payload Postiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -180,
         -160
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
+        "method": "POST",
+        "url": "={{ $env.POSTIZ_INTERNAL_API_URL + '/public/v1/posts' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
             {
-              "id": "net-ig-check",
-              "leftValue": "={{ $('Preparar publicacion').first().json.network }}",
-              "rightValue": "instagram",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "check-network-instagram-v1",
-      "name": "Es Instagram",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [
-        -180,
-        60
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "net-gmb-check",
-              "leftValue": "={{ $('Preparar publicacion').first().json.network }}",
-              "rightValue": "gmb",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "check-network-gmb-v1",
-      "name": "Es GMB",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [
-        -180,
-        280
-      ]
-    },
-    {
-      "parameters": {
-        "type": "schedule",
-        "date": "={{ $('Preparar publicacion').first().json.desiredScheduledAt }}",
-        "posts": {
-          "post": [
-            {
-              "integrationId": "={{ $('Preparar publicacion').first().json.integrationId }}",
-              "settings": {
-                "setting": [
-                  {
-                    "key": "__type",
-                    "stringValue": "facebook"
-                  }
-                ]
-              },
-              "value": {
-                "contentItem": [
-                  {
-                    "content": "={{ $('Preparar publicacion').first().json.copy }}",
-                    "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
-                    "image": {
-                      "imageItem": [
-                        {
-                          "id": "img1",
-                          "path": "={{ $('Preparar publicacion').first().json.imageUrl }}"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
+              "name": "Authorization",
+              "value": "={{ $env.POSTIZ_API_KEY }}"
             }
           ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($('Construir payload Postiz').first().json.body) }}",
+        "options": {
+          "timeout": 60000
         }
       },
-      "id": "postiz-facebook-v1",
-      "name": "Postiz Facebook",
-      "type": "n8n-nodes-postiz.postiz",
-      "typeVersion": 1,
+      "id": "create-post-publish-v1",
+      "name": "Crear post en Postiz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         60,
         -220
-      ],
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "type": "schedule",
-        "date": "={{ $('Preparar publicacion').first().json.desiredScheduledAt }}",
-        "posts": {
-          "post": [
-            {
-              "integrationId": "={{ $('Preparar publicacion').first().json.integrationId }}",
-              "settings": {
-                "setting": [
-                  {
-                    "key": "post_type",
-                    "stringValue": "post"
-                  }
-                ]
-              },
-              "value": {
-                "contentItem": [
-                  {
-                    "content": "={{ $('Preparar publicacion').first().json.copy }}",
-                    "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
-                    "image": {
-                      "imageItem": [
-                        {
-                          "id": "img1",
-                          "path": "={{ $('Preparar publicacion').first().json.imageUrl }}"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      },
-      "id": "postiz-instagram-v1",
-      "name": "Postiz Instagram",
-      "type": "n8n-nodes-postiz.postiz",
-      "typeVersion": 1,
-      "position": [
-        60,
-        0
-      ],
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "type": "schedule",
-        "date": "={{ $('Preparar publicacion').first().json.desiredScheduledAt }}",
-        "posts": {
-          "post": [
-            {
-              "integrationId": "={{ $('Preparar publicacion').first().json.integrationId }}",
-              "settings": {
-                "setting": [
-                  {
-                    "key": "topicType",
-                    "stringValue": "STANDARD"
-                  },
-                  {
-                    "key": "callToActionType",
-                    "stringValue": "LEARN_MORE"
-                  },
-                  {
-                    "key": "callToActionUrl",
-                    "stringValue": "={{ $('Preparar publicacion').first().json.externalUrl }}"
-                  }
-                ]
-              },
-              "value": {
-                "contentItem": [
-                  {
-                    "content": "={{ $('Preparar publicacion').first().json.copy }}",
-                    "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
-                    "image": {
-                      "imageItem": [
-                        {
-                          "id": "img1",
-                          "path": "={{ $('Preparar publicacion').first().json.imageUrl }}"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      },
-      "id": "postiz-gmb-v1",
-      "name": "Postiz GMB",
-      "type": "n8n-nodes-postiz.postiz",
-      "typeVersion": 1,
-      "position": [
-        60,
-        220
-      ],
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "type": "schedule",
-        "date": "={{ $('Preparar publicacion').first().json.desiredScheduledAt }}",
-        "posts": {
-          "post": [
-            {
-              "integrationId": "={{ $('Preparar publicacion').first().json.integrationId }}",
-              "settings": {
-                "setting": []
-              },
-              "value": {
-                "contentItem": [
-                  {
-                    "content": "={{ $('Preparar publicacion').first().json.copy }}",
-                    "id": "={{ $('Validar trabajo').first().json.job.target_id }}",
-                    "image": {
-                      "imageItem": [
-                        {
-                          "id": "img1",
-                          "path": "={{ $('Preparar publicacion').first().json.imageUrl }}"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      },
-      "id": "postiz-generico-v1",
-      "name": "Postiz Generico",
-      "type": "n8n-nodes-postiz.postiz",
-      "typeVersion": 1,
-      "position": [
-        60,
-        440
       ],
       "onError": "continueErrorOutput"
     },
@@ -538,7 +297,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar publicacion').first().json;const response=$('Capturar respuesta Postiz').first().json.postizResponse;const postId=response.postId??response.id;if(!postId)throw new Error('Postiz no devolvio postId');const publication={status:'scheduled',confirmedScheduledAt:req.desiredScheduledAt,postizPostId:String(postId),providerPostId:null,externalUrl:null,publishedAt:null,errorCode:null,errorMessage:null};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:'postiz.scheduled',sourceEventId:`postiz:${req.postizInstance}:${postId}:scheduled`,occurredAt:new Date().toISOString(),publicationStatus:'scheduled',payload:{accountId:req.accountId,postizPostId:String(postId),confirmedScheduledAt:req.desiredScheduledAt}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',publication,event,result:{workflowVersion:1,state:'scheduled'},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "const job=$('Validar trabajo').first().json.job;const req=$('Preparar publicacion').first().json;const response=$('Capturar respuesta Postiz').first().json.postizResponse;const first=Array.isArray(response)?response[0]:(Array.isArray(response?.posts)?response.posts[0]:response);const postId=first?.postId??first?.id;if(!postId)throw new Error('Postiz no devolvio postId');const publication={status:'scheduled',confirmedScheduledAt:req.desiredScheduledAt,postizPostId:String(postId),providerPostId:null,externalUrl:null,publishedAt:null,errorCode:null,errorMessage:null};const event={schemaVersion:1,clientId:job.client_id,entityType:'publication',entityId:job.target_id,eventType:'postiz.scheduled',sourceEventId:`postiz:${req.postizInstance}:${postId}:scheduled`,occurredAt:new Date().toISOString(),publicationStatus:'scheduled',payload:{accountId:req.accountId,postizPostId:String(postId),confirmedScheduledAt:req.desiredScheduledAt}};return [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',publication,event,result:{workflowVersion:1,state:'scheduled'},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "normalize-publish-v1",
       "name": "Normalizar programacion",
@@ -737,7 +496,7 @@
     },
     {
       "parameters": {
-        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo tras enviar la publicacion a Postiz').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);let postizPostId=null;for(const name of [\"Capturar respuesta Postiz\",\"Postiz Facebook\",\"Postiz Instagram\",\"Postiz GMB\",\"Postiz Generico\"]){try{const json=$(name).first().json;const response=json?.postizResponse??json;const id=response?.postId??response?.id;if(id!=null&&!response?.error){postizPostId=String(id);break;}}catch(e){}}return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',error:message,publication:{status:'unknown',postizPostId,errorCode:'POST_WRITE_FAILURE',errorMessage:message},result:{workflowVersion:1,reconcileRequired:true,stage:'after_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
+        "jsCode": "let job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo tras enviar la publicacion a Postiz').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);let postizPostId=null;for(const name of [\"Capturar respuesta Postiz\",\"Crear post en Postiz\"]){try{const json=$(name).first().json;let response=json?.postizResponse??json;if(Array.isArray(response))response=response[0];const id=response?.postId??response?.id;if(id!=null&&!response?.error){postizPostId=String(id);break;}}catch(e){}}return [{json:{schemaVersion:1,clientId:job.client_id,status:'unknown',error:message,publication:{status:'unknown',postizPostId,errorCode:'POST_WRITE_FAILURE',errorMessage:message},result:{workflowVersion:1,reconcileRequired:true,stage:'after_postiz'},leaseToken:job.leaseToken,jobId:job.id}}];"
       },
       "id": "fail-after-postiz-publish-v1",
       "name": "Preparar fallo tras Postiz",
@@ -919,7 +678,7 @@
       "main": [
         [
           {
-            "node": "Es Facebook",
+            "node": "Construir payload Postiz",
             "type": "main",
             "index": 0
           }
@@ -933,115 +692,25 @@
         ]
       ]
     },
-    "Es Facebook": {
+    "Construir payload Postiz": {
       "main": [
         [
           {
-            "node": "Postiz Facebook",
+            "node": "Crear post en Postiz",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Es Instagram",
+            "node": "Preparar fallo confirmado",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Es Instagram": {
-      "main": [
-        [
-          {
-            "node": "Postiz Instagram",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Es GMB",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Es GMB": {
-      "main": [
-        [
-          {
-            "node": "Postiz GMB",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Postiz Generico",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Postiz Facebook": {
-      "main": [
-        [
-          {
-            "node": "Capturar respuesta Postiz",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Capturar error Postiz",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Postiz Instagram": {
-      "main": [
-        [
-          {
-            "node": "Capturar respuesta Postiz",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Capturar error Postiz",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Postiz GMB": {
-      "main": [
-        [
-          {
-            "node": "Capturar respuesta Postiz",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Capturar error Postiz",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Postiz Generico": {
+    "Crear post en Postiz": {
       "main": [
         [
           {
