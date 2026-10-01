@@ -13,16 +13,30 @@ export interface CoreQueryable {
 let corePool: Pool | null = null;
 
 const PG_DATE_OID = 1082;
+const PG_TIMESTAMPTZ_OID = 1184;
 
 /**
  * pg turns DATE into a JavaScript Date at local midnight, which shifts the day across time zones. The whole API
  * contract uses plain 'YYYY-MM-DD' strings (daily_stats.stat_date is the only DATE column), so the core pool hands
  * DATE values back as the raw text PostgreSQL sends. Scoped to this pool through the per-client `types` option: the
  * editorial pool and the global pg parsers are untouched, and every other type keeps its default parser.
+ *
+ * TIMESTAMPTZ (sessions.expires_at, leads.received_at) is handed back as the fixed-width UTC string the API always
+ * used ('YYYY-MM-DDTHH:mm:ss.sssZ', i.e. Date#toISOString()), whatever offset or microsecond precision PostgreSQL
+ * prints. pg's own parser does the text parsing (offsets, fractions); a value it cannot turn into a finite Date
+ * (infinity, out-of-range) is passed through untouched rather than throwing while a row is being read.
  */
+const parseTimestamptzDefault = pgTypes.getTypeParser(PG_TIMESTAMPTZ_OID, 'text') as unknown as (value: string) => unknown;
+
+export function parseTimestamptzAsIso(value: string): string {
+  const parsed = parseTimestamptzDefault(value);
+  return parsed instanceof Date && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : value;
+}
+
 export const coreTypeParsers = {
   getTypeParser(oid: number, format?: 'text' | 'binary') {
     if (oid === PG_DATE_OID) return (value: string) => value;
+    if (oid === PG_TIMESTAMPTZ_OID && format !== 'binary') return parseTimestamptzAsIso;
     return pgTypes.getTypeParser(oid, format as 'text');
   },
 } as NonNullable<PoolConfig['types']>;
