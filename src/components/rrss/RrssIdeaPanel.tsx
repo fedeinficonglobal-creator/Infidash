@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { AlertCircle, LoaderCircle, Sparkles, X } from 'lucide-react';
+import { AlertCircle, FilePlus2, LoaderCircle, Sparkles, Upload, X } from 'lucide-react';
 import { useClientStore } from '../../store/useClientStore.js';
-import { useRrssStore } from '../../store/useRrssStore.js';
+import { useRrssStore, type BulkUploadState } from '../../store/useRrssStore.js';
 import { canRunJob, formatEditorialDate } from '../../lib/content.js';
-import { RRSS_FORMATS, RRSS_NETWORKS, canGeneratePosts, formatLabel, networkFromInstanceKey, networkLabel, preselectAccountIds, rrssIdeaDisplayStatus } from '../../lib/rrss.js';
-import type { RrssIdea } from '../../services/rrssApi.js';
+import { CREATIVE_ACCEPT, RRSS_FORMATS, RRSS_NETWORKS, bulkUploadTargets, canGeneratePosts, copyLimit, formatLabel, manualDraftAccounts, networkFromInstanceKey, networkLabel, preselectAccountIds, rrssIdeaDisplayStatus, validateCreativeFile } from '../../lib/rrss.js';
+import type { RrssIdea, SocialPost } from '../../services/rrssApi.js';
+import { cn } from '../../lib/utils.js';
 import { Button, Field } from '../content/controls.js';
 import { ContentStatusBadge } from '../content/ContentStatusBadge.js';
 import { SocialPostCard } from './SocialPostCard.js';
@@ -63,19 +64,133 @@ function GeneratePostsDialog({ idea, onClose }: { idea: RrssIdea; onClose: () =>
   </div>;
 }
 
+const NO_EDITABLE_DRAFTS = 'No hay borradores editables (en revisión o aprobados)';
+
+/** Files picked for a creative input, split into uploadable ones and per-file Spanish errors. */
+function pickCreatives(list: FileList | null) {
+  const files: File[] = list ? Array.from(list) : [];
+  const valid: File[] = [];
+  const errors: string[] = [];
+  files.forEach((file) => { const invalid = validateCreativeFile(file); if (invalid) errors.push(`${file.name}: ${invalid}`); else valid.push(file); });
+  return { valid, errors };
+}
+
+export interface RrssDraftsToolbarProps {
+  admin: boolean;
+  ideaStatus: string;
+  posts: ReadonlyArray<Pick<SocialPost, 'status'>>;
+  busy: boolean;
+  bulkUpload: BulkUploadState | null;
+  onNewDraft: () => void;
+  onBulkUpload: (files: File[]) => void;
+  onDismissBulkUpload?: () => void;
+}
+
+/** «Nuevo borrador» and «Subir creatividad para todos» (admins), with the bulk upload progress and summary. */
+export function RrssDraftsToolbar({ admin, ideaStatus, posts, busy, bulkUpload, onNewDraft, onBulkUpload, onDismissBulkUpload }: RrssDraftsToolbarProps) {
+  if (!admin) return null;
+  const hasTargets = bulkUploadTargets(posts).length > 0;
+  const running = bulkUpload?.status === 'running';
+  const bulkDisabled = !hasTargets || busy || running;
+  return <div className="space-y-2">
+    <div className="flex flex-wrap gap-2">
+      {ideaStatus !== 'generating' && <Button type="button" disabled={busy || running} onClick={onNewDraft} className="bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm ring-1 ring-slate-200"><FilePlus2 className="size-4" />Nuevo borrador</Button>}
+      <label aria-disabled={bulkDisabled ? 'true' : undefined} title={hasTargets ? undefined : NO_EDITABLE_DRAFTS} className={cn('inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600 hover:border-brand-primary hover:text-brand-primary', bulkDisabled && 'cursor-not-allowed opacity-50 hover:border-slate-300 hover:text-slate-600')}>
+        <Upload className="size-4" />Subir creatividad para todos
+        <input type="file" accept={CREATIVE_ACCEPT} multiple disabled={bulkDisabled} className="sr-only" onChange={(event) => { const files: File[] = event.target.files ? Array.from(event.target.files) : []; event.target.value = ''; if (files.length) onBulkUpload(files); }} />
+      </label>
+    </div>
+    {running && <p className="flex items-center gap-2 rounded-xl bg-slate-50 p-3 text-xs font-semibold text-slate-600" aria-live="polite"><LoaderCircle className="size-4 shrink-0 animate-spin" />{bulkUpload?.progress ?? 'Subiendo…'}</p>}
+    {bulkUpload?.status === 'done' && <div className={cn('space-y-1 rounded-xl p-3 text-xs', bulkUpload.failures.length ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-800')} role="status">
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-bold">{bulkUpload.failures.length ? 'Algunas creatividades no se añadieron:' : 'Creatividades añadidas a todos los borradores editables.'}</p>
+        {onDismissBulkUpload && <button type="button" onClick={onDismissBulkUpload} aria-label="Cerrar resumen de la subida" className="rounded p-0.5 hover:bg-white"><X className="size-3.5" /></button>}
+      </div>
+      {bulkUpload.failures.length > 0 && <ul className="list-disc space-y-0.5 pl-4">{bulkUpload.failures.map((failure) => <li key={failure}>{failure}</li>)}</ul>}
+      {bulkUpload.approvedReturned && <p className="font-semibold text-amber-800">Los borradores aprobados vuelven a revisión.</p>}
+    </div>}
+  </div>;
+}
+
+function NewDraftDialog({ idea, onClose }: { idea: RrssIdea; onClose: () => void }) {
+  const token = useClientStore((state) => state.sessionToken) ?? '';
+  const { publishingAccounts, socialPosts, loadAccounts, createManualDraft } = useRrssStore();
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
+  const [accountId, setAccountId] = useState('');
+  const [copy, setCopy] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileErrors, setFileErrors] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [failedFiles, setFailedFiles] = useState<{ name: string; error: string }[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    void loadAccounts(token).finally(() => { if (active) setIsLoadingAccounts(false); });
+    return () => { active = false; };
+  }, [idea.id, loadAccounts, token]);
+  const { accounts, emptyReason } = manualDraftAccounts(publishingAccounts, socialPosts);
+  // Keep a valid selection: default to the first free account, and drop one that got a draft meanwhile.
+  useEffect(() => { if (!failedFiles && !accounts.some((account) => account.id === accountId)) setAccountId(accounts[0]?.id ?? ''); }, [accounts.map((account) => account.id).join(','), accountId, failedFiles]);
+  const selected = accounts.find((account) => account.id === accountId);
+  const limit = copyLimit(selected ? networkFromInstanceKey(selected.instanceKey) : 'other');
+  const created = failedFiles !== null;
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Nuevo borrador">
+    <form className="max-h-full w-full max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" onSubmit={async (event) => {
+      event.preventDefault();
+      if (created) { onClose(); return; }
+      setError(null);
+      setIsSubmitting(true);
+      try {
+        const result = await createManualDraft(token, idea.id, { accountId, copy, files });
+        if (result.failedFiles.length) setFailedFiles(result.failedFiles); else onClose();
+      } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo crear el borrador'); }
+      finally { setIsSubmitting(false); }
+    }}>
+      <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Nuevo borrador</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar"><X className="size-4" /></Button></div>
+      <p className="text-xs text-slate-500">Para posts hechos en otra herramienta (Canva, Photoshop, CapCut…): elige la cuenta, pega el texto y sube las creatividades.</p>
+      <label className="block text-xs font-bold text-slate-500">Cuenta
+        {isLoadingAccounts ? <span className="mt-1 flex items-center gap-2 text-sm font-normal text-slate-500"><LoaderCircle className="size-4 animate-spin" />Cargando cuentas…</span>
+          : <select value={accountId} disabled={created || !accounts.length} onChange={(event) => setAccountId(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 disabled:bg-slate-100">{accounts.map((account) => <option key={account.id} value={account.id}>{account.label} · {networkLabel(networkFromInstanceKey(account.instanceKey))}</option>)}</select>}
+      </label>
+      {!isLoadingAccounts && emptyReason && !created && <p className="text-xs font-semibold text-amber-700">{emptyReason}</p>}
+      <div>
+        <label className="block text-xs font-bold text-slate-500">Texto del post<textarea rows={6} value={copy} disabled={created} onChange={(event) => setCopy(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 disabled:bg-slate-100" /></label>
+        <span className={cn('text-[11px] font-semibold', copy.length > limit ? 'text-rose-600' : 'text-slate-400')} aria-live="polite">{copy.length} / {limit}</span>
+      </div>
+      <div className="space-y-1">
+        <label className={cn('inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-bold text-slate-600 hover:border-brand-primary hover:text-brand-primary', created && 'pointer-events-none opacity-50')}>
+          <Upload className="size-4" />Añadir creatividades (opcional)
+          <input type="file" accept={CREATIVE_ACCEPT} multiple disabled={created} className="sr-only" onChange={(event) => { const picked = pickCreatives(event.target.files); event.target.value = ''; setFiles([...files, ...picked.valid]); setFileErrors(picked.errors); }} />
+        </label>
+        <p className="text-[11px] text-slate-400">Imágenes JPG, PNG o WEBP (máx. 10 MB) y vídeos MP4 o MOV (máx. 200 MB).</p>
+        {files.length > 0 && <ul className="space-y-1">{files.map((file, index) => <li key={`${file.name}-${index}`} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1 text-xs text-slate-600"><span className="truncate font-semibold">{file.name}</span>{!created && <button type="button" onClick={() => setFiles(files.filter((_, position) => position !== index))} aria-label={`Quitar ${file.name}`} className="rounded p-0.5 hover:bg-white"><X className="size-3.5" /></button>}</li>)}</ul>}
+        {fileErrors.length > 0 && <ul role="alert" className="space-y-0.5 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{fileErrors.map((line) => <li key={line}>{line}</li>)}</ul>}
+      </div>
+      {error && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</p>}
+      {created && <div role="alert" className="rounded-lg bg-amber-50 p-2 text-sm text-amber-800"><p className="font-bold">El borrador se creó, pero no se pudieron subir estas creatividades:</p><ul className="mt-1 list-disc pl-4 text-xs">{failedFiles.map((file) => <li key={file.name}>{file.name}: {file.error}</li>)}</ul><p className="mt-1 text-xs">Puedes subirlas desde la tarjeta del borrador.</p></div>}
+      <div className="flex justify-end gap-2">
+        {!created && <Button type="button" onClick={onClose} className="bg-slate-100 text-slate-700">Cancelar</Button>}
+        {created ? <Button type="submit" className="bg-slate-900 text-white">Cerrar</Button>
+          : <Button type="submit" disabled={isSubmitting || isLoadingAccounts || !selected || !copy.trim()} className="bg-slate-900 text-white">{isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}Crear borrador</Button>}
+      </div>
+    </form>
+  </div>;
+}
+
 /** Drawer with the idea brief, its status actions and its social post drafts. */
 export function RrssIdeaPanel() {
   const token = useClientStore((state) => state.sessionToken) ?? '';
   const role = useClientStore((state) => state.currentUser?.role);
-  const { items, selectedId, socialPosts, uploads, readiness, isLoadingDetail, isSaving, detailError, conflict, select, saveIdea, releaseGeneration, saveCopy, removeMedia, moveMedia, uploadFiles, dismissUpload, approvePost, discardPost, schedulePost, refresh, clearConflict } = useRrssStore();
+  const { items, selectedId, socialPosts, uploads, bulkUpload, readiness, isLoadingDetail, isSaving, detailError, conflict, select, saveIdea, releaseGeneration, saveCopy, removeMedia, moveMedia, uploadFiles, uploadToAllDrafts, dismissBulkUpload, dismissUpload, approvePost, discardPost, schedulePost, refresh, clearConflict } = useRrssStore();
   const idea = items.find((candidate) => candidate.id === selectedId) ?? null;
   const [draft, setDraft] = useState({ title: '', theme: '', rationale: '', format: '', networks: [] as string[], cta: '', plannedAt: '' });
   const [generating, setGenerating] = useState(false);
+  const [newDraftOpen, setNewDraftOpen] = useState(false);
   useEffect(() => { if (idea) setDraft({ title: idea.title, theme: idea.theme ?? '', rationale: idea.rationale ?? '', format: idea.format ?? '', networks: [...idea.networks], cta: idea.cta ?? '', plannedAt: toLocalInput(idea.plannedAt) }); }, [idea?.id, idea?.version]); // Keyed by id+version: a background refresh must not wipe unsaved edits.
   if (!idea) return null;
   const admin = role === 'admin';
   const ignore = () => { /* the store already surfaced the error in the panel */ };
-  const close = () => { setGenerating(false); void select(token, null); };
+  const close = () => { setGenerating(false); setNewDraftOpen(false); void select(token, null); };
   const release = () => { if (!window.confirm('¿Marcar la generación como fallida? Revisa antes que no se hayan creado ya los borradores para no duplicarlos.')) return; void releaseGeneration(token, idea.id).catch(ignore); };
   return <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" role="dialog" aria-modal="true" aria-label={`Detalle de ${idea.title}`} onMouseDown={(event) => { if (event.currentTarget === event.target) close(); }}><aside className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur"><div className="flex items-start justify-between gap-4"><div><ContentStatusBadge status={rrssIdeaDisplayStatus(idea.status, socialPosts)} /><h2 className="mt-2 text-xl font-bold text-slate-900">{idea.title}</h2><p className="mt-1 text-xs text-slate-500">{formatEditorialDate(idea.plannedAt)} · {formatLabel(idea.format)}</p></div><Button onClick={close} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar detalle"><X className="size-4" /></Button></div></div>
@@ -98,10 +213,14 @@ export function RrssIdeaPanel() {
       </form>
       <section aria-label="Borradores" className="space-y-3">
         <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">Borradores</h3>
+        <RrssDraftsToolbar admin={admin} ideaStatus={idea.status} posts={socialPosts} busy={isSaving || isLoadingDetail} bulkUpload={bulkUpload}
+          onNewDraft={() => setNewDraftOpen(true)}
+          onBulkUpload={(files) => void uploadToAllDrafts(token, idea.id, files)}
+          onDismissBulkUpload={dismissBulkUpload} />
         {isLoadingDetail && <p className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />Cargando borradores…</p>}
         {idea.status === 'generating' && <p className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800"><LoaderCircle className="size-4 shrink-0 animate-spin" />Generando posts… los borradores aparecerán aquí automáticamente.</p>}
         {!isLoadingDetail && !socialPosts.length && <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">Esta idea todavía no tiene borradores.</p>}
-        {socialPosts.map((post) => <SocialPostCard key={post.id} post={post} admin={admin} canPublish={canRunJob(readiness, 'publish')} busy={isSaving} uploads={uploads[post.id] ?? []}
+        {socialPosts.map((post) => <SocialPostCard key={post.id} post={post} admin={admin} canPublish={canRunJob(readiness, 'publish')} busy={isSaving || bulkUpload?.status === 'running'} uploads={uploads[post.id] ?? []}
           onSaveCopy={(copy) => void saveCopy(token, post.id, copy).catch(ignore)}
           onRemoveMedia={(index) => void removeMedia(token, post.id, index).catch(ignore)}
           onMoveMedia={(index, delta) => void moveMedia(token, post.id, index, delta).catch(ignore)}
@@ -113,5 +232,6 @@ export function RrssIdeaPanel() {
       </section>
     </div>
     {generating && <GeneratePostsDialog idea={idea} onClose={() => setGenerating(false)} />}
+    {newDraftOpen && <NewDraftDialog idea={idea} onClose={() => setNewDraftOpen(false)} />}
   </aside></div>;
 }

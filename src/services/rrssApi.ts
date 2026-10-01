@@ -79,6 +79,11 @@ export function getSocialPosts(token: string, planItemId: string, signal?: Abort
   return request<{ socialPosts: SocialPost[] }>(`/api/content/plan-items/${encodeURIComponent(planItemId)}/social-posts`, token, { signal });
 }
 
+/** «Nuevo borrador»: a manual draft (no AI) for one Postiz account; creatives are uploaded afterwards. */
+export function createSocialPost(token: string, planItemId: string, input: { accountId: string; copy: string }) {
+  return request<{ socialPost: SocialPost }>(`/api/content/plan-items/${encodeURIComponent(planItemId)}/social-posts`, token, { method: 'POST', body: JSON.stringify(input) });
+}
+
 export function updateSocialPost(token: string, id: string, input: { copy?: string; media?: SocialMedia[]; expectedVersion: number }) {
   return request<{ socialPost: SocialPost }>(postPath(id), token, { method: 'PATCH', body: JSON.stringify(input) });
 }

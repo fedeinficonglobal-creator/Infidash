@@ -15,6 +15,7 @@ import {
 import {
   approveSocialPost,
   createRrssIdea,
+  createSocialPost,
   discardSocialPost,
   getRrssItems,
   getRrssPlanInputs,
@@ -29,11 +30,14 @@ import {
   type SocialMedia,
   type SocialPost,
 } from '../services/rrssApi.js';
-import { RRSS_PAGE_SIZE, moveMediaItem, removeMediaItem, socialScheduleKey, validateCreativeFile } from '../lib/rrss.js';
+import { MAX_POST_MEDIA, RRSS_PAGE_SIZE, appendMediaItem, bulkUploadTargets, canEditPost, moveMediaItem, networkLabel, removeMediaItem, socialScheduleKey, validateCreativeFile } from '../lib/rrss.js';
 
 export interface RrssFilters { status: string; format: string; search: string; }
 /** One file of a «Subir creatividad» batch; finished uploads leave the list, failures stay until dismissed. */
 export interface CreativeUpload { key: string; name: string; status: 'uploading' | 'error'; error?: string; }
+/** Progress and outcome of «Subir creatividad para todos»; `failures` are Spanish, one line per file or draft. */
+export interface BulkUploadState { status: 'running' | 'done'; progress: string | null; failures: string[]; approvedReturned: boolean; }
+export interface ManualDraftResult { socialPost: SocialPost; failedFiles: { name: string; error: string }[]; }
 
 interface RrssState {
   clientId: string;
@@ -50,6 +54,7 @@ interface RrssState {
   selectedId: string | null;
   socialPosts: SocialPost[];
   uploads: Record<string, CreativeUpload[]>;
+  bulkUpload: BulkUploadState | null;
   isLoading: boolean;
   isRefreshing: boolean;
   isLoadingDetail: boolean;
@@ -83,6 +88,11 @@ interface RrssState {
   /** Validates then uploads each file one by one, tracking a per-file spinner or error. */
   uploadFiles: (token: string, postId: string, files: File[]) => Promise<void>;
   dismissUpload: (postId: string, key: string) => void;
+  /** «Nuevo borrador»: creates a manual draft, then uploads `files` to it one by one; a failed upload keeps the draft. */
+  createManualDraft: (token: string, ideaId: string, input: { accountId: string; copy: string; files?: File[] }) => Promise<ManualDraftResult>;
+  /** «Subir creatividad para todos»: uploads each file once, then appends that same creative to every other editable draft. */
+  uploadToAllDrafts: (token: string, ideaId: string, files: File[]) => Promise<BulkUploadState>;
+  dismissBulkUpload: () => void;
   approvePost: (token: string, postId: string) => Promise<void>;
   discardPost: (token: string, postId: string) => Promise<void>;
   schedulePost: (token: string, postId: string, input: { desiredScheduledAt: string; externalUrl?: string }) => Promise<void>;
@@ -136,6 +146,7 @@ export const useRrssStore = create<RrssState>((set, get) => {
     selectedId: null,
     socialPosts: [],
     uploads: {},
+    bulkUpload: null,
     isLoading: false,
     isRefreshing: false,
     isLoadingDetail: false,
@@ -147,7 +158,7 @@ export const useRrssStore = create<RrssState>((set, get) => {
     reset: (clientId) => {
       listController?.abort(); detailController?.abort();
       requestSerial += 1;
-      set({ clientId, filters: EMPTY_FILTERS, items: [], nextCursor: null, ...FIRST_PAGE, jobs: [], readiness: null, publishingAccounts: [], selectedId: null, socialPosts: [], uploads: {}, isLoading: false, isRefreshing: false, isLoadingDetail: false, isSaving: false, error: null, detailError: null, conflict: null, lastUpdatedAt: null });
+      set({ clientId, filters: EMPTY_FILTERS, items: [], nextCursor: null, ...FIRST_PAGE, jobs: [], readiness: null, publishingAccounts: [], selectedId: null, socialPosts: [], uploads: {}, bulkUpload: null, isLoading: false, isRefreshing: false, isLoadingDetail: false, isSaving: false, error: null, detailError: null, conflict: null, lastUpdatedAt: null });
     },
     setFilters: (partial) => set((state) => ({ filters: { ...state.filters, ...partial }, ...FIRST_PAGE })),
     load: async (token) => {
@@ -206,7 +217,7 @@ export const useRrssStore = create<RrssState>((set, get) => {
     },
     select: async (token, id) => {
       detailController?.abort();
-      set({ selectedId: id, socialPosts: [], uploads: {}, detailError: null, conflict: null, isLoadingDetail: false });
+      set({ selectedId: id, socialPosts: [], uploads: {}, bulkUpload: null, detailError: null, conflict: null, isLoadingDetail: false });
       if (!id) return;
       await get().loadSocialPosts(token, id);
     },
@@ -305,6 +316,94 @@ export const useRrssStore = create<RrssState>((set, get) => {
       }
     },
     dismissUpload: (postId, key) => setUploads(postId, (entries) => entries.filter((entry) => entry.key !== key)),
+    createManualDraft: async (token, ideaId, input) => {
+      set({ isSaving: true, conflict: null, detailError: null });
+      try {
+        let { socialPost } = await createSocialPost(token, ideaId, { accountId: input.accountId, copy: input.copy });
+        const summary = { id: socialPost.id, accountId: socialPost.accountId, network: socialPost.network, status: socialPost.status };
+        // Mirror the server: a proposed/approved idea moves to review (version bump) once it has a draft.
+        set((state) => ({
+          socialPosts: state.selectedId === ideaId ? [...state.socialPosts.filter((post) => post.id !== socialPost.id), socialPost] : state.socialPosts,
+          items: state.items.map((item) => item.id !== ideaId ? item : {
+            ...item,
+            socialPosts: [...(item.socialPosts ?? []), summary],
+            ...(item.status === 'proposed' || item.status === 'approved' ? { status: 'review' as const, version: item.version + 1 } : {}),
+          }),
+        }));
+        const failedFiles: ManualDraftResult['failedFiles'] = [];
+        for (const file of input.files ?? []) {
+          const invalid = validateCreativeFile(file);
+          if (invalid) { failedFiles.push({ name: file.name, error: invalid }); continue; }
+          try { socialPost = (await uploadSocialPostMedia(token, socialPost.id, file)).socialPost; replacePost(socialPost); }
+          catch (error) { failedFiles.push({ name: file.name, error: message(error) }); }
+        }
+        if (get().selectedId === ideaId) await get().loadSocialPosts(token, ideaId);
+        return { socialPost, failedFiles };
+      } finally { set({ isSaving: false }); }
+    },
+    uploadToAllDrafts: async (token, ideaId, files) => {
+      const failures: string[] = [];
+      let approvedReturned = false;
+      const publish = (status: BulkUploadState['status'], progress: string | null) => {
+        const next: BulkUploadState = { status, progress, failures: [...failures], approvedReturned };
+        set({ bulkUpload: next });
+        return next;
+      };
+      const current = (id: string) => get().socialPosts.find((post) => post.id === id);
+      const labelOf = (id: string) => { const post = current(id); return post ? post.accountLabel ?? networkLabel(post.network) : 'Borrador'; };
+      /** PATCHes `item` onto one draft; on STALE_VERSION it refetches the drafts once and retries. Returns an error or null. */
+      const appendTo = async (id: string, item: SocialMedia): Promise<string | null> => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const post = current(id);
+          if (!post || !canEditPost(post)) return 'el borrador ya no es editable';
+          const media = appendMediaItem(post.media, item);
+          if (!media) return null;
+          if (media.length > MAX_POST_MEDIA) return `ya tiene el máximo de ${MAX_POST_MEDIA} creatividades`;
+          try {
+            const { socialPost } = await updateSocialPost(token, id, { media, expectedVersion: post.version });
+            replacePost(socialPost);
+            if (post.status === 'approved') approvedReturned = true;
+            return null;
+          } catch (error) {
+            if (attempt > 0 || !(error instanceof ContentApiRequestError && error.status === 409 && error.code === 'STALE_VERSION')) return message(error);
+            try {
+              const fresh = (await getSocialPosts(token, ideaId)).socialPosts.find((candidate) => candidate.id === id);
+              if (!fresh) return 'el borrador ya no existe';
+              replacePost(fresh);
+            } catch (refetchError) { return message(refetchError); }
+          }
+        }
+        return 'el borrador cambió mientras se actualizaba';
+      };
+
+      set({ conflict: null, detailError: null });
+      const targetIds = bulkUploadTargets(get().socialPosts.filter((post) => post.planItemId === ideaId)).map((post) => post.id);
+      if (!targetIds.length) { failures.push('No hay borradores editables (en revisión o aprobados)'); return publish('done', null); }
+      for (const [index, file] of files.entries()) {
+        const invalid = validateCreativeFile(file);
+        if (invalid) { failures.push(`${file.name}: ${invalid}`); continue; }
+        publish('running', `Subiendo ${index + 1}/${files.length}…`);
+        const host = targetIds.map(current).find((post): post is SocialPost => Boolean(post && canEditPost(post) && post.media.length < MAX_POST_MEDIA));
+        if (!host) { failures.push(`${file.name}: todos los borradores tienen ya el máximo de ${MAX_POST_MEDIA} creatividades`); continue; }
+        let item: SocialMedia | undefined;
+        try {
+          const { socialPost } = await uploadSocialPostMedia(token, host.id, file);
+          replacePost(socialPost);
+          if (host.status === 'approved') approvedReturned = true;
+          item = socialPost.media[socialPost.media.length - 1];
+        } catch (error) { failures.push(`${file.name}: ${message(error)}`); continue; }
+        if (!item) { failures.push(`${file.name}: la respuesta no incluye la creatividad subida`); continue; }
+        const others = targetIds.filter((id) => id !== host.id);
+        if (others.length) publish('running', `Añadiendo a ${others.length} ${others.length === 1 ? 'borrador' : 'borradores'}…`);
+        for (const id of others) {
+          const error = await appendTo(id, item);
+          if (error) failures.push(`${labelOf(id)} (${file.name}): ${error}`);
+        }
+      }
+      if (get().selectedId === ideaId) await get().loadSocialPosts(token, ideaId);
+      return publish('done', null);
+    },
+    dismissBulkUpload: () => set({ bulkUpload: null }),
     approvePost: async (token, postId) => {
       const post = findPost(postId);
       await mutatePost(() => approveSocialPost(token, postId, post.version), 'El borrador cambió antes de aprobarse.');

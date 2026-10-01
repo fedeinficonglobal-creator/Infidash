@@ -211,6 +211,24 @@ export async function contentRoutes(app: FastifyInstance, options: ContentRoutes
     return reply.send({ socialPosts: await repository.listSocialPosts(id) });
   }));
 
+  /** «Nuevo borrador»: a manual draft (no AI) for one Postiz account of the idea's client. */
+  app.post('/api/content/plan-items/:id/social-posts', route(async (request, reply) => {
+    const session = await requireHuman(request, 'admin');
+    const id = requireString(paramsOf(request).id, 'id', 100);
+    const item = await repository.getPlanItem(id);
+    if (!item) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
+    const clientId = (item as any).client_id as string;
+    requireClientAccess(session, clientId);
+    const body = requireObject(request.body);
+    const socialPost = await repository.createManualSocialPost({
+      clientId,
+      planItemId: id,
+      accountId: requireString(body.accountId, 'accountId', 100),
+      copy: requireSocialCopy(body.copy),
+    }, session.user.id);
+    return reply.code(201).send({ socialPost });
+  }));
+
   /** Loads a social post for an admin mutation and checks the session can act on its client. */
   async function socialPostForAdmin(request: Request) {
     const session = await requireHuman(request, 'admin');

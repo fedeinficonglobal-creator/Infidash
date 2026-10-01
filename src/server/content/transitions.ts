@@ -25,7 +25,16 @@ export function assertTransition<T extends string>(entity: string, from: T, to: 
   if (!map[from]?.includes(to)) throw new ContentApiError(409, 'INVALID_TRANSITION', `Transición incompatible para ${entity}: ${from} → ${to}`);
 }
 
-export const assertPlanTransition = (from: PlanItemStatus, to: PlanItemStatus) => assertTransition('plan_item', from, to, planTransitions);
+/**
+ * A manual RRSS draft gives a proposed/approved idea something to review, so it moves to review.
+ * Kept apart from planTransitions on purpose: widening that shared map would also let a blog item
+ * be PATCHed from proposed/approved straight to review. Returns null when the status stays.
+ */
+export function planStatusAfterManualDraft(status: PlanItemStatus): PlanItemStatus | null {
+  return status === 'proposed' || status === 'approved' ? 'review' : null;
+}
+
+export const assertPlanTransition =(from: PlanItemStatus, to: PlanItemStatus) => assertTransition('plan_item', from, to, planTransitions);
 export const assertContentTransition = (from: ContentStatus, to: ContentStatus) => assertTransition('content', from, to, contentTransitions);
 export const assertPublicationTransition = (from: PublicationStatus, to: PublicationStatus) => assertTransition('publication', from, to, publicationTransitions);
 export const assertSocialPostTransition = (from: SocialPostStatus, to: SocialPostStatus) => assertTransition('social_post', from, to, socialPostTransitions);
