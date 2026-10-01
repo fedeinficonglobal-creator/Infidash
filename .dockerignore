@@ -10,3 +10,11 @@ dist
 data
 coverage
 *.log
+
+# Not needed at runtime and may carry client data or tooling state
+docs
+n8n-import
+tests
+.atl
+.claude
+.github
