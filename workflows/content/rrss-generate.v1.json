@@ -1,0 +1,762 @@
+{
+  "name": "Content v1 - RRSS - Generate posts",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger-rrss-generate-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const job=input.job??input;\nif(job.kind!=='generate_rrss'||!job.id||!job.client_id||!job.target_id||!job.leaseToken)throw new Error('Contrato generate_rrss v1 invalido');\nconst accounts=job.payload?.accounts;\nif(!Array.isArray(accounts)||!accounts.length||accounts.some((account)=>!account?.id))throw new Error('Contrato generate_rrss v1 invalido: payload.accounts no puede estar vacio');\nif(!String(job.payload?.planItem?.title??'').trim())throw new Error('Contrato generate_rrss v1 invalido: falta payload.planItem.title');\nreturn [{json:{job}}];"
+      },
+      "id": "validate-rrss-generate-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 1500 }) }}",
+        "options": {}
+      },
+      "id": "heartbeat-before-ai-rrss-generate-v1",
+      "name": "Heartbeat antes de IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-rrss-generate-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared by every client: brand data comes from editorial_config, the idea and the target accounts from the job.\nconst job=$('Validar trabajo').first().json.job;\nconst ctx=$input.first().json;\nconst cfg=ctx.settings?.editorial_config??{};\nconst text=(value)=>(value===undefined||value===null?'':String(value).trim());\nconst NETWORKS=['gmb','facebook','instagram'];\nconst networkOf=(account)=>{const network=text(account?.network).toLowerCase();return NETWORKS.includes(network)?network:'other';};\nconst brandName=text(cfg.brandName)||text(cfg.topic);\nif(!brandName)throw new Error('Falta editorial_config.brandName para este cliente');\nconst item=job.payload.planItem;\nconst keywords=Array.isArray(item.keywords)?item.keywords.map((keyword)=>text(keyword)).filter(Boolean):[];\nreturn [{json:{\n  brandName,\n  sector:text(cfg.topic),\n  siteUrl:(text(cfg.siteUrl)||text(cfg.site_url)).replace(/\\/+$/,''),\n  title:text(item.title),\n  theme:text(item.theme),\n  rationale:text(item.rationale),\n  format:text(item.format)||'post',\n  keywords:keywords.join(', '),\n  cta:text(item.cta),\n  networks:[...new Set(job.payload.accounts.map(networkOf))],\n}}];"
+      },
+      "id": "prepare-rrss-generate-v1",
+      "name": "Preparar posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres community manager senior de {{ $json.brandName }}{{ $json.sector ? ', un negocio del sector ' + $json.sector : '' }}.\nEscribe el texto de una publicación para cada red social indicada a partir de esta idea:\n\n- Idea: {{ $json.title }}\n- Tema: {{ $json.theme || 'sin especificar' }}\n- Justificación: {{ $json.rationale || 'sin especificar' }}\n- Formato: {{ $json.format }}\n- Keywords: {{ $json.keywords || 'sin especificar' }}\n- Llamada a la acción: {{ $json.cta || 'sin especificar' }}\n- Web: {{ $json.siteUrl || 'sin web' }}\n\n# REGLAS POR RED\n{{ $json.networks.includes('gmb') ? '- gmb (Google Business Profile): texto conciso e informativo de 1.400 caracteres como máximo que termine con una llamada a la acción clara. Sin hashtags. Puedes mencionar la web.' : '' }}\n{{ $json.networks.includes('facebook') ? '- facebook: tono conversacional, de 1 a 3 párrafos cortos, llamada a la acción suave y entre 0 y 3 hashtags.' : '' }}\n{{ $json.networks.includes('instagram') ? '- instagram: gancho inicial visual y atractivo, saltos de línea para facilitar la lectura, emojis con moderación, sin enlaces en el texto y de 5 a 10 hashtags relevantes al final.' : '' }}\n{{ $json.networks.includes('other') ? '- other: publicación neutra que funcione en cualquier red, con una llamada a la acción y sin abusar de los hashtags.' : '' }}\n\n# REGLAS GENERALES\n- Respeta la marca, el sector y el enfoque de la idea, y adapta el texto al formato ({{ $json.format }}).\n- Integra las keywords con naturalidad, sin forzarlas.\n- Usa la llamada a la acción de la idea cuando la haya.\n- No inventes datos, cifras, precios, promociones, premios ni testimonios.\n- Escribe en español, con un tono cercano y profesional.\n\n# PALABRAS PROHIBIDAS\nNo utilices bajo ninguna circunstancia estas palabras:\n\n* costo\n* crucial\n* adquirir\n* calcomanía\n* esencial\n\nSustitúyelas por alternativas naturales según el contexto.\n\n# FORMATO DE RESPUESTA\nDevuelve SOLO un JSON válido (sin markdown ni explicaciones) con exactamente estas claves: {{ $json.networks.join(', ') }}.\nCada valor es el texto final, listo para publicar en esa red:\n{{ JSON.stringify(Object.fromEntries($json.networks.map((network) => [network, 'texto para ' + network]))) }}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "copy-agent-rrss-generate-v1",
+      "name": "🤖 IA: Textos por red",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1100,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 2500,
+          "temperature": 0.7
+        }
+      },
+      "id": "model-copy-rrss-generate-v1",
+      "name": "OpenAI — Textos por red",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prepared=$('Preparar posts').first().json;\nlet text=String($input.first()?.json?.text??'').replace(/```json\\s*/gi,'').replace(/```/g,'').trim();\nconst start=text.indexOf('{');const end=text.lastIndexOf('}');\nif(start>=0&&end>start)text=text.slice(start,end+1);\nlet parsed;\ntry{parsed=JSON.parse(text);}catch(e){throw new Error('La IA no devolvio un JSON valido de textos por red: '+e.message);}\nconst texts={};\nfor(const network of prepared.networks){\n  const copy=parsed?.[network];\n  if(typeof copy!=='string'||!copy.trim())throw new Error('La IA no devolvio el texto para la red '+network);\n  texts[network]=copy.trim();\n}\nreturn [{json:{texts}}];"
+      },
+      "id": "parse-copy-rrss-generate-v1",
+      "name": "Parsear textos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;\nconst texts=$input.first().json.texts??{};\nconst NETWORKS=['gmb','facebook','instagram'];\nreturn job.payload.accounts.map((account,index)=>{\n  const raw=String(account.network??'').trim().toLowerCase();\n  const network=NETWORKS.includes(raw)?raw:'other';\n  const copy=texts[network];\n  if(!copy)throw new Error('Falta el texto del post para la red '+network);\n  return {json:{index,accountId:account.id,network,label:account.label??null,copy}};\n});"
+      },
+      "id": "fan-out-rrss-generate-v1",
+      "name": "Un item por cuenta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-rrss-generate-v1",
+      "name": "Recorrer cuentas",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "generate-image-condition-rrss-generate-v1",
+              "leftValue": "={{ $('Validar trabajo').first().json.job.payload.generateImage !== false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "image-check-rrss-generate-v1",
+      "name": "¿Generar imagen?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1980,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'gpt-image-1-mini', prompt: 'Imagen fotorrealista y profesional, sin texto superpuesto, para una publicacion en redes sociales' + ($('Preparar posts').first().json.sector ? ' de un negocio del sector ' + $('Preparar posts').first().json.sector : '') + ' sobre: ' + $('Preparar posts').first().json.title + ($('Preparar posts').first().json.theme ? '. Tema: ' + $('Preparar posts').first().json.theme : ''), size: $json.network === 'instagram' ? '1024x1024' : '1536x1024', quality: 'medium', output_format: 'jpeg', output_compression: 80 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-image-rrss-generate-v1",
+      "name": "Generar imagen IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        100
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data[0].b64_json",
+        "options": {
+          "fileName": "post.jpg",
+          "mimeType": "image/jpeg"
+        }
+      },
+      "id": "convert-image-rrss-generate-v1",
+      "name": "Convertir imagen a binario",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        100
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "uploadFile",
+        "binaryProperty": "data"
+      },
+      "id": "upload-image-rrss-generate-v1",
+      "name": "Subir imagen a Postiz",
+      "type": "n8n-nodes-postiz.postiz",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        100
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 'Recorrer cuentas' (batch size 1) runs this node exactly once per account, so $runIndex is the account's\n// position in 'Un item por cuenta'. Items coming from the image chain have lost the account fields (the OpenAI\n// and Postiz nodes replace the JSON) and paired-item lookups through the community Postiz node are not reliable,\n// so the account is taken from the item when present (skipped-image branch) and by run index otherwise.\nconst accounts=$('Un item por cuenta').all();\nconst current=$input.first()?.json??{};\nconst accountId=typeof current.accountId==='string'?current.accountId:(accounts[$runIndex]?.json?.accountId??null);\n// Any image failure (OpenAI, conversion or Postiz upload) degrades to a post without media.\nlet mediaUrl=null;\ntry{const path=!current.error&&typeof current.path==='string'?current.path.trim():'';if(/^https?:\\/\\//i.test(path))mediaUrl=path;}catch(e){mediaUrl=null;}\nreturn [{json:{accountId,mediaUrl}}];"
+      },
+      "id": "prepare-post-rrss-generate-v1",
+      "name": "Preparar post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One post per account from 'Un item por cuenta' (the authoritative list), with the image each loop iteration produced.\nconst accounts=$('Un item por cuenta').all().map((item)=>item.json);\nconst media=new Map();\nfor(const item of $input.all()){const result=item.json??{};if(result.accountId&&result.mediaUrl)media.set(result.accountId,result.mediaUrl);}\nconst socialPosts=accounts.map((account)=>({accountId:account.accountId,copy:account.copy,media:media.has(account.accountId)?[{url:media.get(account.accountId)}]:[]}));\nreturn [{json:{socialPosts,imagesGenerated:socialPosts.filter((post)=>post.media.length).length}}];"
+      },
+      "id": "aggregate-rrss-generate-v1",
+      "name": "Agregar posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 600 }) }}",
+        "options": {}
+      },
+      "id": "heartbeat-after-ai-rrss-generate-v1",
+      "name": "Heartbeat tras IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        -200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;\nconst aggregated=$('Agregar posts').first().json;\nconst selected=new Set((job.payload.accounts??[]).map((account)=>account.id));\nconst socialPosts=aggregated.socialPosts??[];\nif(!socialPosts.length)throw new Error('No hay posts que guardar');\nfor(const post of socialPosts){\n  if(!selected.has(post.accountId))throw new Error('El post pertenece a una cuenta no seleccionada: '+post.accountId);\n  if(typeof post.copy!=='string'||!post.copy.trim())throw new Error('Falta el texto del post para la cuenta '+post.accountId);\n}\nreturn [{json:{\n  schemaVersion:1,\n  clientId:job.client_id,\n  status:'succeeded',\n  socialPosts:socialPosts.map((post)=>({accountId:post.accountId,copy:post.copy,media:Array.isArray(post.media)?post.media:[]})),\n  result:{workflowVersion:1,count:socialPosts.length,imagesGenerated:aggregated.imagesGenerated??0,generateImage:job.payload.generateImage!==false},\n  leaseToken:job.leaseToken,\n  jobId:job.id,\n}}];"
+      },
+      "id": "normalize-rrss-generate-v1",
+      "name": "Normalizar resultado RRSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion:$json.schemaVersion, clientId:$json.clientId, status:$json.status, socialPosts:$json.socialPosts, result:$json.result, leaseToken:$json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-rrss-generate-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        -200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reports a confirmed failure (nothing external was published) so Infidash can retry the job.\nlet job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo generando los posts de redes').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'generate_rrss'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-rrss-generate-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "save-failure-rrss-generate-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        -500
+      ]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat antes de IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat antes de IA": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "Preparar posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar posts": {
+      "main": [
+        [
+          {
+            "node": "🤖 IA: Textos por red",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI — Textos por red": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 IA: Textos por red",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 IA: Textos por red": {
+      "main": [
+        [
+          {
+            "node": "Parsear textos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear textos": {
+      "main": [
+        [
+          {
+            "node": "Un item por cuenta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Un item por cuenta": {
+      "main": [
+        [
+          {
+            "node": "Recorrer cuentas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recorrer cuentas": {
+      "main": [
+        [
+          {
+            "node": "Agregar posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Generar imagen?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Generar imagen?": {
+      "main": [
+        [
+          {
+            "node": "Generar imagen IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar imagen IA": {
+      "main": [
+        [
+          {
+            "node": "Convertir imagen a binario",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir imagen a binario": {
+      "main": [
+        [
+          {
+            "node": "Subir imagen a Postiz",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir imagen a Postiz": {
+      "main": [
+        [
+          {
+            "node": "Preparar post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar post": {
+      "main": [
+        [
+          {
+            "node": "Recorrer cuentas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar posts": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat tras IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat tras IA": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resultado RRSS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar resultado RRSS": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

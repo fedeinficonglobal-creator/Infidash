@@ -11,7 +11,9 @@
         "generate_plan": { "workflowIdEnv": "N8N_WORKFLOW_INFICON_PLAN" },
         "generate_content": { "workflowIdEnv": "N8N_WORKFLOW_INFICON_GENERATE" },
         "publish": { "workflowIdEnv": "N8N_WORKFLOW_INFICON_PUBLISH" },
-        "reconcile": { "workflowIdEnv": "N8N_WORKFLOW_RECONCILE" }
+        "reconcile": { "workflowIdEnv": "N8N_WORKFLOW_RECONCILE" },
+        "generate_rrss_plan": { "workflowIdEnv": "N8N_WORKFLOW_RRSS_PLAN" },
+        "generate_rrss": { "workflowIdEnv": "N8N_WORKFLOW_RRSS_GENERATE" }
       }
     }
   ]

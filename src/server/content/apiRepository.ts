@@ -128,6 +128,16 @@ function storedAccountIds(payload: any): string[] {
   return ids.filter((id: unknown): id is string => typeof id === 'string');
 }
 
+/** Whether a generate_rrss job asks the workflow for a new AI image per post; missing (older payloads) means yes. */
+function storedGenerateImage(payload: any): boolean { return payload?.generateImage !== false; }
+
+/** The optional client-supplied generateImage flag: a boolean, defaulting to true. */
+function requireGenerateImage(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'boolean') throw new ContentApiError(400, 'INVALID_PAYLOAD', 'generateImage debe ser un booleano');
+  return value;
+}
+
 function requireAccountIds(value: unknown): string[] {
   if (!Array.isArray(value) || !value.length || value.some((id) => typeof id !== 'string' || !id.trim() || id.length > 100)) {
     throw new ContentApiError(400, 'INVALID_PAYLOAD', 'accountIds debe ser una lista no vacía de cuentas de redes sociales');
@@ -848,25 +858,28 @@ export class EditorialApiRepository {
   }
 
   /** generate_rrss brief: the idea (with its target networks) and the selected accounts, each with the network its copy must fit. */
-  private rrssPayload(row: any, accounts: any[], accountIds: string[]) {
+  private rrssPayload(row: any, accounts: any[], accountIds: string[], generateImage: boolean) {
     return {
       schemaVersion: 1,
       planItem: { ...this.planItemPayload(row).planItem, networks: Array.isArray(row.networks) ? row.networks : [] },
       accountIds,
       accounts: accounts.map((account) => ({ id: account.id, instanceKey: account.instance_key, network: networkFromInstanceKey(account.instance_key), label: account.label, externalAccountId: account.external_account_id ?? null })),
+      generateImage,
     };
   }
 
-  private async rrssPayloadForJob(client: PoolClient, clientId: string, planItemId: string, accountIds: string[]) {
+  private async rrssPayloadForJob(client: PoolClient, clientId: string, planItemId: string, accountIds: string[], generateImage: boolean) {
     const result = await client.query('SELECT * FROM editorial.plan_items WHERE client_id=$1 AND id=$2', [clientId, planItemId]);
     if (!result.rows[0]) throw new ContentApiError(404, 'NOT_FOUND', 'Propuesta no encontrada');
-    return this.rrssPayload(result.rows[0], await this.rrssAccounts(client, clientId, accountIds), accountIds);
+    return this.rrssPayload(result.rows[0], await this.rrssAccounts(client, clientId, accountIds), accountIds, generateImage);
   }
 
   private async validateJobTarget(client: PoolClient, input: any) {
     if (input.kind === 'generate_rrss') {
       if (!input.targetId || !input.expectedVersion) throw new ContentApiError(400, 'TARGET_VERSION_REQUIRED', 'generate_rrss requiere targetId y expectedVersion');
       const accountIds = requireAccountIds(input.payload?.accountIds);
+      // accountIds and generateImage are the only client-controlled fields of the generate_rrss payload.
+      const generateImage = requireGenerateImage(input.payload?.generateImage);
       const result = await client.query(
         `SELECT p.*,c.kind calendar_kind FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id=p.client_id AND c.id=p.calendar_id
          WHERE p.client_id=$1 AND p.id=$2 FOR UPDATE OF p`, [input.clientId, input.targetId],
@@ -880,7 +893,7 @@ export class EditorialApiRepository {
       const accounts = await this.rrssAccounts(client, input.clientId, accountIds);
       if (accounts.length !== accountIds.length) throw new ContentApiError(409, 'ACCOUNT_NOT_AVAILABLE', 'Alguna cuenta no pertenece al cliente, está desactivada o no es una cuenta de redes sociales (Postiz)');
       await client.query(`UPDATE editorial.plan_items SET status='generating',version=version+1,updated_at=now() WHERE id=$1`, [input.targetId]);
-      input.payload = this.rrssPayload(item, accounts, accountIds);
+      input.payload = this.rrssPayload(item, accounts, accountIds, generateImage);
       return;
     }
     if (input.kind === 'generate_content') {
@@ -1001,7 +1014,7 @@ export class EditorialApiRepository {
         await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
       }
       if(selectedJob.kind==='generate_rrss' && selectedJob.target_id) {
-        const payload = await this.rrssPayloadForJob(client, selectedJob.client_id, selectedJob.target_id, storedAccountIds(selectedJob.payload));
+        const payload = await this.rrssPayloadForJob(client, selectedJob.client_id, selectedJob.target_id, storedAccountIds(selectedJob.payload), storedGenerateImage(selectedJob.payload));
         selectedJob.payload = payload;
         await client.query('UPDATE editorial.jobs SET payload=$2::jsonb,updated_at=now() WHERE id=$1', [selectedJob.id, json(payload)]);
       }
@@ -1152,13 +1165,15 @@ export class EditorialApiRepository {
   }
 
   async context(clientId:string){
-    const [settings,accounts,recent,plans]=await Promise.all([
+    // Blog and RRSS ideas are separate pipelines: planItems keeps blog-calendar items only, rrssPlanItems the RRSS ones.
+    const [settings,accounts,recent,plans,rrssPlans]=await Promise.all([
       this.pool.query(`SELECT client_id,timezone,language,editorial_config,workflow_bindings,enabled FROM editorial.client_settings WHERE client_id=$1`,[clientId]),
       this.pool.query(`SELECT id,provider,instance_key,external_account_id,platform,label,timezone,active FROM editorial.publishing_accounts WHERE client_id=$1 AND active=TRUE`,[clientId]),
       this.pool.query(`SELECT id,title,status,updated_at FROM editorial.contents WHERE client_id=$1 ORDER BY updated_at DESC LIMIT 100`,[clientId]),
-      this.pool.query(`SELECT id,title,status,planned_at FROM editorial.plan_items WHERE client_id=$1 ORDER BY planned_at DESC NULLS LAST LIMIT 200`,[clientId]),
+      this.pool.query(`SELECT p.id,p.title,p.status,p.planned_at FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id=p.client_id AND c.id=p.calendar_id WHERE p.client_id=$1 AND c.kind='blog' ORDER BY p.planned_at DESC NULLS LAST LIMIT 200`,[clientId]),
+      this.pool.query(`SELECT p.id,p.title,p.status,p.planned_at,p.format,p.networks FROM editorial.plan_items p JOIN editorial.calendars c ON c.client_id=p.client_id AND c.id=p.calendar_id WHERE p.client_id=$1 AND c.kind='rrss' ORDER BY p.planned_at DESC NULLS LAST LIMIT 200`,[clientId]),
     ]);
-    return {settings:settings.rows[0]??null,accounts:accounts.rows,recentContents:recent.rows,planItems:plans.rows};
+    return {settings:settings.rows[0]??null,accounts:accounts.rows,recentContents:recent.rows,planItems:plans.rows,rrssPlanItems:rrssPlans.rows};
   }
 
   async recordEvent(input:any,serviceId:string){

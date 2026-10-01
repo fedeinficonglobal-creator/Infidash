@@ -1,0 +1,994 @@
+{
+  "name": "Content v1 - RRSS - Generate plan",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger-rrss-plan-v1",
+      "name": "Trabajo recibido",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const job=input.job??input;\nconst calendarId=job.target_id??job.payload?.calendarId??job.payload?.calendar_id;\nif(job.kind!=='generate_rrss_plan'||!job.id||!job.client_id||!job.leaseToken||!calendarId)throw new Error('Contrato generate_rrss_plan v1 invalido: calendarId es obligatorio');\nconst payloadCalendar=job.payload?.calendarId??job.payload?.calendar_id;\nif(String(calendarId)!==String(job.target_id)||(payloadCalendar&&String(payloadCalendar)!==String(calendarId)))throw new Error('calendarId debe coincidir con target_id');\nreturn [{json:{job:{...job,target_id:calendarId,payload:{...job.payload,calendarId,calendar_id:calendarId}}}}];"
+      },
+      "id": "validate-rrss-plan-v1",
+      "name": "Validar trabajo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 1800 }) }}",
+        "options": {}
+      },
+      "id": "heartbeat-initial-rrss-plan-v1",
+      "name": "Heartbeat inicial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/clients/' + $('Validar trabajo').first().json.job.client_id + '/context' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "context-rrss-plan-v1",
+      "name": "Cargar contexto Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shared by every client: values come only from the job payload (built by Infidash from editorial_config.rrss)\n// and from editorial_config; there are no client-specific fallbacks.\nconst job=$('Validar trabajo').first().json.job;\nconst ctx=$('Cargar contexto Infidash').first().json;\nconst cfg=ctx.settings?.editorial_config??{};\nconst rrssCfg=cfg.rrss&&typeof cfg.rrss==='object'?cfg.rrss:{};\nconst requested=job.payload?.rrss&&typeof job.payload.rrss==='object'?job.payload.rrss:{};\nconst NETWORKS=['gmb','facebook','instagram'];\nconst text=(value)=>(value===undefined||value===null?'':String(value).trim());\nconst list=(value)=>Array.isArray(value)?value.map((item)=>text(item)).filter(Boolean):typeof value==='string'?value.split(',').map((item)=>item.trim()).filter(Boolean):[];\nconst positive=(value,max,fallback)=>{const number=Number(value);return Number.isInteger(number)&&number>0?Math.min(number,max):fallback;};\nconst topic=text(requested.topic)||text(rrssCfg.topic)||text(cfg.topic);\nif(!topic)throw new Error('Falta el tema del plan de redes (editorial_config.rrss.topic o editorial_config.topic)');\nconst allowedNetworks=(value)=>[...new Set(list(value).map((network)=>network.toLowerCase()).filter((network)=>NETWORKS.includes(network)))];\nconst networks=[requested.networks,rrssCfg.networks].map(allowedNetworks).find((candidate)=>candidate.length)??[];\nif(!networks.length)throw new Error('Faltan las redes sociales del plan de redes (editorial_config.rrss.networks)');\nconst keywordsList=[requested.keywords,rrssCfg.keywords].map(list).find((candidate)=>candidate.length)??[];\n// Keywords fall back to the topic so the SerpAPI calls never send an empty q.\nconst keywords=keywordsList.length?keywordsList:[topic];\nconst postsPerWeek=positive(requested.postsPerWeek??rrssCfg.postsPerWeek,14,3);\nconst weeksHorizon=positive(requested.weeksHorizon??rrssCfg.weeksHorizon,12,4);\nreturn [{json:{\n  topic,\n  brandName:text(cfg.brandName)||topic,\n  country:text(rrssCfg.country)||text(cfg.country)||'ES',\n  keywords:keywords.join(', '),\n  keywords_list:keywords,\n  networks,\n  postsPerWeek,\n  weeksHorizon,\n  totalPosts:postsPerWeek*weeksHorizon,\n  periodStart:job.payload?.periodStart??null,\n}}];"
+      },
+      "id": "config-rrss-plan-v1",
+      "name": "⚙️ Configuración RRSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.topic }}"
+            },
+            {
+              "name": "geo",
+              "value": "={{ $('⚙️ Configuración RRSS').first().json.country }}"
+            },
+            {
+              "name": "engine",
+              "value": "google_trends"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.SERPAPI_API_KEY }}"
+            },
+            {
+              "name": "data_type",
+              "value": "RELATED_QUERIES"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "trends-rrss-plan-v1",
+      "name": "📈 A: Google Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.item.json;\nconst rising = (d.related_queries?.rising || []).slice(0, 10);\nconst top    = (d.related_queries?.top    || []).slice(0, 10);\nreturn [{ json: {\n  analysis_type: 'trends',\n  rising_queries: rising.map(r => ({ query: r.query, value: r.value })),\n  top_queries:    top.map(t    => ({ query: t.query, value: t.value })),\n  summary: rising.length + ' tendencias en alza · ' + top.length + ' queries top detectadas'\n}}];"
+      },
+      "id": "trends-process-rrss-plan-v1",
+      "name": "📈 A: Procesar Tendencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista de tendencias para redes sociales de un negocio del sector {{ $('⚙️ Configuración RRSS').first().json.topic }}.\n\nDatos de Google Trends (queries en alza y queries top):\nRising: {{ JSON.stringify($json.rising_queries, null, 2) }}\nTop: {{ JSON.stringify($json.top_queries, null, 2) }}\nResumen previo: {{ $json.summary }}\n\nTarea: identifica qué tendencias se pueden aprovechar en publicaciones de redes sociales (Google Business Profile, Facebook e Instagram) durante las próximas semanas, descartando ruido (queries genéricas, de marca ajena o sin relación con el sector).\n\nDevuelve SOLO este JSON (sin markdown, sin explicaciones):\n{\n  \"analysis_type\": \"trends\",\n  \"resumen\": \"2-3 líneas con la lectura general de las tendencias\",\n  \"tendencias_relevantes\": [\n    {\"query\": \"...\", \"motivo\": \"por qué es aprovechable en redes sociales\", \"urgencia\": \"alta|media|baja\"}\n  ],\n  \"tendencias_descartadas\": [\"query1\", \"query2\"],\n  \"angulos_de_contenido\": [\"ángulo para un post, reel, carrusel o story\", \"otro ángulo\"]\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "trends-agent-rrss-plan-v1",
+      "name": "🤖 Agente IA: Tendencias",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1540,
+        -300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'trends', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'trends';\nreturn [{ json: parsed }];"
+      },
+      "id": "trends-parse-rrss-plan-v1",
+      "name": "📝 Parsear IA Tendencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'trends',unavailable:true,source:'Google Trends',error,resumen:'Sin datos disponibles de Google Trends',insights:'Sin datos disponibles de Google Trends'}}];"
+      },
+      "id": "trends-stub-rrss-plan-v1",
+      "name": "Sin datos: Tendencias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_trends"
+            },
+            {
+              "name": "q",
+              "value": "={{ $('⚙️ Configuración RRSS').first().json.keywords_list.slice(0, 5).join(',') }}"
+            },
+            {
+              "name": "geo",
+              "value": "={{ $('⚙️ Configuración RRSS').first().json.country }}"
+            },
+            {
+              "name": "data_type",
+              "value": "TIMESERIES"
+            },
+            {
+              "name": "date",
+              "value": "today 12-m"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.SERPAPI_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "seasonal-rrss-plan-v1",
+      "name": "🌍 B: Estacionalidad — SerpAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tl = $input.item.json?.interest_over_time?.timeline_data || [];\nconst monthly = {};\ntl.forEach(p => {\n  const dt = new Date(p.timestamp * 1000);\n  const k  = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');\n  if (!monthly[k]) monthly[k] = [];\n  monthly[k].push(parseInt(p.values?.[0]?.extracted_value || 0));\n});\nconst avgs = Object.entries(monthly)\n  .map(([m, v]) => ({ month: m, avg: Math.round(v.reduce((a, b) => a + b, 0) / v.length) }))\n  .sort((a, b) => b.avg - a.avg);\nreturn [{ json: {\n  analysis_type:    'seasonal',\n  monthly_interest: avgs,\n  peak_month:       avgs[0]?.month || 'N/A',\n  top_months:       avgs.slice(0, 4),\n  seasonal_tip:     'Pico de interés detectado en ' + (avgs[0]?.month || 'N/A')\n}}];"
+      },
+      "id": "seasonal-process-rrss-plan-v1",
+      "name": "🌍 B: Procesar Estacionalidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista de estacionalidad de búsquedas para un negocio del sector {{ $('⚙️ Configuración RRSS').first().json.topic }}.\n\nDatos de interés mensual (últimos 12 meses):\nInterés mensual: {{ JSON.stringify($json.monthly_interest, null, 2) }}\nMes pico: {{ $json.peak_month }}\nTop meses: {{ JSON.stringify($json.top_months, null, 2) }}\n\nFecha de hoy: {{ $now.format('yyyy-MM-dd') }}\n\nTarea: determina si en las próximas semanas nos acercamos a un pico estacional y qué temas conviene anticipar en redes sociales (hay que publicar ANTES del pico, no durante).\n\nDevuelve SOLO este JSON:\n{\n  \"analysis_type\": \"seasonal\",\n  \"resumen\": \"2-3 líneas sobre si estamos entrando en temporada alta o baja\",\n  \"alerta_estacional\": \"próximo pico detectado y cuántas semanas faltan (o null si no aplica)\",\n  \"temas_a_anticipar\": [\"tema que debería publicarse ya en redes para llegar a tiempo al pico\"],\n  \"recomendacion_timing\": \"cuándo publicar respecto al pico (ej: 2-3 semanas antes)\"\n}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "seasonal-agent-rrss-plan-v1",
+      "name": "🤖 Agente IA: Estacionalidad",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1540,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  parsed = { analysis_type: 'seasonal', resumen: 'Error al parsear salida del agente IA', error: e.message, raw: text };\n}\nif (!parsed.analysis_type) parsed.analysis_type = 'seasonal';\nreturn [{ json: parsed }];"
+      },
+      "id": "seasonal-parse-rrss-plan-v1",
+      "name": "📝 Parsear IA Estacionalidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'seasonal',unavailable:true,source:'SerpAPI (estacionalidad)',error,resumen:'Sin datos disponibles de SerpAPI (estacionalidad)',insights:'Sin datos disponibles de SerpAPI (estacionalidad)'}}];"
+      },
+      "id": "seasonal-stub-rrss-plan-v1",
+      "name": "Sin datos: Estacionalidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx=$('Cargar contexto Infidash').first().json;\nconst rrss=(ctx.rrssPlanItems??[]).filter((item)=>item&&item.title).map((item)=>({title:item.title,date:item.planned_at??null,status:item.status??null,format:item.format??null,networks:Array.isArray(item.networks)?item.networks:[]}));\nconst blog=(ctx.planItems??[]).filter((item)=>item&&item.title).slice(0,30).map((item)=>({title:item.title,date:item.planned_at??null,status:item.status??null}));\nreturn [{json:{analysis_type:'existing_ideas',rrss_ideas:rrss,blog_articles:blog,used_titles:rrss.map((item)=>item.title),insights:rrss.length+' ideas de redes existentes; '+blog.length+' artículos del blog como inspiración.'}}];"
+      },
+      "id": "existing-ideas-rrss-plan-v1",
+      "name": "📚 C: Ideas existentes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const error=String(detail??'Fuente no disponible').slice(0,500);return [{json:{analysis_type:'existing_ideas',unavailable:true,source:'Infidash (ideas existentes)',error,resumen:'Sin datos disponibles de Infidash (ideas existentes)',insights:'Sin datos disponibles de Infidash (ideas existentes)'}}];"
+      },
+      "id": "existing-ideas-stub-rrss-plan-v1",
+      "name": "Sin datos: Ideas existentes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {
+          "maxTokens": 1000
+        }
+      },
+      "id": "model-analysis-rrss-plan-v1",
+      "name": "OpenAI — Análisis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "merge-rrss-plan-v1",
+      "name": "🔗 Merge Análisis",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst find = (type) => items.find((item) => item.json.analysis_type === type)?.json || {};\nconst NA = '(sin datos)';\nconst list = (arr, mapper) => (!Array.isArray(arr) || arr.length === 0) ? '  ' + NA : arr.map((x) => '  - ' + (mapper ? mapper(x) : x)).join('\\n');\n// A stub (unavailable source) or a parse error never breaks the prompt.\nconst errBlock = (b) => b && b.unavailable\n  ? '⚠️ Fuente no disponible (' + b.error + '). ' + (b.insights || NA)\n  : b && b.error\n  ? '⚠️ No se pudo parsear el análisis de este bloque (' + b.error + ').\\nResumen crudo: ' + (b.insights || b.raw || NA)\n  : null;\n\nconst trends = find('trends');\nconst trends_data = errBlock(trends) || [\n  'Resumen: ' + (trends.resumen || NA),\n  'Tendencias relevantes:',\n  list(trends.tendencias_relevantes, (t) => t.query + ' (urgencia ' + t.urgencia + '): ' + t.motivo),\n  'Ángulos para redes sociales:',\n  list(trends.angulos_de_contenido)\n].join('\\n');\n\nconst seasonal = find('seasonal');\nconst seasonal_data = errBlock(seasonal) || [\n  'Resumen: ' + (seasonal.resumen || NA),\n  'Alerta estacional: ' + (seasonal.alerta_estacional || 'sin alertas próximas'),\n  'Temas a anticipar:',\n  list(seasonal.temas_a_anticipar),\n  'Recomendación de timing: ' + (seasonal.recomendacion_timing || NA)\n].join('\\n');\n\nconst ideas = find('existing_ideas');\nconst existing_ideas_data = errBlock(ideas) || list(ideas.rrss_ideas, (x) => x.title + ' [' + (x.format || 'post') + ' · ' + ((x.networks || []).join(', ') || 'sin red') + ']');\nconst blog_articles_data = ideas.unavailable ? NA : list(ideas.blog_articles, (x) => x.title);\n\nconst cfg = $('⚙️ Configuración RRSS').first().json;\nreturn [{ json: {\n  trends_data,\n  seasonal_data,\n  existing_ideas_data,\n  blog_articles_data,\n  config: {\n    topic:        cfg.topic,\n    brandName:    cfg.brandName,\n    country:      cfg.country,\n    keywords:     cfg.keywords,\n    networks:     (cfg.networks || []).join(', '),\n    postsPerWeek: cfg.postsPerWeek,\n    weeksHorizon: cfg.weeksHorizon,\n    totalPosts:   cfg.totalPosts,\n    periodStart:  cfg.periodStart\n  }\n}}];"
+      },
+      "id": "context-ai-rrss-plan-v1",
+      "name": "🧩 Preparar Contexto IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un estratega senior de redes sociales para {{ $json.config.brandName }}, un negocio del sector {{ $json.config.topic }} en el mercado {{ $json.config.country }}.\nDiseña un plan de publicaciones para redes sociales de {{ $json.config.weeksHorizon }} semanas que empieza el {{ $json.config.periodStart }}, con exactamente {{ $json.config.postsPerWeek }} publicaciones por semana ({{ $json.config.totalPosts }} en total).\n\nRedes permitidas (usa SOLO estas): {{ $json.config.networks }}\nFormatos permitidos: post, reel, carousel, story.\nKeywords y temas prioritarios: {{ $json.config.keywords }}\n\n## TENDENCIAS ACTUALES:\n{{ $json.trends_data }}\n\n## ESTACIONALIDAD:\n{{ $json.seasonal_data }}\n\n## IDEAS DE REDES YA EXISTENTES (NO repitas estos títulos ni enfoques):\n{{ $json.existing_ideas_data }}\n\n## ARTÍCULOS DEL BLOG (inspiración opcional: puedes proponer publicaciones que los den a conocer):\n{{ $json.blog_articles_data }}\n\n## REGLAS\n- Devuelve exactamente {{ $json.config.totalPosts }} ideas: {{ $json.config.postsPerWeek }} en cada una de las {{ $json.config.weeksHorizon }} semanas.\n- Reparte las ideas entre las redes permitidas y varía los formatos y los pilares temáticos (educativo, inspiracional, detrás de las cámaras, comunidad, promocional...).\n- En \"networks\" indica solo redes permitidas en las que encaje la idea.\n- \"plannedAt\" es la fecha y hora de publicación en ISO-8601 con zona horaria, dentro de su semana; la semana 1 empieza el {{ $json.config.periodStart }}.\n- No inventes datos, cifras, precios, promociones ni testimonios.\n\nDevuelve SOLO este JSON válido (sin markdown, sin explicaciones):\n{\n  \"summary\": \"resumen ejecutivo del plan en 2-3 líneas\",\n  \"content_plan\": [\n    {\n      \"week\": 1,\n      \"theme\": \"pilar o tema de la semana\",\n      \"posts\": [\n        {\n          \"day\": \"Lunes\",\n          \"plannedAt\": \"fecha y hora ISO-8601 con zona\",\n          \"title\": \"idea del post en una frase\",\n          \"theme\": \"pilar temático del post\",\n          \"rationale\": \"por qué esta idea, basada en los datos\",\n          \"format\": \"post|reel|carousel|story\",\n          \"networks\": [\"red permitida\"],\n          \"keywords\": [\"kw1\", \"kw2\"],\n          \"cta\": \"llamada a la acción\",\n          \"priority\": \"alta|media|baja\"\n        }\n      ]\n    }\n  ]\n}\n\n**hoy** es {{ $now.format('yyyy-MM-dd') }}",
+        "messages": {
+          "messageValues": []
+        }
+      },
+      "id": "synthesis-rrss-plan-v1",
+      "name": "🤖 IA: Plan de Redes",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        2640,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "maxTokens": 4000,
+          "temperature": 0.6
+        }
+      },
+      "id": "model-synthesis-rrss-plan-v1",
+      "name": "OpenAI — Plan de Redes",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let text = $input.item.json.text || '{}';\ntext = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\ntry {\n  const plan = JSON.parse(text);\n  return [{ json: { success: true, plan, raw: text } }];\n} catch (e) {\n  return [{ json: { success: false, error: e.message, raw: text } }];\n}"
+      },
+      "id": "parse-plan-rrss-plan-v1",
+      "name": "📝 Parsear Plan JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $('Validar trabajo').first().json.job.id + '/heartbeat' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ clientId: $('Validar trabajo').first().json.job.client_id, leaseToken: $('Validar trabajo').first().json.job.leaseToken, leaseSeconds: 600 }) }}",
+        "options": {}
+      },
+      "id": "heartbeat-after-ai-rrss-plan-v1",
+      "name": "Heartbeat tras IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const job=$('Validar trabajo').first().json.job;\nconst cfg=$('⚙️ Configuración RRSS').first().json;\nconst parsed=$('📝 Parsear Plan JSON').first().json;\nif(!parsed.success||!Array.isArray(parsed.plan?.content_plan))throw new Error(parsed.error||'La IA no devolvio content_plan');\nconst calendarId=job.target_id;\nif(!calendarId)throw new Error('calendarId es obligatorio');\nconst FORMATS=['post','reel','carousel','story'];\nconst allowed=Array.isArray(cfg.networks)?cfg.networks:[];\nconst dayOffset={lunes:0,martes:1,miercoles:2,'miércoles':2,jueves:3,viernes:4,sabado:5,'sábado':5,domingo:6};\nconst periodStart=job.payload?.periodStart??cfg.periodStart??null;\nconst base=periodStart?new Date(periodStart):null;\nconst words=(value)=>Array.isArray(value)?value:typeof value==='string'?value.split(','):[];\nconst out=[];\nfor(const week of parsed.plan.content_plan){\n  for(const post of week?.posts??[]){\n    if(!post?.title||!String(post.title).trim())throw new Error('Cada propuesta requiere title');\n    if(post.calendarId&&String(post.calendarId)!==String(calendarId))throw new Error('La IA devolvió un calendarId distinto al reservado');\n    let plannedAt=post.plannedAt??null;\n    // Without a date from the AI, date the idea from periodStart: week N, weekday (Monday when unknown).\n    if(!plannedAt&&base&&!Number.isNaN(base.getTime())){\n      const date=new Date(base);\n      date.setUTCDate(date.getUTCDate()+(Math.max(1,Number(week.week)||1)-1)*7+(dayOffset[String(post.day??'').trim().toLowerCase()]??0));\n      plannedAt=date.toISOString();\n    }\n    if(!plannedAt||Number.isNaN(Date.parse(plannedAt)))throw new Error('plannedAt debe ser ISO-8601');\n    const networks=[...new Set(words(post.networks).map((network)=>String(network).trim().toLowerCase()).filter((network)=>allowed.includes(network)))];\n    const format=String(post.format??'').trim().toLowerCase();\n    out.push({\n      calendarId,\n      title:String(post.title).trim(),\n      theme:post.theme??week.theme??null,\n      rationale:post.rationale??week.rationale??null,\n      format:FORMATS.includes(format)?format:'post',\n      networks:networks.length?networks:[...allowed],\n      keywords:words(post.keywords).map((keyword)=>String(keyword).trim()).filter(Boolean),\n      cta:post.cta??null,\n      priority:post.priority??null,\n      plannedAt:new Date(plannedAt).toISOString(),\n      sourceKey:'rrss-plan:'+job.id+':'+out.length,\n    });\n  }\n}\nif(!out.length)throw new Error('El plan de redes no contiene propuestas');\nreturn [{json:{schemaVersion:1,clientId:job.client_id,status:'succeeded',planItems:out,result:{count:out.length,summary:parsed.plan.summary??null,workflowVersion:1},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "normalize-rrss-plan-v1",
+      "name": "Normalizar resultado del plan RRSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ schemaVersion:$json.schemaVersion, clientId:$json.clientId, status:$json.status, planItems:$json.planItems, result:$json.result, leaseToken:$json.leaseToken }) }}",
+        "options": {}
+      },
+      "id": "result-rrss-plan-v1",
+      "name": "Guardar resultado Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reports a confirmed failure (nothing external was published) so Infidash can retry the job.\nlet job=null;try{job=$('Validar trabajo').first().json.job;}catch(e){}if(!job||!job.leaseToken){try{const input=$('Trabajo recibido').first().json;job=input.job??input;}catch(e){}}const failure=$input.first()?.json??{};const raw=failure.error??failure;const detail=typeof raw==='string'?raw:(raw?.message??raw?.description??failure.message);const message=String(detail??'Fallo generando el plan de redes').slice(0,4000);if(!job?.id||!job?.client_id||!job?.leaseToken)throw new Error('Trabajo sin leaseToken; no se puede informar a Infidash: '+message);return [{json:{schemaVersion:1,clientId:job.client_id,status:'failed',error:message,result:{workflowVersion:1,stage:'generate_rrss_plan'},leaseToken:job.leaseToken,jobId:job.id}}];"
+      },
+      "id": "fail-rrss-plan-v1",
+      "name": "Preparar fallo confirmado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INFIDASH_INTERNAL_API_URL + '/api/internal/content/jobs/' + $json.jobId + '/result' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.INFIDASH_SERVICE_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "save-failure-rrss-plan-v1",
+      "name": "Guardar fallo Infidash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Trabajo recibido": {
+      "main": [
+        [
+          {
+            "node": "Validar trabajo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar trabajo": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat inicial",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat inicial": {
+      "main": [
+        [
+          {
+            "node": "Cargar contexto Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar contexto Infidash": {
+      "main": [
+        [
+          {
+            "node": "⚙️ Configuración RRSS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚙️ Configuración RRSS": {
+      "main": [
+        [
+          {
+            "node": "📈 A: Google Trends",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🌍 B: Estacionalidad — SerpAPI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📚 C: Ideas existentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📈 A: Google Trends": {
+      "main": [
+        [
+          {
+            "node": "📈 A: Procesar Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📈 A: Procesar Tendencias": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Tendencias": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Tendencias": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Análisis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Tendencias": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Análisis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌍 B: Estacionalidad — SerpAPI": {
+      "main": [
+        [
+          {
+            "node": "🌍 B: Procesar Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🌍 B: Procesar Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agente IA: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agente IA: Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear IA Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear IA Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Análisis",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Estacionalidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Estacionalidad": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Análisis",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "📚 C: Ideas existentes": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Análisis",
+            "type": "main",
+            "index": 2
+          }
+        ],
+        [
+          {
+            "node": "Sin datos: Ideas existentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin datos: Ideas existentes": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge Análisis",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "OpenAI — Análisis": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agente IA: Tendencias",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "🤖 Agente IA: Estacionalidad",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Merge Análisis": {
+      "main": [
+        [
+          {
+            "node": "🧩 Preparar Contexto IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧩 Preparar Contexto IA": {
+      "main": [
+        [
+          {
+            "node": "🤖 IA: Plan de Redes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI — Plan de Redes": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 IA: Plan de Redes",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 IA: Plan de Redes": {
+      "main": [
+        [
+          {
+            "node": "📝 Parsear Plan JSON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Parsear Plan JSON": {
+      "main": [
+        [
+          {
+            "node": "Heartbeat tras IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heartbeat tras IA": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resultado del plan RRSS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar resultado del plan RRSS": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar resultado Infidash": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Preparar fallo confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fallo confirmado": {
+      "main": [
+        [
+          {
+            "node": "Guardar fallo Infidash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
