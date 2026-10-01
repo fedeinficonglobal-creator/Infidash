@@ -4,7 +4,7 @@ import { AlertCircle, LoaderCircle, Sparkles, X } from 'lucide-react';
 import { useClientStore } from '../../store/useClientStore.js';
 import { useRrssStore } from '../../store/useRrssStore.js';
 import { canRunJob, formatEditorialDate } from '../../lib/content.js';
-import { RRSS_FORMATS, RRSS_NETWORKS, canGeneratePosts, formatLabel, networkFromInstanceKey, networkLabel, preselectAccountIds } from '../../lib/rrss.js';
+import { RRSS_FORMATS, RRSS_NETWORKS, canGeneratePosts, formatLabel, networkFromInstanceKey, networkLabel, preselectAccountIds, rrssIdeaDisplayStatus } from '../../lib/rrss.js';
 import type { RrssIdea } from '../../services/rrssApi.js';
 import { Button, Field } from '../content/controls.js';
 import { ContentStatusBadge } from '../content/ContentStatusBadge.js';
@@ -78,7 +78,7 @@ export function RrssIdeaPanel() {
   const close = () => { setGenerating(false); void select(token, null); };
   const release = () => { if (!window.confirm('¿Marcar la generación como fallida? Revisa antes que no se hayan creado ya los borradores para no duplicarlos.')) return; void releaseGeneration(token, idea.id).catch(ignore); };
   return <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" role="dialog" aria-modal="true" aria-label={`Detalle de ${idea.title}`} onMouseDown={(event) => { if (event.currentTarget === event.target) close(); }}><aside className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
-    <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur"><div className="flex items-start justify-between gap-4"><div><ContentStatusBadge status={idea.status} /><h2 className="mt-2 text-xl font-bold text-slate-900">{idea.title}</h2><p className="mt-1 text-xs text-slate-500">{formatEditorialDate(idea.plannedAt)} · {formatLabel(idea.format)}</p></div><Button onClick={close} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar detalle"><X className="size-4" /></Button></div></div>
+    <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur"><div className="flex items-start justify-between gap-4"><div><ContentStatusBadge status={rrssIdeaDisplayStatus(idea.status, socialPosts)} /><h2 className="mt-2 text-xl font-bold text-slate-900">{idea.title}</h2><p className="mt-1 text-xs text-slate-500">{formatEditorialDate(idea.plannedAt)} · {formatLabel(idea.format)}</p></div><Button onClick={close} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar detalle"><X className="size-4" /></Button></div></div>
     <div className="space-y-6 p-5">
       {conflict && <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex gap-2"><AlertCircle className="size-5 shrink-0" /><div><p className="font-bold">Hay una versión más reciente</p><p className="mt-1">{conflict}</p><Button className="mt-3 bg-amber-900 text-white" onClick={() => { clearConflict(); void refresh(token).then(() => select(token, idea.id)); }}>Recargar datos</Button></div></div></div>}
       {detailError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{detailError}</p>}

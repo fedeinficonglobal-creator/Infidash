@@ -152,6 +152,8 @@ test('RRSS item listing filters by rrss calendars and summarizes their social po
   assert.match(query.sql, /FROM editorial\.social_posts sp/);
   assert.match(query.sql, /'accountId', sp\.account_id/);
   assert.match(query.sql, /'network', sp\.network/);
+  assert.match(query.sql, /'publicationStatus', pub\.status/, 'the row summary carries the publication outcome so the list badge can show Publicado');
+  assert.match(query.sql, /LEFT JOIN editorial\.publications pub ON pub\.client_id = sp\.client_id AND pub\.id = sp\.publication_id/);
   assert.match(query.sql, /p\.status = \$2/);
   assert.equal(query.values[0], 'client-a');
   assert.equal(query.values.at(-1), 21);

@@ -73,6 +73,18 @@ export function draftsSummary(posts: ReadonlyArray<{ status: string }>) {
   return scheduled ? `${drafts} · ${scheduled} ${scheduled === 1 ? 'programado' : 'programados'}` : drafts;
 }
 
+/**
+ * Badge for an idea, kept consistent with its drafts: «Publicado» if any draft was published,
+ * else «Programado» if any is still scheduled, else the idea's own status. Cancelled or failed
+ * publications don't count as scheduled.
+ */
+export function rrssIdeaDisplayStatus(itemStatus: string, posts: ReadonlyArray<{ status: string; publicationStatus?: string | null }>) {
+  const shown = posts.map((post) => socialPostDisplayStatus({ status: post.status, publicationStatus: post.publicationStatus ?? null } as Pick<SocialPost, 'status' | 'publicationStatus'>));
+  if (shown.includes('published')) return 'published';
+  if (shown.includes('scheduled')) return 'scheduled';
+  return itemStatus;
+}
+
 /** A scheduled draft shows its publication's outcome (published, cancelled, failed) instead of «Programado». */
 export function socialPostDisplayStatus(post: Pick<SocialPost, 'status' | 'publicationStatus'>) {
   if (post.status !== 'scheduled') return post.status;
