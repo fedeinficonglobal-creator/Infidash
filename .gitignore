@@ -8,3 +8,10 @@ node_modules
 
 # Per-client n8n imports generated from workflows/content templates
 n8n-import/
+
+
+# Client operations data and raw n8n exports: they carry real client IDs, webhook tokens and
+# credential blocks, so they must never be committed (keep them outside the repo when possible).
+docs/*.csv
+docs/Blog *.json
+docs/Plan de Contenidos *.json
