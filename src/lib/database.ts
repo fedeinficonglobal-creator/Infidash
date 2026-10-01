@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { UserFacingError } from './userFacingError.js';
+import { coreAll, coreGet, coreRun, getCorePool, type CoreQueryable } from './corePool.js';
 import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.js';
 import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
@@ -1390,9 +1391,18 @@ export function getDatabase() {
   return database;
 }
 
-function getClientIdsForUser(userId: string, role: UserRole): string[] | null {
+/**
+ * Async, parameterized pool for the modules already migrated off the psql shim (users, auth, sessions).
+ * Calling getDatabase() first guarantees the schema bootstrap has run before the first pooled query.
+ */
+function getCoreDb(): CoreQueryable {
+  getDatabase();
+  return getCorePool();
+}
+
+async function getClientIdsForUser(db: CoreQueryable, userId: string, role: UserRole): Promise<string[] | null> {
   if (role === 'admin') return null;
-  const rows = getDatabase().prepare(`SELECT client_id FROM client_memberships WHERE user_id = ?`).all(userId) as { client_id: string }[];
+  const rows = await coreAll<{ client_id: string }>(db, `SELECT client_id FROM client_memberships WHERE user_id = $1`, [userId]);
   return rows.map((row) => row.client_id);
 }
 
@@ -1408,13 +1418,13 @@ function rowToUserBase(row: any): Omit<PublicUser, 'clientIds'> {
   };
 }
 
-function rowToUser(row: any): PublicUser {
+async function rowToUser(db: CoreQueryable, row: any): Promise<PublicUser> {
   const base = rowToUserBase(row);
-  return { ...base, clientIds: getClientIdsForUser(base.id, base.role) };
+  return { ...base, clientIds: await getClientIdsForUser(db, base.id, base.role) };
 }
 
-function rowsToUsers(rows: any[]): PublicUser[] {
-  const membershipRows = getDatabase().prepare(`SELECT user_id, client_id FROM client_memberships`).all() as { user_id: string; client_id: string }[];
+async function rowsToUsers(db: CoreQueryable, rows: any[]): Promise<PublicUser[]> {
+  const membershipRows = await coreAll<{ user_id: string; client_id: string }>(db, `SELECT user_id, client_id FROM client_memberships`);
   const byUser = new Map<string, string[]>();
   for (const row of membershipRows) {
     const list = byUser.get(row.user_id) ?? [];
@@ -1578,22 +1588,26 @@ function rowToMonthlyKpi(row: any): MonthlyKpiRecord {
   };
 }
 
-export function listUsers() {
-  const rows = getDatabase().prepare(`SELECT * FROM users ORDER BY created_at ASC`).all() as any[];
-  return rowsToUsers(rows);
+export async function listUsers() {
+  const db = getCoreDb();
+  const rows = await coreAll(db, `SELECT * FROM users ORDER BY created_at ASC`);
+  return rowsToUsers(db, rows);
 }
 
-function setClientMemberships(db: AppDatabase, userId: string, clientIds: string[]) {
-  db.prepare(`DELETE FROM client_memberships WHERE user_id = ?`).run(userId);
-  const insert = db.prepare(`INSERT INTO client_memberships (id, user_id, client_id, created_at) VALUES (?, ?, ?, ?)`);
+async function setClientMemberships(db: CoreQueryable, userId: string, clientIds: string[]) {
+  await coreRun(db, `DELETE FROM client_memberships WHERE user_id = $1`, [userId]);
   const timestamp = nowIso();
   for (const clientId of clientIds) {
-    insert.run(crypto.randomUUID(), userId, clientId, timestamp);
+    await coreRun(
+      db,
+      `INSERT INTO client_memberships (id, user_id, client_id, created_at) VALUES ($1, $2, $3, $4)`,
+      [crypto.randomUUID(), userId, clientId, timestamp],
+    );
   }
 }
 
-export function createUser(input: { email: string; name: string; password: string; role: UserRole; clientIds?: string[] }) {
-  const db = getDatabase();
+export async function createUser(input: { email: string; name: string; password: string; role: UserRole; clientIds?: string[] }) {
+  const db = getCoreDb();
   const timestamp = nowIso();
   const record = {
     id: crypto.randomUUID(),
@@ -1606,21 +1620,21 @@ export function createUser(input: { email: string; name: string; password: strin
     updated_at: timestamp,
   };
 
-  const stmt = db.prepare(
+  await coreRun(
+    db,
     `INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
-     VALUES (@id, @email, @name, @password_hash, @role, @active, @created_at, @updated_at)`
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [record.id, record.email, record.name, record.password_hash, record.role, record.active, record.created_at, record.updated_at],
   );
-
-  stmt.run(record);
   if (input.role === 'viewer') {
-    setClientMemberships(db, record.id, input.clientIds ?? []);
+    await setClientMemberships(db, record.id, input.clientIds ?? []);
   }
-  return rowToUser(record);
+  return rowToUser(db, record);
 }
 
-export function updateUserRole(userId: string, updates: Partial<{ role: UserRole; active: boolean; name: string; clientIds: string[] }>) {
-  const db = getDatabase();
-  const existing = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId) as any;
+export async function updateUserRole(userId: string, updates: Partial<{ role: UserRole; active: boolean; name: string; clientIds: string[] }>) {
+  const db = getCoreDb();
+  const existing = await coreGet(db, `SELECT * FROM users WHERE id = $1`, [userId]);
   if (!existing) {
     return null;
   }
@@ -1630,19 +1644,21 @@ export function updateUserRole(userId: string, updates: Partial<{ role: UserRole
   const nextName = updates.name?.trim() || existing.name;
   const timestamp = nowIso();
 
-  db.prepare(
-    `UPDATE users SET name = ?, role = ?, active = ?, updated_at = ? WHERE id = ?`
-  ).run(nextName, nextRole, nextActive, timestamp, userId);
+  await coreRun(
+    db,
+    `UPDATE users SET name = $1, role = $2, active = $3, updated_at = $4 WHERE id = $5`,
+    [nextName, nextRole, nextActive, timestamp, userId],
+  );
 
   if (nextRole === 'admin') {
     // Membership rows only ever exist for viewers — clear them so a later
     // demotion back to viewer never silently resurrects stale access.
-    db.prepare(`DELETE FROM client_memberships WHERE user_id = ?`).run(userId);
+    await coreRun(db, `DELETE FROM client_memberships WHERE user_id = $1`, [userId]);
   } else if (updates.clientIds) {
-    setClientMemberships(db, userId, updates.clientIds);
+    await setClientMemberships(db, userId, updates.clientIds);
   }
 
-  return rowToUser({
+  return rowToUser(db, {
     ...existing,
     name: nextName,
     role: nextRole,
@@ -1651,20 +1667,20 @@ export function updateUserRole(userId: string, updates: Partial<{ role: UserRole
   });
 }
 
-export function deleteUser(userId: string) {
-  const db = getDatabase();
-  const existing = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId) as any;
+export async function deleteUser(userId: string) {
+  const db = getCoreDb();
+  const existing = await coreGet(db, `SELECT * FROM users WHERE id = $1`, [userId]);
   if (!existing) {
     return null;
   }
 
-  db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
-  return rowToUser(existing);
+  await coreRun(db, `DELETE FROM users WHERE id = $1`, [userId]);
+  return rowToUser(db, existing);
 }
 
-export function authenticateUser(email: string, password: string): LoginResult | null {
-  const db = getDatabase();
-  const row = db.prepare(`SELECT * FROM users WHERE email = ?`).get(normalizeEmail(email)) as any;
+export async function authenticateUser(email: string, password: string): Promise<LoginResult | null> {
+  const db = getCoreDb();
+  const row = await coreGet(db, `SELECT * FROM users WHERE email = $1`, [normalizeEmail(email)]);
   if (!row || row.active !== 1) {
     return null;
   }
@@ -1676,41 +1692,45 @@ export function authenticateUser(email: string, password: string): LoginResult |
   const token = createSessionToken();
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 12).toISOString();
 
-  db.prepare(
+  await coreRun(
+    db,
     `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(crypto.randomUUID(), row.id, hashToken(token), nowIso(), expiresAt);
+     VALUES ($1, $2, $3, $4, $5)`,
+    [crypto.randomUUID(), row.id, hashToken(token), nowIso(), expiresAt],
+  );
 
-  return { token, user: rowToUser(row) };
+  return { token, user: await rowToUser(db, row) };
 }
 
 /** Revokes one session (logout). Idempotent: an unknown or already expired token is a no-op. */
-export function revokeSessionByToken(token: string) {
-  getDatabase().prepare(`DELETE FROM sessions WHERE token_hash = ?`).run(hashToken(token));
+export async function revokeSessionByToken(token: string) {
+  await coreRun(getCoreDb(), `DELETE FROM sessions WHERE token_hash = $1`, [hashToken(token)]);
 }
 
 /** Revokes every session of a user (logout everywhere). */
-export function revokeAllSessionsForUser(userId: string) {
-  getDatabase().prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+export async function revokeAllSessionsForUser(userId: string) {
+  await coreRun(getCoreDb(), `DELETE FROM sessions WHERE user_id = $1`, [userId]);
 }
 
-export function getSessionByToken(token: string) {
-  const db = getDatabase();
-  const row = db.prepare(
+export async function getSessionByToken(token: string) {
+  const db = getCoreDb();
+  const row = await coreGet(
+    db,
     `
       SELECT s.expires_at, u.*
       FROM sessions s
       JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = ?
-    `
-  ).get(hashToken(token)) as any;
+      WHERE s.token_hash = $1
+    `,
+    [hashToken(token)],
+  );
 
   if (!row) {
     return null;
   }
 
   if (new Date(row.expires_at).getTime() <= Date.now()) {
-    db.prepare(`DELETE FROM sessions WHERE token_hash = ?`).run(hashToken(token));
+    await coreRun(db, `DELETE FROM sessions WHERE token_hash = $1`, [hashToken(token)]);
     return null;
   }
 
@@ -1720,7 +1740,7 @@ export function getSessionByToken(token: string) {
 
   return {
     token,
-    user: rowToUser(row),
+    user: await rowToUser(db, row),
     expiresAt: row.expires_at,
   } as AuthenticatedSession;
 }
