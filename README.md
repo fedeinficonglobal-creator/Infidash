@@ -66,6 +66,30 @@ Copia `.env.example` a tu entorno local y ajusta lo necesario:
 - `GET /api/health` (público, sin autenticación y exento de rate limit) ejecuta un `SELECT 1` asíncrono contra el pool de PostgreSQL con un timeout de 2 s: responde `200 {"status":"ok"}` o `503 {"status":"degraded","checks":{"database":"down"}}` sin detalles de conexión (la causa solo va al log, como máximo una vez cada 30 s). `GET /api/health?deep=1` añade `checks.migrations` (`applied`/`pending` de `db/migrations`) y `checks.core` (consulta por el shim `psql`, que bloquea el event loop: úsalo solo a mano, no como healthcheck periódico) y devuelve 503 si hay migraciones pendientes.
 - Protección SSRF: las URL que configura un administrador (`siteUrl`, `storeUrl` y `exportUrl` de las integraciones, y el `externalUrl` de las publicaciones) deben ser `http`/`https`, sin credenciales, y no pueden apuntar a `localhost`, nombres `.local`/`.internal`, loopback, redes privadas, link-local (`169.254.169.254`) ni a un nombre cuyo DNS resuelva a esas direcciones. Las redirecciones se revalidan (máximo 3, sin bajar de https a http). `INFIDASH_ALLOW_PRIVATE_URLS=1` desactiva esas comprobaciones y es solo para desarrollo local (nunca en producción).
 
+## Cifrado de credenciales
+
+Las credenciales por cliente de las integraciones (WooCommerce, WordPress, etc.), guardadas en `integrations.credentials_json`, se cifran en reposo con AES-256-GCM a nivel de aplicación. Cada valor se guarda como `enc:v1:<iv>:<tag>:<cifrado>` en la misma columna, con un IV aleatorio por escritura y el id de la integración como dato autenticado (un cifrado copiado a otra fila no se puede descifrar). Las respuestas de la API nunca devuelven secretos y los logs los censuran.
+
+**No cubre** `integrations.webhook_secret` (el secreto de la URL del webhook de leads), que sigue en texto plano.
+
+### Activar el cifrado
+
+1. Genera una clave de 32 bytes en base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+2. Defínela como `INFIDASH_CREDENTIALS_KEY` en las variables de entorno del servicio Infidash en EasyPanel y redespliega.
+3. En el arranque, las credenciales existentes en texto plano se cifran automáticamente (una sola transacción, idempotente; solo se registran recuentos, nunca valores).
+
+**Advertencia:** si pierdes la clave, pierdes las credenciales de cliente guardadas. Guárdala también en un gestor de contraseñas y nunca en el repositorio, en el chat ni en la carpeta de backups. Los backups de `pg_dump` ahora contienen texto cifrado: la clave debe guardarse separada de ellos.
+
+### Sin clave
+
+Si `INFIDASH_CREDENTIALS_KEY` no está definida, nada cambia: las credenciales siguen en texto plano y el arranque registra un aviso (`credentials encryption disabled: INFIDASH_CREDENTIALS_KEY is not set`). Si ya hay filas cifradas y falta la clave (o no sirve para descifrarlas), el arranque falla con un error claro para no ejecutar con credenciales ilegibles.
+
+### Rotar la clave
+
+1. Define `INFIDASH_CREDENTIALS_KEY_PREVIOUS` con la clave antigua y `INFIDASH_CREDENTIALS_KEY` con la nueva.
+2. Redespliega: el arranque descifra con la actual o, si no, con la anterior, y re-cifra todo con la nueva.
+3. Comprueba que arranca bien y elimina `INFIDASH_CREDENTIALS_KEY_PREVIOUS`.
+
 ## Logs
 
 La API escribe logs estructurados en JSON, un evento por línea, en la salida estándar (sin transportes ni `pino-pretty`). Cada línea incluye `time` (ISO 8601), `level`, `service: "infidash"` y `msg`.

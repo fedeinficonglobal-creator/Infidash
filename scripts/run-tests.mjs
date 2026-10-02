@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { readdirSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +23,7 @@ const databaseFiles = [
   'tests/core-characterization.misc.test.ts',
   'tests/core-characterization.kpis.test.ts',
   'tests/core-baseline-migration.db.test.ts',
+  'tests/secret-box.db.test.ts',
 ];
 const apiFiles = ['tests/api-regression.test.ts'];
 const unitFiles = files.filter(file => !databaseFiles.includes(file) && !apiFiles.includes(file));
@@ -77,6 +79,9 @@ if (suite === 'db' || suite === 'api') {
   const databaseUrl = readLocalTestDatabase();
   childEnv.DATABASE_URL = databaseUrl;
   childEnv.INFIDASH_TEST_SUITE = suite;
+  // Exercise at-rest credential encryption in the DB and API suites with a throwaway key (never a real one).
+  childEnv.INFIDASH_CREDENTIALS_KEY = randomBytes(32).toString('base64');
+  delete childEnv.INFIDASH_CREDENTIALS_KEY_PREVIOUS;
 
   if (suite === 'db') {
     selectedFiles = databaseFiles;

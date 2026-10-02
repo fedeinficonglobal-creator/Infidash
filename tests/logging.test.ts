@@ -156,6 +156,14 @@ test('the redact config censors sensitive keys of ad-hoc log objects', async () 
   await app.close();
 });
 
+test('the redact config censors integration credential objects and secret fields', async () => {
+  const { app, capture } = await buildApp();
+  const secret = 'consumer-secret-value-4242';
+  app.log.info({ integration: { credentials: { consumerSecret: secret } }, body: { credentials: { applicationPassword: secret } }, secret }, 'adhoc');
+  assert.ok(!capture.raw().includes(secret), 'log leaked a credential value');
+  await app.close();
+});
+
 test('error logs mask credentials embedded in connection strings', async () => {
   const { app, capture } = await buildApp({}, (instance) => {
     instance.get('/api/dsn', async () => { throw new Error('connect failed postgresql://infidash:db-password-xyz@db.internal:5432/infidash'); });
