@@ -1399,9 +1399,47 @@ export async function updateClient(clientId: string, input: { name?: string; ind
   return getClientById(clientId, db);
 }
 
+// Editorial tables that reference public.clients, in dependency order (children first). Several of their foreign keys
+// are ON DELETE RESTRICT (publications -> publishing_accounts/content_revisions, contents -> plan_items,
+// social_posts -> publishing_accounts), and PostgreSQL does not guarantee the order in which the cascades from
+// public.clients fire, so they are deleted explicitly instead of relying on the cascade.
+const EDITORIAL_CLIENT_TABLES_IN_DELETE_ORDER = [
+  'social_posts',
+  'publications',
+  'jobs',
+  'events',
+  'contents', // cascades content_revisions
+  'content_revisions',
+  'plan_items',
+  'calendars',
+  'publishing_accounts',
+  'research_snapshots',
+  'legacy_mappings',
+  'client_settings',
+] as const;
+
+/**
+ * Deletes a client and every internal record that belongs to it, in one transaction: core tables cascade from
+ * public.clients; monthly_kpi_events (and the optional daily_stats_invalid_dates) have no foreign key and are deleted explicitly; editorial.* is deleted explicitly
+ * (see above) when its migrations have been applied. Anything already published on third-party systems is NOT touched.
+ */
 export async function deleteClient(clientId: string) {
-  const result = await coreRun(getCoreDb(), `DELETE FROM clients WHERE id = $1`, [clientId]);
-  return result.changes > 0;
+  return withCoreTransaction(async (tx) => {
+    const existing = await coreGet(tx, `SELECT id FROM clients WHERE id = $1 FOR UPDATE`, [clientId]);
+    if (!existing) return false;
+
+    for (const table of EDITORIAL_CLIENT_TABLES_IN_DELETE_ORDER) {
+      const present = await coreGet(tx, `SELECT to_regclass($1) IS NOT NULL AS present`, [`editorial.${table}`]);
+      if (present?.present) await coreRun(tx, `DELETE FROM editorial.${table} WHERE client_id = $1`, [clientId]);
+    }
+    await coreRun(tx, `DELETE FROM monthly_kpi_events WHERE client_id = $1`, [clientId]);
+    // Rows quarantined by migration 0006 (copy of daily_stats, no foreign key); the table exists only on databases that needed it.
+    const quarantine = await coreGet(tx, `SELECT to_regclass('daily_stats_invalid_dates') IS NOT NULL AS present`);
+    if (quarantine?.present) await coreRun(tx, `DELETE FROM daily_stats_invalid_dates WHERE client_id = $1`, [clientId]);
+
+    const result = await coreRun(tx, `DELETE FROM clients WHERE id = $1`, [clientId]);
+    return result.changes > 0;
+  });
 }
 
 async function getClientById(clientId: string, db: CoreQueryable = getCoreDb()) {

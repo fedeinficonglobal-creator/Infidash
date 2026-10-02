@@ -28,7 +28,7 @@ test('test runner defaults to explicit unit files and classifies every suite', (
 });
 
 test('unsafe suites have a guard before side-effectful imports or requests', () => {
-  for (const file of ['monthly-model', 'api-regression', 'client-memberships', 'core-characterization.clients-stats', 'core-characterization.auth', 'core-characterization.leads-integrations', 'core-characterization.misc', 'core-characterization.kpis', 'core-baseline-migration.db', 'secret-box.db']) {
+  for (const file of ['monthly-model', 'api-regression', 'client-memberships', 'core-characterization.clients-stats', 'core-characterization.auth', 'core-characterization.leads-integrations', 'core-characterization.misc', 'core-characterization.kpis', 'core-characterization.retention', 'core-baseline-migration.db', 'secret-box.db']) {
     const source = readFileSync(`tests/${file}.test.ts`, 'utf8');
     assert.match(source, /^import '\.\/helpers\/isolated-harness-required\.js';/);
     if (file === 'monthly-model') {

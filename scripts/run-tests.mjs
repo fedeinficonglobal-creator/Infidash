@@ -22,6 +22,7 @@ const databaseFiles = [
   'tests/core-characterization.concurrency.test.ts',
   'tests/core-characterization.misc.test.ts',
   'tests/core-characterization.kpis.test.ts',
+  'tests/core-characterization.retention.test.ts',
   'tests/core-baseline-migration.db.test.ts',
   'tests/secret-box.db.test.ts',
 ];

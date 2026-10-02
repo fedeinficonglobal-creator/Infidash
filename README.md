@@ -20,6 +20,7 @@ Infidash es un dashboard para agencias con autenticación local y persistencia e
 - Esquema de base de datos: todo cambio de esquema, también el del núcleo (`public`), va en `db/migrations/NNNN_*.sql` (las migraciones del núcleo se llaman `NNNN_core_*.sql` y se aplican siempre antes que las editoriales). `0004_core_baseline.sql` congela el esquema núcleo existente y es idempotente (`IF NOT EXISTS` / bloques `DO`), así que los despliegues existentes no necesitan ningún paso manual: se aplica solo al arrancar, sin efecto si el esquema ya existe. Ya no hay DDL en `src/lib/database.ts`; los datos semilla y el backfill de membresías siguen en código.
 - `npm run db:backup` — toma un backup ahora y aplica la retención. Ver «Backups y restauración»
 - `npm run content:import` — valida en dry-run un export de Content Hub; requiere `--apply` para escribir
+- `npm run leads:erase` — borra los leads de un correo (simulación por defecto; `--apply` para borrar). Ver «Retención de datos (RGPD)»
 - `npm run postiz:cleanup` — limpia los vídeos/imágenes caducados de Postiz (dry-run por defecto; `--apply` para borrar). Ver «Limpieza de vídeos de Postiz»
 
 ## Variables de entorno
@@ -99,6 +100,15 @@ La API escribe logs estructurados en JSON, un evento por línea, en la salida es
 - Para seguir una petición: copia el `x-request-id` de la respuesta (por ejemplo desde las herramientas de red del navegador) y filtra los logs por ese valor, p. ej. `docker logs <contenedor> | grep <reqId>`.
 - Las comprobaciones `/api/health` no se registran.
 - Nunca se registran cabeceras ni cuerpos de petición. Se censuran `authorization`, `cookie`, `set-cookie`, `x-service-token`, contraseñas, tokens y claves en cualquier objeto logueado; el token de los webhooks de leads (`/api/public/leads/:token`) se sustituye por `[redacted]` en la URL, igual que los parámetros de consulta con nombres como `token`, `secret`, `password` o `api_key`; y las credenciales de cadenas de conexión (`postgresql://usuario:clave@host`) se enmascaran en los errores.
+
+## Retención de datos (RGPD)
+
+El runbook completo (inventario de datos personales, plazos, terceros, borrado de un cliente, solicitudes de interesados) está en `docs/gdpr-retention.md`. Lo que aplica el propio código:
+
+- Los leads con más de `LEADS_RETENTION_MONTHS` meses (entero de 1 a 120, por defecto 24) se borran solos. Un valor `0`, vacío o no válido se trata como 24: no hay forma de desactivar la purga por variable de entorno, solo poniendo un valor muy grande (120 meses como máximo).
+- El payload bruto del formulario (`raw_payload_json`) de los leads con más de `LEADS_RAW_PAYLOAD_DAYS` días (entero de 1 a 3650, por defecto 90) se vacía a `{}`; nombre, correo, teléfono y mensaje se conservan hasta que caduca el lead.
+- La purga corre una vez al día (primera ejecución 2 minutos después de arrancar), bajo un bloqueo de PostgreSQL para que dos instancias no la ejecuten a la vez, y solo registra recuentos (`retencion de leads aplicada`: `deleted`, `payloadsBlanked`), nunca datos personales. No se ejecuta con `NODE_ENV=test`.
+- `npm run leads:erase -- --email=persona@ejemplo.com [--client=<idCliente>] [--note="texto"] [--apply]` atiende una solicitud de supresión. Sin `--apply` solo cuenta e indica los ids; con `--apply` borra en una transacción y registra el recuento, la nota y un prefijo del hash SHA-256 del correo (nunca el correo en claro). Los backups existentes conservan el dato hasta que rotan.
 
 ## Métricas
 
