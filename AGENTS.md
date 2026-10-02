@@ -2,7 +2,7 @@
 
 ## Project Structure
 
-`src/components/` contains the React UI; `src/store/` and `src/services/` hold client state and API clients. Shared domain helpers live in `src/lib/`, Fastify modules in `src/server/`, and the API entry point is root `server.ts`. Editorial PostgreSQL migrations are in `db/migrations/`; operational scripts are in `scripts/`; static assets are in `public/` and `assets/`. Tests are `tests/*.test.ts`, with isolated fixtures under `tests/fixtures/`. Product and operations documentation belongs in `docs/`. Versioned n8n exports are under `workflows/content/` (`dispatcher.v1.json`, `reconcile.v1.json`, and per-client `<client>/<kind>.v1.json` children); treat them as integration contracts and do not change them without an explicit, scoped request. Their `jsCode` strings are real code covered by `tests/content-workflows.test.ts`, which also asserts the exact export count and sanitization (disabled, no credentials, ids or pinData). Rename and sanitize raw n8n exports before adding them.
+`src/components/` contains the React UI; `src/store/` and `src/services/` hold client state and API clients. Shared domain helpers live in `src/lib/`, Fastify modules in `src/server/`, and the API entry point is root `server.ts`. PostgreSQL migrations (core `NNNN_core_*.sql` and editorial) are in `db/migrations/`; operational scripts are in `scripts/`; static assets are in `public/` and `assets/`. Tests are `tests/*.test.ts`, with isolated fixtures under `tests/fixtures/`. Product and operations documentation belongs in `docs/`. Versioned n8n exports are under `workflows/content/` (`dispatcher.v1.json`, `reconcile.v1.json`, and per-client `<client>/<kind>.v1.json` children); treat them as integration contracts and do not change them without an explicit, scoped request. Their `jsCode` strings are real code covered by `tests/content-workflows.test.ts`, which also asserts the exact export count and sanitization (disabled, no credentials, ids or pinData). Rename and sanitize raw n8n exports before adding them.
 
 ## Build, Test, and Development
 
@@ -12,7 +12,17 @@
 - `npm test` / `npm run test:unit` run the safe unit and contract suites.
 - `npm run build` creates the production frontend in `dist/`; `npm run preview` serves that build.
 - `npm run test:db` and `npm run test:api` require `INFIDASH_TEST_DATABASE_URL` pointing to a disposable loopback PostgreSQL database with a distinct `test` name segment. API tests also use `INFIDASH_TEST_API_BASE_URL` (loopback only). Never target shared, staging, or production data. See `docs/testing.md`.
-- `npm run db:migrate:editorial` applies editorial migrations; `npm run content:import` defaults to a dry run. Use write flags only after reviewing the preview.
+- `npm run db:migrate:editorial` applies pending migrations (core first, then editorial; checksummed, run automatically at boot too). **Never edit a migration that was already applied**: add a new one. `npm run content:import` defaults to a dry run. Use write flags only after reviewing the preview.
+- Operations scripts (run on the server, dry-run by default where they delete): `npm run db:backup` (gzip `pg_dump`), `npm run postiz:cleanup` (expired Postiz media; `-- --apply` deletes, `-- --check-disk` alerts), `npm run leads:erase -- --email=…` (GDPR erasure of one person's leads). Details in `README.md` and `docs/gdpr-retention.md`.
+- CI (`.github/workflows/ci.yml`) must pass before merging: lint, `npm test`, build, blocking `npm audit --audit-level=high`, the bundle-size budget, db and api suites on a disposable PostgreSQL, and a Docker image build with smoke checks. There is no local PostgreSQL/Docker on the usual dev machine, so db/api tests run only in CI; write them carefully.
+
+## Data layer conventions
+
+Core data code (`src/lib/database.ts`, `src/lib/corePool.ts`) is async over a `pg` pool and uses `$n` bind parameters only (never string-interpolate values); editorial code (`src/server/content/`) has its own pool and repositories. Keep the two separate. DATE and TIMESTAMPTZ columns are returned to the API as plain strings by the core pool's type parsers. DB and API tests must start with `import './helpers/isolated-harness-required.js'` and be registered in `scripts/run-tests.mjs` (`databaseFiles`) and `tests/test-runner.test.ts`.
+
+## Frontend conventions
+
+Tabs are lazy-loaded (keep the initial bundle under the budget in `tests/bundle-budget.test.ts`). Components subscribe to Zustand stores through named selectors with `useShallow` (never bare `useXStore()`), use the shared `Modal` and `useConfirm()` (no `window.confirm`), keep interactive elements keyboard-accessible with accessible text contrast, and format money/numbers/dates through `src/lib/format.ts`. Source-scan tests enforce these rules.
 
 ## Style and Testing
 
@@ -20,11 +30,11 @@ Use TypeScript/TSX, two-space indentation, semicolons, and the surrounding file'
 
 ## Commits and Pull Requests
 
-Use the Conventional Commit prefixes present in history, such as `feat(leads): ...`, `fix(server): ...`, and `test(integrations): ...`. Keep changes focused. PRs should summarize behavior, link related issues, call out migrations/configuration, attach UI screenshots when relevant, and report tests, lint, and build results. Never commit secrets; use `.env.example` as the configuration reference.
+Use the Conventional Commit prefixes present in history, such as `feat(leads): ...`, `fix(server): ...`, and `test(integrations): ...`. Keep changes focused. PRs should summarize behavior, link related issues, call out migrations/configuration, attach UI screenshots when relevant, and report tests, lint, and build results. Never commit secrets, spreadsheets with client data or raw n8n exports (`tests/repo-hygiene.test.ts` checks this); use `.env.example` as the configuration reference (newer variables are documented in `README.md`). One PR per concern, merge after green CI.
 
 ## Known Issues
 
-- **Historical Clarity snapshots may contain false zeros** (found 2026-09-25): the former parser wrote each `{metricName, information}` item over the same daily row. The current parser aggregates a full export into one snapshot and the UI marks overwritten rows as incomplete. Clarity can only re-export the previous one to three days; older lost metrics cannot be reconstructed. Validate a real sync before treating the fix as deployed. See CLAUDE.md for the original analysis.
+- **Historical Clarity snapshots may contain false zeros** (found 2026-09-25): the former parser wrote each `{metricName, information}` item over the same daily row. The current parser aggregates a full export into one snapshot and the UI marks overwritten rows as incomplete. Clarity can only re-export the previous one to three days; older lost metrics cannot be reconstructed. Validate a real sync before treating the fix as deployed. See `docs/editorial-pipeline-history.md` for the original analysis.
 - **Clarity's `/test` endpoint never contacts Clarity** — it only checks field completeness and always reports `pending`. Use the separate "Sincronizar" button (real API call) to actually verify a Clarity integration.
 - **Editorial jobs stuck in «Generando»** no longer need SQL: admins use «Marcar como fallida» (`POST /api/content/plan-items/:id/release-generation`). It refuses while an execution still holds a live lease.
 - **GMB action URL is only validated in n8n** (`publish.v1.json` → `Validar publicacion`, falling back to `editorial_config.site_url`); the app accepts GMB publications without URL.
