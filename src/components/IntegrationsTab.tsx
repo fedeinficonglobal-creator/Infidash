@@ -45,6 +45,8 @@ import {
 } from '../lib/integrationCatalog.js';
 import { cn } from '../lib/utils.js';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectSession } from '../store/selectors.js';
 
 type IntegrationDraft = {
   label: string;
@@ -129,7 +131,7 @@ function capabilityTone(capability: string) {
 }
 
 export function IntegrationsTab({ client }: { client: Client }) {
-  const { sessionToken, currentUser } = useClientStore();
+  const { sessionToken, currentUser } = useClientStore(useShallow(selectSession));
   const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
   const [integrations, setIntegrations] = useState<ApiIntegration[]>([]);

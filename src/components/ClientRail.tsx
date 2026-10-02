@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Home, Search } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { Client } from '../store/useClientStore.js';
@@ -116,6 +116,29 @@ function ClientSearch({ clients }: { clients: Client[] }) {
   );
 }
 
+/** One client avatar tile. Memoized: client objects keep their identity between unrelated store updates, so only the previously and newly active tiles re-render on navigation. */
+const ClientRailTile = memo(function ClientRailTile({ client, isActive }: { client: Client; isActive: boolean }) {
+  return (
+    <li className="relative w-full flex justify-center">
+      {isActive && (
+        <span aria-hidden="true" className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full bg-brand-primary" />
+      )}
+      <Link
+        to={clientPath(client.slug)}
+        aria-label={client.name}
+        title={client.name}
+        aria-current={isActive ? 'page' : undefined}
+        className={cn(railTileClass, isActive ? railTileActive : railTileIdle)}
+      >
+        <span className={cn(railIconClass, 'overflow-hidden', isActive && 'ring-2 ring-brand-primary')}>
+          <InitialsAvatar name={client.name} seed={client.slug} logo={client.logo} decorative className="text-[11px]" />
+        </span>
+        <span className={railLabelClass}>{client.name}</span>
+      </Link>
+    </li>
+  );
+});
+
 /** Narrow vertical rail with the agency home button, one avatar per client and a client search. */
 export function ClientRail({ clients, activeClientId }: { clients: Client[]; activeClientId: string | null }) {
   const { pathname } = useLocation();
@@ -137,28 +160,7 @@ export function ClientRail({ clients, activeClientId }: { clients: Client[]; act
       <div className="w-8 border-t border-slate-200" />
 
       <ul className={cn('flex-1 min-h-0 w-full overflow-y-auto flex flex-col items-center gap-1 py-3', railScrollClass)}>
-        {sortClients(clients).map((client) => {
-          const isActive = client.id === activeClientId;
-          return (
-            <li key={client.id} className="relative w-full flex justify-center">
-              {isActive && (
-                <span aria-hidden="true" className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 rounded-r-full bg-brand-primary" />
-              )}
-              <Link
-                to={clientPath(client.slug)}
-                aria-label={client.name}
-                title={client.name}
-                aria-current={isActive ? 'page' : undefined}
-                className={cn(railTileClass, isActive ? railTileActive : railTileIdle)}
-              >
-                <span className={cn(railIconClass, 'overflow-hidden', isActive && 'ring-2 ring-brand-primary')}>
-                  <InitialsAvatar name={client.name} seed={client.slug} logo={client.logo} decorative className="text-[11px]" />
-                </span>
-                <span className={railLabelClass}>{client.name}</span>
-              </Link>
-            </li>
-          );
-        })}
+        {sortClients(clients).map((client) => <ClientRailTile key={client.id} client={client} isActive={client.id === activeClientId} />)}
       </ul>
 
       <ClientSearch clients={clients} />

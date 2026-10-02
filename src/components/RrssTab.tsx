@@ -13,6 +13,8 @@ import { RrssPostsSection } from './rrss/RrssPostsSection.js';
 import { Modal } from './Modal.js';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { formatMonthYear } from '../lib/format.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectSession } from '../store/selectors.js';
 
 type RrssSection = 'posts' | 'plan';
 const SECTIONS: ReadonlyArray<[RrssSection, string]> = [['posts', 'Publicaciones'], ['plan', 'Planificación mensual']];
@@ -26,7 +28,7 @@ const EMPTY_FORM = {
 };
 
 export function RrssTab({ client }: { client: Client }) {
-  const { currentUser, sessionToken } = useClientStore();
+  const { currentUser, sessionToken } = useClientStore(useShallow(selectSession));
   const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
   const [section, setSection] = useState<RrssSection>('posts');

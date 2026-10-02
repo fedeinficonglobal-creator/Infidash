@@ -5,6 +5,8 @@ import { useClientStore } from '../store/useClientStore';
 import { createUserAccount, deleteUserAccount, getUsers, updateUserAccount, type SessionUser, type UserRole } from '../services/infidashApi.js';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { formatDateTime } from '../lib/format.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectUsersAdmin } from '../store/selectors.js';
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string; hint: string }> = [
   { value: 'admin', label: 'Administrador', hint: 'Puede crear usuarios y gestionar permisos' },
@@ -22,7 +24,7 @@ function roleBadgeClass(role: UserRole) {
 }
 
 export function UsersAdminTab() {
-  const { sessionToken, currentUser, clients } = useClientStore();
+  const { sessionToken, currentUser, clients } = useClientStore(useShallow(selectUsersAdmin));
   const confirm = useConfirm();
   const [users, setUsers] = useState<SessionUser[]>([]);
   const [loading, setLoading] = useState(true);

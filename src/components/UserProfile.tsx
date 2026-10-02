@@ -5,10 +5,12 @@ import { useClientStore } from '../store/useClientStore';
 import { getAvatarInitials } from '../lib/avatarInitials.js';
 import { signOutToDashboard } from '../lib/authNavigation.js';
 import { useNavigate } from 'react-router';
+import { useShallow } from 'zustand/react/shallow';
+import { selectUserProfile } from '../store/selectors.js';
 
 export function UserProfile() {
   const [activeSubTab, setActiveSubTab] = useState<'profile' | 'security' | 'notifications'>('profile');
-  const { currentUser, signOut } = useClientStore();
+  const { currentUser, signOut } = useClientStore(useShallow(selectUserProfile));
   const navigate = useNavigate();
 
   const displayName = currentUser?.name ?? 'Usuario de Infidash';

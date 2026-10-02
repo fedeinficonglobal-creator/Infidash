@@ -4,6 +4,8 @@ import { type Client, useClientStore } from '../store/useClientStore';
 import { createDailyStat, fetchDailyReportPdf, getDailyStats, type DailyStat } from '../services/infidashApi';
 import { SavedReportsPanel } from './SavedReportsPanel.js';
 import { formatDecimal, formatInteger, formatMoney, formatStatDate } from '../lib/format.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectReportsSession } from '../store/selectors.js';
 
 function todayISODate() {
   return new Date().toISOString().slice(0, 10);
@@ -46,7 +48,7 @@ function DailyStatRow({ stat }: { stat: DailyStat }) {
 }
 
 export function ReportsTab({ client }: { client: Client }) {
-  const { sessionToken, currentUser, refreshClients } = useClientStore();
+  const { sessionToken, currentUser, refreshClients } = useClientStore(useShallow(selectReportsSession));
   const canManageReports = currentUser?.role === 'admin';
   const [isSavingStat, setIsSavingStat] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
