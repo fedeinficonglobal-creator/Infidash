@@ -11,6 +11,7 @@ import {
   reopenMonthlyKpiCycle,
   createClient,
   createDatabaseBackup,
+  getBackupDirectory,
   deleteClient,
   updateClient,
   createUser,
@@ -96,6 +97,8 @@ import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPd
 import { deliverReportEmail, reportSmtpConfigured } from './src/lib/reportEmail.js';
 import { registerErrorHandling } from './src/lib/errorHandling.js';
 import { buildFastifyLoggingOptions, logger, registerRequestId } from './src/lib/logger.js';
+import { BACKUP_SCHEDULER_LOCK_ID, createBackupScheduler, resolveBackupSchedule, startBackupSchedulerTimers, withAdvisoryLock } from './src/lib/backupScheduler.js';
+import { applyRetention, listBackupEntries } from './src/lib/backupRetention.js';
 import { publicErrorMessage, UserFacingError } from './src/lib/userFacingError.js';
 import { INVALID_STAT_DATE_MESSAGE, isCanonicalStatDate } from './src/lib/statDate.js';
 import { shouldRunEditorialMigrations, shouldServeHttp } from './src/lib/serverRuntime.js';
@@ -1201,6 +1204,34 @@ for (const [action, active] of [['disable', false], ['enable', true]] as const) 
   });
 }
 
+const backupSchedulerLog = (level: 'info' | 'warn' | 'error', message: string, meta: Record<string, unknown> = {}) => {
+  logger[level](meta, message);
+};
+
+// Daily scheduled backups (opt-in via INFIDASH_BACKUP_SCHEDULE_HOUR). Dumps run under a PostgreSQL advisory lock so two
+// overlapping processes (e.g. during a deploy) never both dump; the scheduler instance also feeds GET /api/admin/backups.
+const backupScheduler = createBackupScheduler({
+  config: resolveBackupSchedule(process.env),
+  now: () => new Date(),
+  listFileNames: async () => (await listBackupEntries(getBackupDirectory())).map((entry) => entry.name),
+  takeBackup: (label) => createDatabaseBackup(label),
+  runRetention: () => {
+    const { keepDaily, keepWeekly } = backupScheduler.getConfig();
+    return applyRetention(getBackupDirectory(), { keepDaily, keepWeekly }, {
+      log: (level, message, meta) => backupSchedulerLog(level, message, meta),
+    });
+  },
+  withLock: (fn) => withAdvisoryLock(getCorePool(), BACKUP_SCHEDULER_LOCK_ID, fn),
+  log: backupSchedulerLog,
+});
+
+function startBackupScheduler() {
+  if (process.env.NODE_ENV === 'test') return;
+  const globalState = globalThis as typeof globalThis & { __infidashBackupSchedulerStop?: () => void };
+  if (globalState.__infidashBackupSchedulerStop) return;
+  globalState.__infidashBackupSchedulerStop = startBackupSchedulerTimers(backupScheduler, backupSchedulerLog);
+}
+
 const SESSION_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 // Expired sessions are otherwise deleted only when their own token is presented. Hourly purge, first run delayed
@@ -1772,6 +1803,25 @@ app.post('/api/admin/backup', async (req: AnyFastifyRequest, reply: FastifyReply
   }
 });
 
+app.get('/api/admin/backups', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  try {
+    const { enabled, hourUtc, keepDaily, keepWeekly } = backupScheduler.getConfig();
+    return reply.send({
+      backups: await listBackupEntries(getBackupDirectory()),
+      schedule: { enabled, hourUtc, keepDaily, keepWeekly },
+      lastRun: backupScheduler.getLastRun(),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, 'backup listing failed');
+    return sendError(reply, 500, 'No se pudo listar las copias de seguridad', 'BACKUP_LIST_FAILED');
+  }
+});
+
 app.get('/api/dashboard/summary', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
@@ -1806,6 +1856,7 @@ if (process.env.NODE_ENV !== 'test') {
   startClaritySyncScheduler();
   startMonthlyKpiCloseScheduler();
   startSessionPurgeScheduler();
+  startBackupScheduler();
 }
 
 if (shouldServeHttp(process.env)) {

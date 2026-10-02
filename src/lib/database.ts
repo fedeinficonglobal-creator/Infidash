@@ -635,6 +635,11 @@ async function importLegacySqliteData(db: CoreQueryable) {
  * Creates a pg_dump backup in the backup directory without blocking the event loop. Only the file name, label,
  * creation time and size are returned: the internal filesystem path is never exposed to API clients.
  */
+/** Backup directory (internal; never exposed to API clients). */
+export function getBackupDirectory() {
+  return backupDir;
+}
+
 export async function createDatabaseBackup(label?: string | null): Promise<BackupResult> {
   const connectionString = (process.env.DATABASE_URL ?? process.env.INFIDASH_DATABASE_URL ?? '').trim();
   if (!connectionString) {

@@ -18,6 +18,7 @@ Infidash es un dashboard para agencias con autenticación local y persistencia e
 - `npm run clean` — borra `dist/` y `server.js` (no toca `data/`)
 - `npm run db:migrate:editorial` — aplica migraciones editoriales pendientes con lock y checksum
 - Esquema de base de datos: todo cambio de esquema, también el del núcleo (`public`), va en `db/migrations/NNNN_*.sql` (las migraciones del núcleo se llaman `NNNN_core_*.sql` y se aplican siempre antes que las editoriales). `0004_core_baseline.sql` congela el esquema núcleo existente y es idempotente (`IF NOT EXISTS` / bloques `DO`), así que los despliegues existentes no necesitan ningún paso manual: se aplica solo al arrancar, sin efecto si el esquema ya existe. Ya no hay DDL en `src/lib/database.ts`; los datos semilla y el backfill de membresías siguen en código.
+- `npm run db:backup` — toma un backup ahora y aplica la retención. Ver «Backups y restauración»
 - `npm run content:import` — valida en dry-run un export de Content Hub; requiere `--apply` para escribir
 - `npm run postiz:cleanup` — limpia los vídeos/imágenes caducados de Postiz (dry-run por defecto; `--apply` para borrar). Ver «Limpieza de vídeos de Postiz»
 
@@ -29,7 +30,10 @@ Copia `.env.example` a tu entorno local y ajusta lo necesario:
 - `PORT` — fallback del puerto en algunos entornos
 - `DATABASE_URL` — conexión PostgreSQL principal en producción
 - `DATABASE_SSL` — modo SSL del cliente PostgreSQL (`disable`, `require`, etc.)
-- `INFIDASH_BACKUP_DIR` — carpeta de backups
+- `INFIDASH_BACKUP_DIR` — carpeta de backups (debe ser un volumen persistente; ver «Backups y restauración»)
+- `INFIDASH_BACKUP_SCHEDULE_HOUR` — hora UTC (0-23) del backup diario programado; sin definir, los backups programados están desactivados
+- `BACKUP_KEEP_DAILY` — backups diarios a conservar (0-365, por defecto 14)
+- `BACKUP_KEEP_WEEKLY` — backups semanales a conservar (0-104, por defecto 8)
 - `APP_URL` — URL pública/local del frontend cuando haga falta generar enlaces o callbacks
 - `EDITORIAL_DB_POOL_MAX`, `EDITORIAL_DB_IDLE_TIMEOUT_MS` y `EDITORIAL_DB_CONNECTION_TIMEOUT_MS` — límites del pool asíncrono del módulo editorial
 
@@ -89,9 +93,68 @@ npm run build
 ## Notas operativas
 
 - La autenticación usa sesión/token con roles `admin` y `viewer`.
-- Los backups se crean desde la API y se guardan en `data/backups/` por defecto.
+- Los backups se crean desde la API, con `npm run db:backup` o de forma programada, y se guardan en `data/backups/` por defecto. Ver «Backups y restauración».
 - La sección **Contenidos** usa el esquema PostgreSQL `editorial`; no actives los workflows nuevos antes de aplicar sus migraciones.
 - Los tokens de servicio de n8n se guardan solo como SHA-256 en `editorial.service_tokens`. La API nunca necesita el token en una variable de entorno.
+
+## Backups y restauración
+
+Los backups son volcados `pg_dump` en SQL plano (`--format=plain --no-owner --no-privileges`), comprimidos con gzip mientras se escriben. Incluyen todos los esquemas de la base (`public` y `editorial`). Nombre: `infidash-<etiqueta>-<AAAA-MM-DDTHH-MM-SS-mmmZ>.sql.gz` (hora UTC). Los `.sql` antiguos sin comprimir siguen siendo válidos y la retención los reconoce.
+
+### Cómo tomar un backup
+
+- **Consola de Easypanel (CLI):** `npm run db:backup` (opciones: `-- --label=antes-de-migrar`, `-- --no-retention`). Imprime el nombre y el tamaño; termina con código 1 si falla.
+- **API (sesión admin):** `POST /api/admin/backup` con `{ "label": "opcional" }`. `GET /api/admin/backups` lista los backups (solo nombres, sin rutas), la configuración de la programación y el resultado de la última ejecución programada.
+- **Programado:** define `INFIDASH_BACKUP_SCHEDULE_HOUR` (hora UTC, 0-23). Cada día, a partir de esa hora, se toma un backup con etiqueta `auto` y después se aplica la retención. Por defecto está desactivado. Hay un bloqueo en PostgreSQL para que dos procesos solapados (por ejemplo durante un despliegue) no hagan el volcado a la vez, y como máximo 3 intentos por día si falla. Los fallos se registran como `error` en los logs.
+
+### Dónde están los ficheros
+
+Se guardan en `INFIDASH_BACKUP_DIR` (por defecto `/data/backups` en Docker, `data/backups/` en local).
+
+> **Atención:** `/data/backups` dentro del contenedor se pierde en cada redespliegue salvo que esté montado como volumen persistente o bind mount en Easypanel. Configura ese volumen antes de activar los backups programados.
+
+> **Atención:** un backup en el mismo VPS no protege si se pierde el VPS. Copia los ficheros fuera del servidor (por ejemplo descargándolos por SFTP/WinSCP, o con `rclone` a un almacenamiento de objetos). Infidash no sube los backups a ningún sitio.
+
+### Retención
+
+Se conserva el backup más reciente de cada uno de los últimos `BACKUP_KEEP_DAILY` días (por defecto 14, UTC) y el más reciente de cada una de las últimas `BACKUP_KEEP_WEEKLY` semanas ISO (por defecto 8). El resto se elimina. El backup más reciente nunca se borra, sea cual sea la configuración. Solo se tocan ficheros con el nombre exacto de arriba (`infidash-….sql` / `.sql.gz`); cualquier otro fichero de la carpeta se ignora. La retención se aplica tras cada backup programado y con `npm run db:backup`, no con `POST /api/admin/backup`.
+
+### Restaurar (PostgreSQL 17)
+
+El volcado no incluye `DROP`/`CREATE DATABASE` ni propietarios, así que se restaura siempre en una base **vacía**. No restaures nunca directamente sobre producción para «probar»: primero en una base de ensayo.
+
+1. Descarga el fichero a una máquina con cliente `psql` 17 (o usa la consola del contenedor, que ya lo trae).
+2. Crea una base de ensayo vacía (no necesita extensiones: el esquema no usa ninguna):
+   ```bash
+   createdb -h HOST -U USUARIO infidash_restore_test
+   export SCRATCH_URL="postgres://USUARIO:CLAVE@HOST:5432/infidash_restore_test"
+   ```
+3. Restaura (se detiene al primer error y es todo-o-nada):
+   ```bash
+   gunzip -c infidash-auto-2026-10-02T03-00-00-000Z.sql.gz | psql "$SCRATCH_URL" -v ON_ERROR_STOP=1 --single-transaction
+   ```
+   Para un `.sql` sin comprimir: `psql "$SCRATCH_URL" -v ON_ERROR_STOP=1 --single-transaction -f fichero.sql`.
+4. Verifica (compara con producción en el momento del backup, teniendo en cuenta que producción puede haber cambiado desde entonces):
+   ```sql
+   SELECT 'users' AS tabla, count(*) FROM public.users
+   UNION ALL SELECT 'clients', count(*) FROM public.clients
+   UNION ALL SELECT 'daily_stats', count(*) FROM public.daily_stats
+   UNION ALL SELECT 'leads', count(*) FROM public.leads
+   UNION ALL SELECT 'editorial.jobs', count(*) FROM editorial.jobs;
+   SELECT max(version) FROM public.schema_migrations;
+   ```
+5. Opcional: arranca una instancia local con `DATABASE_URL="$SCRATCH_URL"` y comprueba el login y un cliente.
+6. Para restaurar de verdad (desastre): detén la app, restaura en una base nueva vacía, comprueba, apunta `DATABASE_URL` a ella (o renómbrala) y arranca. Los roles/propietarios se recrean con los del usuario que restaura (`--no-owner`).
+
+### Checklist de ensayo (repetir tras cada cambio relevante y al menos cada trimestre)
+
+- [ ] `INFIDASH_BACKUP_DIR` apunta a un volumen persistente y el fichero sigue ahí tras un redespliegue.
+- [ ] Hay un backup `auto` reciente en `GET /api/admin/backups` y `lastRun.ok` es `true`.
+- [ ] Se ha copiado un backup fuera del VPS y se ha descargado desde esa copia.
+- [ ] `gunzip -t fichero.sql.gz` no da errores.
+- [ ] La restauración en una base de ensayo termina sin errores (paso 3).
+- [ ] Los recuentos del paso 4 son coherentes con producción.
+- [ ] Se ha anotado la fecha y el tiempo que tardó la restauración; se borra la base de ensayo (`dropdb`).
 
 ## Limpieza de vídeos de Postiz
 
