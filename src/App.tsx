@@ -33,6 +33,7 @@ export default function App() {
     currentUser,
     signIn,
     authError,
+    sessionExpiredMessage,
     isAuthenticating,
   } = useClientStore();
   const navigate = useNavigate();
@@ -53,7 +54,7 @@ export default function App() {
   }
 
   if (!sessionToken || !currentUser) {
-    return <LoginScreen isLoading={isAuthenticating} error={authError} onLogin={(email, password) => signInToDashboard(signIn, navigate, email, password)} />;
+    return <LoginScreen isLoading={isAuthenticating} error={authError} notice={sessionExpiredMessage} onLogin={(email, password) => signInToDashboard(signIn, navigate, email, password)} />;
   }
 
   return <AuthenticatedApp currentUser={currentUser} />;

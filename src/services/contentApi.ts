@@ -1,3 +1,5 @@
+import { interceptUnauthorized } from './sessionExpiry.js';
+
 export type PlanStatus = 'proposed' | 'approved' | 'generating' | 'review' | 'ready' | 'generation_failed' | 'archived';
 export type ContentStatus = 'draft' | 'review' | 'approved' | 'archived';
 export type PublicationStatus = 'pending' | 'sending' | 'scheduled' | 'published' | 'failed' | 'unknown' | 'cancel_requested' | 'cancelled' | 'draft';
@@ -127,6 +129,7 @@ export async function request<T>(path: string, token: string, options: RequestIn
   headers.set('Authorization', `Bearer ${token}`);
   if (options.body && !(typeof FormData !== 'undefined' && options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const response = await fetch(path, { ...options, headers });
+  interceptUnauthorized(response.status, path, token);
   if (response.status === 204) return undefined as T;
   const payload = await response.json().catch(() => null) as { error?: string; code?: string } | null;
   if (!response.ok) throw new ContentApiRequestError(payload?.error ?? `La solicitud falló (${response.status})`, response.status, payload?.code ?? null);

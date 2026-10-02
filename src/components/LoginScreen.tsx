@@ -4,10 +4,11 @@ import { ShieldCheck, LogIn, LoaderCircle } from 'lucide-react';
 interface LoginScreenProps {
   isLoading: boolean;
   error: string | null;
+  notice?: string | null;
   onLogin: (email: string, password: string) => Promise<void>;
 }
 
-export function LoginScreen({ isLoading, error, onLogin }: LoginScreenProps) {
+export function LoginScreen({ isLoading, error, notice, onLogin }: LoginScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -53,6 +54,12 @@ export function LoginScreen({ isLoading, error, onLogin }: LoginScreenProps) {
               required
             />
           </label>
+
+          {notice && !error && (
+            <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {notice}
+            </div>
+          )}
 
           {error && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

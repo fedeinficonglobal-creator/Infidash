@@ -1,6 +1,7 @@
 export type UserRole = 'admin' | 'viewer';
 
 import { type KpiThresholds } from '../lib/kpiThresholds.js';
+import { ApiError, interceptUnauthorized } from './sessionExpiry.js';
 
 export interface SessionUser {
   id: string;
@@ -192,6 +193,8 @@ export async function apiRequest<T>(
     headers,
   });
 
+  interceptUnauthorized(response.status, path, token);
+
   if (response.status === 204) {
     return undefined as T;
   }
@@ -207,7 +210,7 @@ export async function apiRequest<T>(
       : typeof payload === 'string' && payload
         ? payload
         : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
 
   return payload as T;
@@ -270,8 +273,8 @@ export async function deleteUserAccount(token: string, userId: string) {
   }, token);
 }
 
-export async function getClients(token: string) {
-  return apiRequest<{ clients: ApiClient[] }>('/api/clients', {}, token);
+export async function getClients(token: string, signal?: AbortSignal) {
+  return apiRequest<{ clients: ApiClient[] }>('/api/clients', { signal }, token);
 }
 
 export async function getDailyStats(token: string, clientId?: string) {
