@@ -41,31 +41,31 @@ function DailyStatRow({ stat }: { stat: DailyStat }) {
   return (
     <div className="p-4 flex flex-col gap-3 hover:bg-slate-50 transition-colors sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-4">
-        <div className="size-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">
+        <div className="size-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-500">
           <FileText className="size-5" />
         </div>
         <div>
           <h4 className="text-sm font-bold text-slate-900">{formatDate(stat.statDate)}</h4>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
             {stat.source} • {stat.notes ? stat.notes : 'Sin notas'}
           </p>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 text-right sm:grid-cols-4 sm:gap-5">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Revenue</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Revenue</p>
           <p className="text-sm font-bold text-slate-900">{formatMoney(stat.revenue)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">ROAS</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">ROAS</p>
           <p className="text-sm font-bold text-slate-900">{formatDecimal(stat.roas)}x</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">CPA</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">CPA</p>
           <p className="text-sm font-bold text-slate-900">{formatMoney(stat.cpa)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Conv.</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Conv.</p>
           <p className="text-sm font-bold text-slate-900">{formatInteger(stat.conversions)}</p>
         </div>
       </div>
@@ -225,7 +225,7 @@ export function ReportsTab({ client }: { client: Client }) {
         <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
           <div className="relative z-10">
             <h3 className="text-lg font-bold text-slate-900 mb-2">Última métrica guardada</h3>
-            <p className="text-sm text-slate-400 font-medium mb-6">
+            <p className="text-sm text-slate-500 font-medium mb-6">
               {latestStat
                 ? `${formatDate(latestStat.statDate)} · Revenue ${formatMoney(latestStat.revenue)} · ROAS ${formatDecimal(latestStat.roas)}x`
                 : 'Todavía no hay métricas guardadas para este cliente.'}
@@ -250,8 +250,8 @@ export function ReportsTab({ client }: { client: Client }) {
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-4">
             <div>
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Registrar métrica diaria</h3>
-              <p className="text-xs text-slate-400 mt-1">Persistencia real en PostgreSQL para {client.name}</p>
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Registrar métrica diaria</h3>
+              <p className="text-xs text-slate-500 mt-1">Persistencia real en PostgreSQL para {client.name}</p>
             </div>
             {currentUser?.role === 'admin' ? (
               <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">Solo administradores</span>
@@ -382,7 +382,7 @@ export function ReportsTab({ client }: { client: Client }) {
               )}
 
               <div className="flex items-center justify-between gap-4 pt-2">
-                <p className="text-xs text-slate-400">{historySummary}</p>
+                <p className="text-xs text-slate-500">{historySummary}</p>
                 <button
                   type="submit"
                   disabled={isSavingStat}
@@ -405,8 +405,8 @@ export function ReportsTab({ client }: { client: Client }) {
 
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-100">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Resumen real del cliente</h3>
-            <p className="text-xs text-slate-400 mt-1">Últimos datos sincronizados desde la API</p>
+            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Resumen real del cliente</h3>
+            <p className="text-xs text-slate-500 mt-1">Últimos datos sincronizados desde la API</p>
           </div>
           <div className="divide-y divide-slate-100 p-6 space-y-4">
             {isLoadingHistory ? (
@@ -419,19 +419,19 @@ export function ReportsTab({ client }: { client: Client }) {
               <>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Revenue</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Revenue</p>
                     <p className="text-sm font-bold text-slate-900">{formatMoney(latestStat.revenue)}</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">ROAS</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">ROAS</p>
                     <p className="text-sm font-bold text-slate-900">{formatDecimal(latestStat.roas)}x</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Clicks</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Clicks</p>
                     <p className="text-sm font-bold text-slate-900">{formatInteger(latestStat.clicks)}</p>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Conversiones</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Conversiones</p>
                     <p className="text-sm font-bold text-slate-900">{formatInteger(latestStat.conversions)}</p>
                   </div>
                 </div>
@@ -454,7 +454,7 @@ export function ReportsTab({ client }: { client: Client }) {
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
                 <p className="text-sm font-semibold text-slate-700">No hay métricas diarias guardadas todavía</p>
-                <p className="text-xs text-slate-400 mt-1">Guarda la primera métrica para ver el histórico real aquí.</p>
+                <p className="text-xs text-slate-500 mt-1">Guarda la primera métrica para ver el histórico real aquí.</p>
               </div>
             )}
           </div>
@@ -464,7 +464,7 @@ export function ReportsTab({ client }: { client: Client }) {
       <SavedReportsPanel token={sessionToken} clientId={client.id} from={reportFrom} to={reportTo} canManage={canManageReports} />
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Exportación y sincronización</h3>
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Exportación y sincronización</h3>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
           <div className="p-6 border-b lg:border-b-0 lg:border-r border-slate-100">

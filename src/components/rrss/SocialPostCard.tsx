@@ -63,7 +63,7 @@ export function SocialPostCard({ post, admin, canPublish, busy, uploads, onSaveC
       <label htmlFor={copyId} className="text-xs font-bold text-slate-500">Texto del post</label>
       <textarea id={copyId} rows={5} value={copy} onChange={(event) => setCopy(event.target.value)} readOnly={!editable} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 read-only:bg-slate-100" />
       <div className="mt-1 flex items-center justify-between gap-2">
-        <span className={cn('text-[11px] font-semibold', copy.length > limit ? 'text-rose-600' : 'text-slate-400')} aria-live="polite">{copy.length} / {limit}</span>
+        <span className={cn('text-[11px] font-semibold', copy.length > limit ? 'text-rose-600' : 'text-slate-500')} aria-live="polite">{copy.length} / {limit}</span>
         {editable && <Button type="button" disabled={busy || !copy.trim() || copy === post.copy} onClick={() => onSaveCopy(copy)} className="bg-slate-900 px-3 py-1.5 text-xs text-white">Guardar texto</Button>}
       </div>
     </div>
@@ -81,13 +81,13 @@ export function SocialPostCard({ post, admin, canPublish, busy, uploads, onSaveC
           </div>
           <button type="button" disabled={busy} onClick={() => onRemoveMedia(index)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40"><Trash2 className="size-3.5" />Quitar</button>
         </div>}
-      </li>)}</ul> : <p className="mt-1 text-xs text-slate-400">Sin creatividades.</p>}
+      </li>)}</ul> : <p className="mt-1 text-xs text-slate-500">Sin creatividades.</p>}
       {editable && <div className="mt-2 space-y-1">
         <label className={cn('inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-bold text-slate-600 hover:border-brand-primary hover:text-brand-primary', mediaFull && 'pointer-events-none opacity-50')}>
           <Upload className="size-4" />Subir creatividad
           <input type="file" accept={CREATIVE_ACCEPT} multiple disabled={mediaFull} className="sr-only" onChange={(event) => { const files: File[] = event.target.files ? Array.from(event.target.files) : []; event.target.value = ''; if (files.length) onUpload(files); }} />
         </label>
-        <p className="text-[11px] text-slate-400">Imágenes JPG, PNG o WEBP (máx. 10 MB) y vídeos MP4 o MOV (máx. 200 MB).</p>
+        <p className="text-[11px] text-slate-500">Imágenes JPG, PNG o WEBP (máx. 10 MB) y vídeos MP4 o MOV (máx. 200 MB).</p>
       </div>}
       {uploads.length > 0 && <ul className="mt-2 space-y-1">{uploads.map((upload) => <li key={upload.key} className={cn('flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs', upload.status === 'error' ? 'bg-rose-50 text-rose-700' : 'bg-slate-50 text-slate-600')}>
         <span className="flex min-w-0 items-center gap-2">{upload.status === 'uploading' && <LoaderCircle className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />}<span className="truncate font-semibold">{upload.name}</span>{upload.status === 'uploading' ? <span>Subiendo…</span> : <span role="alert">{upload.error}</span>}</span>

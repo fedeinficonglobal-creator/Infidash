@@ -21,7 +21,7 @@ export function MetricCard({ metric }: { metric: Metric }) {
         <h3 className="text-2xl font-bold font-display text-slate-900">{metric.value}</h3>
       </div>
       <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">vs Periodo Anterior</span>
+        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">vs Periodo Anterior</span>
         <div className="size-2 rounded-full bg-slate-200" />
       </div>
     </div>
@@ -47,7 +47,7 @@ export function HealthScoreCard({ score }: { score: number }) {
             {status.label}
           </span>
         </div>
-        <p className="text-xs text-slate-400 mb-6 font-medium">{status.sub}</p>
+        <p className="text-xs text-slate-500 mb-6 font-medium">{status.sub}</p>
       </div>
 
       <div className="flex items-center gap-6 relative z-10">
@@ -81,14 +81,14 @@ export function HealthScoreCard({ score }: { score: number }) {
         </div>
         <div className="flex-1 space-y-2">
            <div className="flex justify-between text-[10px] font-bold">
-              <span className="text-slate-400">SALES</span>
+              <span className="text-slate-500">SALES</span>
               <span>{(score / 10).toFixed(1)}/10</span>
            </div>
            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.max(Math.min(score, 100), 0)}%` }} />
            </div>
            <div className="flex justify-between text-[10px] font-bold">
-              <span className="text-slate-400">ADS</span>
+              <span className="text-slate-500">ADS</span>
               <span>{(Math.max(score - 40, 0) / 10).toFixed(1)}/10</span>
            </div>
            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">

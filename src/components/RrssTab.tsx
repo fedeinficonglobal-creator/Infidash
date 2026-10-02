@@ -159,7 +159,7 @@ export function RrssTab({ client }: { client: Client }) {
       <section className="mb-8 rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between p-6 border-b border-slate-100 bg-gradient-to-r from-amber-50 to-white">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-2">{monthLabel}</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500 mb-2">{monthLabel}</p>
             <h3 className="text-xl font-bold text-slate-900">Plan RRSS editable</h3>
             <p className="text-sm text-slate-500 mt-1">Añade y edita filas con WEB, RRSS, objetivo, inspiración/idea y competidores.</p>
           </div>
@@ -201,7 +201,7 @@ export function RrssTab({ client }: { client: Client }) {
                           {row.web}
                         </a>
                       ) : (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className="text-sm text-slate-500">—</span>
                       )}
                     </td>
                     <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words">{row.rrss || '—'}</td>
@@ -209,7 +209,7 @@ export function RrssTab({ client }: { client: Client }) {
                     <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[280px]">{row.inspoIdea || '—'}</td>
                     <td className="px-5 py-4 border-b border-slate-100 align-top text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[260px]">{row.competidores || '—'}</td>
                     <td className="px-5 py-4 border-b border-slate-100 align-top text-right">
-                      {isAdmin && <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                      {isAdmin && <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity">
                         <button
                           type="button"
                           onClick={() => openEditModal(row)}
@@ -250,7 +250,7 @@ export function RrssTab({ client }: { client: Client }) {
                 )}
 
                 <label className="space-y-2 text-sm font-bold text-slate-700 md:col-span-2">
-                  <span className="flex items-center gap-2"><Link2 className="size-4 text-slate-400" /> WEB</span>
+                  <span className="flex items-center gap-2"><Link2 className="size-4 text-slate-500" /> WEB</span>
                   <input
                     type="url"
                     required
@@ -274,7 +274,7 @@ export function RrssTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700">
-                  <span className="flex items-center gap-2"><Target className="size-4 text-slate-400" /> OBJETIVO</span>
+                  <span className="flex items-center gap-2"><Target className="size-4 text-slate-500" /> OBJETIVO</span>
                   <textarea
                     required
                     rows={4}
@@ -286,7 +286,7 @@ export function RrssTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700">
-                  <span className="flex items-center gap-2"><Sparkles className="size-4 text-slate-400" /> INSPO/IDEA</span>
+                  <span className="flex items-center gap-2"><Sparkles className="size-4 text-slate-500" /> INSPO/IDEA</span>
                   <textarea
                     required
                     rows={4}

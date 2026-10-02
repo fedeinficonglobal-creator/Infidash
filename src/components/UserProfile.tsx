@@ -73,11 +73,11 @@ export function UserProfile() {
                     <p className="text-sm font-bold text-brand-primary mb-4 uppercase tracking-widest">{displayRole}</p>
                     <div className="flex flex-wrap justify-center md:justify-start gap-4">
                       <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-full border border-slate-100">
-                        <Globe className="size-3 text-slate-400" />
+                        <Globe className="size-3 text-slate-500" />
                         <span className="text-[10px] font-bold text-slate-600">ESPAÑA, MADRID</span>
                       </div>
                       <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-full border border-slate-100">
-                        <Mail className="size-3 text-slate-400" />
+                        <Mail className="size-3 text-slate-500" />
                         <span className="text-[10px] font-bold text-slate-600">{displayEmail}</span>
                       </div>
                     </div>
@@ -86,19 +86,19 @@ export function UserProfile() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Cuenta</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Cuenta</p>
                     <p className="text-sm font-bold text-slate-900">{currentUser?.active ? 'Activa' : 'Sin sesión'}</p>
                     <p className="text-xs text-slate-500 mt-1">Datos sincronizados desde el backend.</p>
                   </div>
                   <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Permisos</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Permisos</p>
                     <p className="text-sm font-bold text-slate-900">{displayRole}</p>
                     <p className="text-xs text-slate-500 mt-1">Acceso según rol del usuario autenticado.</p>
                   </div>
                   <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Última carga</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Última carga</p>
                     <p className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
-                      <Clock3 className="size-4 text-slate-400" />
+                      <Clock3 className="size-4 text-slate-500" />
                       Sesión restaurada
                     </p>
                     <p className="text-xs text-slate-500 mt-1">La información viene del token guardado en el navegador.</p>
@@ -118,11 +118,11 @@ export function UserProfile() {
                   <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100">
                     <div className="flex items-center gap-4">
                       <div className="size-10 bg-white rounded-xl flex items-center justify-center border border-slate-100">
-                        <Key className="size-5 text-slate-400" />
+                        <Key className="size-5 text-slate-500" />
                       </div>
                       <div>
                         <p className="text-sm font-bold text-slate-900">Sesión autenticada</p>
-                        <p className="text-xs text-slate-400">El token se valida contra el backend en cada petición</p>
+                        <p className="text-xs text-slate-500">El token se valida contra el backend en cada petición</p>
                       </div>
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">Activa</span>
@@ -134,7 +134,7 @@ export function UserProfile() {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-slate-900">Rol actual</p>
-                        <p className="text-xs text-slate-400">{displayRole} con permisos de {currentUser?.role === 'admin' ? 'escritura completa' : 'solo lectura en endpoints de edición'}</p>
+                        <p className="text-xs text-slate-500">{displayRole} con permisos de {currentUser?.role === 'admin' ? 'escritura completa' : 'solo lectura en endpoints de edición'}</p>
                       </div>
                     </div>
                     <BadgeCheck className="size-5 text-emerald-500" />

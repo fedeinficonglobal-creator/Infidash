@@ -221,7 +221,7 @@ export function TrafficTab({ client }: { client: Client }) {
           <p className="text-xs text-slate-500">{report.persisted ? 'Sincronización guardada' : 'Vista previa sin guardar'} · propiedad {report.propertyId}.{report.syncedAt && !Number.isNaN(Date.parse(report.syncedAt)) ? ` Última sincronización: ${new Date(report.syncedAt).toLocaleString('es-ES')}.` : ''}</p>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Sesiones y conversiones</h3>
+            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Sesiones y conversiones</h3>
             {chartData.length === 0 ? (
               <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">No hay datos de sesiones en el periodo.</p>
             ) : (
@@ -251,30 +251,30 @@ export function TrafficTab({ client }: { client: Client }) {
 
           <div className="grid gap-6 lg:grid-cols-3">
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Fuentes de tráfico</h3>
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Fuentes de tráfico</h3>
               {report.trafficSources.length === 0 ? <p className="mt-3 text-sm text-slate-500">Sin datos.</p> : (
                 <table className="mt-3 w-full text-left text-sm">
-                  <thead className="text-xs text-slate-400"><tr><th className="pb-2">Canal</th><th className="pb-2">Sesiones</th><th className="pb-2">Conv.</th></tr></thead>
+                  <thead className="text-xs text-slate-500"><tr><th className="pb-2">Canal</th><th className="pb-2">Sesiones</th><th className="pb-2">Conv.</th></tr></thead>
                   <tbody>{report.trafficSources.map((row) => <tr key={row.channelGroup} className="border-t border-slate-100"><td className="py-2">{row.channelGroup}</td><td className="py-2">{row.sessions}</td><td className="py-2">{row.conversions}</td></tr>)}</tbody>
                 </table>
               )}
             </section>
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Páginas más vistas</h3>
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Páginas más vistas</h3>
               {report.topPages.length === 0 ? <p className="mt-3 text-sm text-slate-500">Sin datos.</p> : (
                 <table className="mt-3 w-full text-left text-sm">
-                  <thead className="text-xs text-slate-400"><tr><th className="pb-2">Página</th><th className="pb-2">Vistas</th></tr></thead>
+                  <thead className="text-xs text-slate-500"><tr><th className="pb-2">Página</th><th className="pb-2">Vistas</th></tr></thead>
                   <tbody>{report.topPages.map((row) => <tr key={row.pagePath} className="border-t border-slate-100"><td className="py-2 truncate max-w-[12rem]" title={row.pagePath}>{row.pagePath}</td><td className="py-2">{row.pageViews}</td></tr>)}</tbody>
                 </table>
               )}
             </section>
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Páginas de destino</h3>
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Páginas de destino</h3>
               {report.landingPages.length === 0 ? <p className="mt-3 text-sm text-slate-500">Sin datos.</p> : (
                 <table className="mt-3 w-full text-left text-sm">
-                  <thead className="text-xs text-slate-400"><tr><th className="pb-2">Página</th><th className="pb-2">Sesiones</th></tr></thead>
+                  <thead className="text-xs text-slate-500"><tr><th className="pb-2">Página</th><th className="pb-2">Sesiones</th></tr></thead>
                   <tbody>{report.landingPages.map((row) => <tr key={row.landingPage} className="border-t border-slate-100"><td className="py-2 truncate max-w-[12rem]" title={row.landingPage}>{row.landingPage}</td><td className="py-2">{row.sessions}</td></tr>)}</tbody>
                 </table>
               )}
@@ -315,7 +315,7 @@ export function TrafficTab({ client }: { client: Client }) {
               <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">No hay campañas con datos en el periodo.</p>
             ) : (
               <table className="mt-4 w-full text-left text-sm">
-                <thead className="text-xs text-slate-400">
+                <thead className="text-xs text-slate-500">
                   <tr><th className="pb-2">Campaña</th><th className="pb-2">Estado</th><th className="pb-2">Inversión</th><th className="pb-2">Clics</th><th className="pb-2">Conv.</th><th className="pb-2">ROAS</th></tr>
                 </thead>
                 <tbody>

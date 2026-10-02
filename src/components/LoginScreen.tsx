@@ -32,7 +32,7 @@ export function LoginScreen({ isLoading, error, notice, onLogin }: LoginScreenPr
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Email</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Email</span>
             <input
               type="email"
               value={email}
@@ -44,7 +44,7 @@ export function LoginScreen({ isLoading, error, notice, onLogin }: LoginScreenPr
           </label>
 
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Contraseña</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Contraseña</span>
             <input
               type="password"
               value={password}
@@ -77,7 +77,7 @@ export function LoginScreen({ isLoading, error, notice, onLogin }: LoginScreenPr
           </button>
         </form>
 
-        <p className="mt-6 text-xs leading-relaxed text-slate-400">
+        <p className="mt-6 text-xs leading-relaxed text-slate-500">
           Para el MVP local puedes usar la cuenta seed del backend.
         </p>
       </div>

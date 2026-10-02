@@ -438,7 +438,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
     const fields = section === 'config' ? selectedDefinition.configFields : selectedDefinition.credentialFields;
     return fields.map((field) => (
       <label key={field.key} className="space-y-2 block">
-        <span className="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
           {section === 'credentials' && <KeyRound className="size-3 text-amber-500" />}
           {field.label}
           {field.required && <span className="text-rose-500">*</span>}
@@ -515,7 +515,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
                       <Icon className="size-5" />
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{provider.summary}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{provider.summary}</p>
                       <div className="mt-2 flex items-center justify-end gap-2">
                         <div className={cn('size-2 rounded-full', integration ? meta.dot : 'bg-slate-300')} />
                         <span className="text-xs font-bold text-slate-700">{integration ? meta.label : 'Sin conectar'}</span>
@@ -579,7 +579,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
               </div>
             ) : integrations.length === 0 ? (
               <div className="p-8 text-center">
-                <div className="mx-auto mb-4 size-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400">
+                <div className="mx-auto mb-4 size-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-500">
                   <Eye className="size-6" />
                 </div>
                 <h4 className="text-lg font-bold text-slate-900 mb-2">Todavía no hay integraciones</h4>
@@ -721,7 +721,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
               )}
 
               <label className="space-y-2 block">
-                <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Proveedor</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Proveedor</span>
                 <select
                   value={selectedProvider}
                   onChange={(event) => resetFormForProvider(event.target.value as IntegrationProvider)}
@@ -736,7 +736,7 @@ export function IntegrationsTab({ client }: { client: Client }) {
               </label>
 
               <label className="space-y-2 block mt-4">
-                <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Nombre interno</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Nombre interno</span>
                 <input
                   type="text"
                   value={draft.label}
@@ -749,11 +749,11 @@ export function IntegrationsTab({ client }: { client: Client }) {
 
             <div className="space-y-4">
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Configuración</h4>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Configuración</h4>
                 <div className="space-y-4">{renderFields('config')}</div>
               </div>
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Credenciales</h4>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Credenciales</h4>
                 <div className="space-y-4">{renderFields('credentials')}</div>
               </div>
             </div>

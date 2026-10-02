@@ -37,7 +37,7 @@ export function AiInsightsTab({ client }: { client: Client }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-6">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
             <AlertCircle className="size-4 text-rose-500" /> Diagnóstico de Salud
           </h3>
           <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
@@ -59,13 +59,13 @@ export function AiInsightsTab({ client }: { client: Client }) {
             </div>
           </div>
 
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
             <Lightbulb className="size-4 text-amber-500" /> Ideas de Contenido
           </h3>
           <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             {contentIdeas.map((idea, i) => (
-              <div key={idea} className="flex gap-3 group cursor-pointer hover:bg-slate-50 p-2 rounded-xl transition-colors text-left w-full">
-                <div className="size-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 group-hover:text-brand-primary transition-colors shrink-0">
+              <div key={idea} className="flex gap-3 group hover:bg-slate-50 p-2 rounded-xl transition-colors text-left w-full">
+                <div className="size-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 group-hover:text-brand-primary transition-colors shrink-0">
                   <MessageSquare className="size-4" />
                 </div>
                 <p className="text-sm font-medium text-slate-600 flex-1 leading-tight">{idea}</p>
@@ -76,7 +76,7 @@ export function AiInsightsTab({ client }: { client: Client }) {
         </div>
 
         <div className="space-y-6">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
             <Sparkles className="size-4 text-brand-primary" /> Resumen basado en reglas
           </h3>
           <p className="mb-3 text-xs text-slate-500">Recomendaciones deterministas basadas en las métricas disponibles; no se usa un modelo generativo.</p>
@@ -120,7 +120,7 @@ export function AiInsightsTab({ client }: { client: Client }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
               <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest flex items-center gap-2 mb-3">
-                <BarChart3 className="size-4 text-slate-400" /> Ritmo de ejecución
+                <BarChart3 className="size-4 text-slate-500" /> Ritmo de ejecución
               </h3>
               <p className="text-sm text-slate-600 leading-relaxed">Mantén el foco en {signals.healthBand === 'excellent' ? 'escala controlada' : 'corrección de prioridades'} para no perder eficiencia en el corto plazo.</p>
             </div>

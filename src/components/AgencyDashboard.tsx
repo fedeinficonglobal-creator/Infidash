@@ -198,21 +198,21 @@ export function AgencyDashboard() {
       {/* Global Agency Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Clientes Activos</h3>
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Clientes Activos</h3>
             <div className="flex items-end justify-between">
                <span className="text-3xl font-bold text-slate-900">{activeClientsCount}</span>
                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{isLoadingHealthSummary ? 'Cargando…' : dailyStatsCount === null ? 'No disponible' : `${dailyStatsCount} registros`}</span>
             </div>
          </div>
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Revenue Gestionado (30d)</h3>
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Revenue Gestionado (30d)</h3>
             <div className="flex items-end justify-between">
                <span className="text-3xl font-bold text-slate-900">{revenue30dRows ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(totalRevenue) : 'Sin datos'}</span>
                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{revenue30dRows ? `${revenue30dRows} registros · 30 días` : 'Sin datos · 30 días'}</span>
             </div>
          </div>
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Health Score Medio</h3>
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Health Score Medio</h3>
             <div className="flex items-center gap-4">
                <div className="relative size-12 flex-shrink-0">
                   <svg className="size-full -rotate-90 transform" viewBox="0 0 100 100">
@@ -228,11 +228,11 @@ export function AgencyDashboard() {
                </div>
                <div>
                   <p className="text-sm font-bold text-slate-700">{healthLabel}</p>
-                  <p className="text-[10px] text-slate-400 font-medium">{criticalClients} cliente{criticalClients === 1 ? '' : 's'} en riesgo crítico</p>
+                  <p className="text-[10px] text-slate-500 font-medium">{criticalClients} cliente{criticalClients === 1 ? '' : 's'} en riesgo crítico</p>
                </div>
             </div>
          </div>
-        <div className="bg-brand-primary p-6 rounded-2xl shadow-[0_8px_30px_rgba(14,165,233,0.3)] flex flex-col justify-between text-white relative overflow-hidden group cursor-pointer">
+        <div className="bg-brand-primary p-6 rounded-2xl shadow-[0_8px_30px_rgba(14,165,233,0.3)] flex flex-col justify-between text-white relative overflow-hidden group">
            <div className="relative z-10">
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/80 mb-2">Resumen automático</h3>
               <p className="text-sm font-medium leading-relaxed">{agencySignal}</p>
@@ -253,7 +253,7 @@ export function AgencyDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
          <div className="flex items-center gap-3">
             <div className="relative w-64">
-               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-500" />
                <input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
@@ -267,13 +267,13 @@ export function AgencyDashboard() {
          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-fit">
             <button 
                onClick={() => setViewMode('grid')}
-               className={cn("p-2 rounded-lg transition-all", viewMode === 'grid' ? "bg-white text-brand-primary shadow-sm" : "text-slate-400 hover:text-slate-600")}
+               className={cn("p-2 rounded-lg transition-all", viewMode === 'grid' ? "bg-white text-brand-primary shadow-sm" : "text-slate-500 hover:text-slate-600")}
             >
                <LayoutGrid className="size-4" />
             </button>
             <button 
                onClick={() => setViewMode('list')}
-               className={cn("p-2 rounded-lg transition-all", viewMode === 'list' ? "bg-white text-brand-primary shadow-sm" : "text-slate-400 hover:text-slate-600")}
+               className={cn("p-2 rounded-lg transition-all", viewMode === 'list' ? "bg-white text-brand-primary shadow-sm" : "text-slate-500 hover:text-slate-600")}
             >
                <List className="size-4" />
             </button>
@@ -288,9 +288,8 @@ export function AgencyDashboard() {
                return (
                   <div 
                      key={client.id} 
-                     onClick={() => goToClient(client.id)}
                      className={cn(
-                        "bg-white rounded-2xl border-2 transition-all cursor-pointer hover:-translate-y-1 hover:shadow-xl group flex flex-col",
+                        "relative bg-white rounded-2xl border-2 transition-all hover:-translate-y-1 hover:shadow-xl group flex flex-col",
                         status.border
                      )}
                   >
@@ -306,7 +305,7 @@ export function AgencyDashboard() {
                                    Score: {client.health}
                                 </span>
                              </div>
-                             {isAdmin && <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                             {isAdmin && <div className="relative z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                                <button
                                  type="button"
                                  onClick={(event) => {
@@ -334,13 +333,23 @@ export function AgencyDashboard() {
                              </div>}
                            </div>
                         </div>
-                        <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1">{client.name}</h3>
-                        <p className="text-xs text-slate-400 font-medium uppercase tracking-widest">{client.industry}</p>
+                        <h3 className="text-lg font-bold text-slate-900 leading-tight mb-1">
+                           {/* Stretched button: the whole card is clickable without nesting the edit/delete buttons inside it. */}
+                           <button
+                              type="button"
+                              onClick={() => goToClient(client.id)}
+                              aria-label={`Abrir cliente ${client.name}`}
+                              className="text-left cursor-pointer focus-visible:outline-none after:absolute after:inset-0 after:rounded-2xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-brand-primary"
+                           >
+                              {client.name}
+                           </button>
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium uppercase tracking-widest">{client.industry}</p>
                      </div>
                      
                      <div className="p-6 bg-slate-50/50 flex-1 grid grid-cols-2 gap-4">
                         <div>
-                           <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">{client.metrics.revenue.label}</p>
+                           <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{client.metrics.revenue.label}</p>
                            <p className="text-sm font-bold text-slate-900">{client.metrics.revenue.value}</p>
                            <div className="flex items-center gap-1 mt-1">
                               {client.metrics.revenue.trend === 'up' ? <TrendingUp className="size-3 text-emerald-500" /> : <TrendingDown className="size-3 text-rose-500" />}
@@ -350,7 +359,7 @@ export function AgencyDashboard() {
                            </div>
                         </div>
                         <div>
-                           <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">{client.metrics.roas.label}</p>
+                           <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{client.metrics.roas.label}</p>
                            <p className="text-sm font-bold text-slate-900">{client.metrics.roas.value}</p>
                            <div className="flex items-center gap-1 mt-1">
                               {client.metrics.roas.trend === 'up' ? <TrendingUp className="size-3 text-emerald-500" /> : <TrendingDown className="size-3 text-rose-500" />}
@@ -360,7 +369,7 @@ export function AgencyDashboard() {
                            </div>
                         </div>
                      </div>
-                     <div className="px-6 py-3 border-t border-slate-50 bg-white rounded-b-2xl flex items-center justify-between text-xs font-bold text-slate-400 group-hover:text-brand-primary transition-colors">
+                     <div className="px-6 py-3 border-t border-slate-50 bg-white rounded-b-2xl flex items-center justify-between text-xs font-bold text-slate-500 group-hover:text-brand-primary transition-colors">
                         <span>Ver Dashboard Analítico</span>
                         <ArrowRight className="size-4" />
                      </div>
@@ -373,17 +382,18 @@ export function AgencyDashboard() {
             <table className="w-full text-left">
                <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
-                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cliente</th>
-                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Health Score</th>
-                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Revenue (30d)</th>
-                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">ROAS</th>
-                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Acción</th>
+                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cliente</th>
+                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Health Score</th>
+                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Revenue (30d)</th>
+                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">ROAS</th>
+                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Acción</th>
                   </tr>
                </thead>
                <tbody className="divide-y divide-slate-100">
                   {visibleClients.map(client => {
                      const status = getHealthStatus(client.health);
                      return (
+                        // Row click is a mouse convenience only; the name button below is the keyboard/AT target.
                         <tr 
                            key={client.id} 
                            className="hover:bg-slate-50 transition-colors cursor-pointer group"
@@ -393,8 +403,20 @@ export function AgencyDashboard() {
                               <div className="flex items-center gap-3">
                                  <img src={client.logo} alt={client.name} className="size-10 rounded-lg object-cover" />
                                  <div>
-                                    <h3 className="text-sm font-bold text-slate-900">{client.name}</h3>
-                                    <p className="text-[10px] text-slate-400 font-medium tracking-widest uppercase">{client.industry}</p>
+                                    <h3 className="text-sm font-bold text-slate-900">
+                                       <button
+                                          type="button"
+                                          onClick={(event) => {
+                                             event.stopPropagation();
+                                             goToClient(client.id);
+                                          }}
+                                          aria-label={`Abrir cliente ${client.name}`}
+                                          className="text-left rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+                                       >
+                                          {client.name}
+                                       </button>
+                                    </h3>
+                                    <p className="text-[10px] text-slate-500 font-medium tracking-widest uppercase">{client.industry}</p>
                                  </div>
                               </div>
                            </td>
@@ -425,7 +447,7 @@ export function AgencyDashboard() {
                               </div>
                            </td>
                            <td className="px-6 py-4 text-right">
-                              {isAdmin && <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {isAdmin && <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                                  <button
                                    type="button"
                                    onClick={(event) => {

@@ -36,7 +36,7 @@ export function RrssToolbar({ admin, readiness, isRefreshing, lastUpdatedAt, onG
       <Button type="button" disabled={!canPlan || isRefreshing} title={readiness && !canPlan ? 'El workflow de plan de redes no está configurado para este cliente' : undefined} onClick={onGeneratePlan} className="bg-slate-900 text-white"><Sparkles className="size-4" />Generar plan de redes</Button>
       <Button type="button" disabled={!enabled} title={readiness && !enabled ? 'La automatización editorial no está activada para este cliente' : undefined} onClick={onNewIdea} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><Plus className="size-4" />Nueva idea</Button>
     </div> : <span />}
-    <div className="flex items-center gap-2 text-xs text-slate-400"><Clock3 className="size-3.5" />{lastUpdatedAt ? `Actualizado ${format(parseISO(lastUpdatedAt), 'HH:mm:ss', { locale: es })}` : 'Pendiente de actualizar'}<button type="button" onClick={onRefresh} disabled={isRefreshing} aria-label="Actualizar publicaciones" className="rounded-lg p-2 hover:bg-white"><RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} /></button></div>
+    <div className="flex items-center gap-2 text-xs text-slate-500"><Clock3 className="size-3.5" />{lastUpdatedAt ? `Actualizado ${format(parseISO(lastUpdatedAt), 'HH:mm:ss', { locale: es })}` : 'Pendiente de actualizar'}<button type="button" onClick={onRefresh} disabled={isRefreshing} aria-label="Actualizar publicaciones" className="rounded-lg p-2 hover:bg-white"><RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} /></button></div>
   </div>;
 }
 
@@ -156,7 +156,7 @@ export function RrssPostsSection({ clientId }: { clientId: string }) {
     <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-4">
       <label className="text-xs font-bold text-slate-500">Estado<select aria-label="Filtrar ideas por estado" value={filters.status} onChange={(event) => setFilters({ status: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Todos</option>{PLAN_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
       <label className="text-xs font-bold text-slate-500">Formato<select aria-label="Filtrar ideas por formato" value={filters.format} onChange={(event) => setFilters({ format: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"><option value="">Todos</option>{RRSS_FORMATS.map((item) => <option key={item} value={item}>{formatLabel(item)}</option>)}</select></label>
-      <label className="relative text-xs font-bold text-slate-500 md:col-span-2">Buscar<Search className="absolute bottom-3 left-3 size-4 text-slate-400" aria-hidden="true" /><input aria-label="Buscar ideas" value={filters.search} onChange={(event) => setFilters({ search: event.target.value })} placeholder="Título o tema" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm" /></label>
+      <label className="relative text-xs font-bold text-slate-500 md:col-span-2">Buscar<Search className="absolute bottom-3 left-3 size-4 text-slate-500" aria-hidden="true" /><input aria-label="Buscar ideas" value={filters.search} onChange={(event) => setFilters({ search: event.target.value })} placeholder="Título o tema" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm" /></label>
     </div>
     {error && <div role="alert" className="flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{error}</span><Button onClick={() => void load(token)} className="bg-white px-3 text-rose-700">Reintentar</Button></div>}
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -168,7 +168,7 @@ export function RrssPostsSection({ clientId }: { clientId: string }) {
             <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatEditorialDate(item.plannedAt)}</td>
             <td className="px-4 py-3"><button type="button" onClick={() => void select(token, item.id)} className="text-left font-bold text-slate-800 hover:text-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/30">{item.title}</button></td>
             <td className="px-4 py-3 text-slate-600">{formatLabel(item.format)}</td>
-            <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{item.networks.length ? item.networks.map((network) => <NetworkBadge key={network} network={network} />) : <span className="text-xs text-slate-400">—</span>}</div></td>
+            <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{item.networks.length ? item.networks.map((network) => <NetworkBadge key={network} network={network} />) : <span className="text-xs text-slate-500">—</span>}</div></td>
             <td className="px-4 py-3"><ContentStatusBadge status={rrssIdeaDisplayStatus(item.status, item.socialPosts)} /></td>
             <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{draftsSummary(item.socialPosts ?? [])}</td>
           </tr>)}</tbody></table></div>}
