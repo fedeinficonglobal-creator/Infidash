@@ -85,8 +85,8 @@ test('the core migration is applied by the runner, twice, and creates every core
 
     const schema = (await pool.query('SELECT current_schema() AS schema')).rows[0].schema;
     await assertCoreSchema(pool, schema, { baselineOnly: false });
-    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql', '0006_core_daily_stats_date.sql', '0007_core_timestamptz_sessions_leads.sql')`);
-    assert.equal(registry.rows.length, 4);
+    const registry = await pool.query(`SELECT version FROM public.schema_migrations WHERE version IN ('0004_core_baseline.sql', '0005_core_drop_ai_insights.sql', '0006_core_daily_stats_date.sql', '0007_core_timestamptz_sessions_leads.sql', '0008_editorial_media_cleanup_log.sql')`);
+    assert.equal(registry.rows.length, 5);
   } finally {
     await closeCorePool();
   }

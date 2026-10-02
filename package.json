@@ -17,7 +17,8 @@
     "test:api": "node scripts/run-tests.mjs api",
     "api": "tsx server.ts",
     "db:migrate:editorial": "tsx scripts/migrate-editorial.ts",
-    "content:import": "tsx scripts/import-content-hub.ts"
+    "content:import": "tsx scripts/import-content-hub.ts",
+    "postiz:cleanup": "tsx scripts/postiz-media-cleanup.ts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.1.1",

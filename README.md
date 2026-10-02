@@ -19,6 +19,7 @@ Infidash es un dashboard para agencias con autenticación local y persistencia e
 - `npm run db:migrate:editorial` — aplica migraciones editoriales pendientes con lock y checksum
 - Esquema de base de datos: todo cambio de esquema, también el del núcleo (`public`), va en `db/migrations/NNNN_*.sql` (las migraciones del núcleo se llaman `NNNN_core_*.sql` y se aplican siempre antes que las editoriales). `0004_core_baseline.sql` congela el esquema núcleo existente y es idempotente (`IF NOT EXISTS` / bloques `DO`), así que los despliegues existentes no necesitan ningún paso manual: se aplica solo al arrancar, sin efecto si el esquema ya existe. Ya no hay DDL en `src/lib/database.ts`; los datos semilla y el backfill de membresías siguen en código.
 - `npm run content:import` — valida en dry-run un export de Content Hub; requiere `--apply` para escribir
+- `npm run postiz:cleanup` — limpia los vídeos/imágenes caducados de Postiz (dry-run por defecto; `--apply` para borrar). Ver «Limpieza de vídeos de Postiz»
 
 ## Variables de entorno
 
@@ -81,6 +82,55 @@ npm run build
 - Los backups se crean desde la API y se guardan en `data/backups/` por defecto.
 - La sección **Contenidos** usa el esquema PostgreSQL `editorial`; no actives los workflows nuevos antes de aplicar sus migraciones.
 - Los tokens de servicio de n8n se guardan solo como SHA-256 en `editorial.service_tokens`. La API nunca necesita el token en una variable de entorno.
+
+## Limpieza de vídeos de Postiz
+
+Postiz (autoalojado con `STORAGE_PROVIDER=local`) guarda para siempre cada creatividad subida (reels de ~20 MB, imágenes) y su API pública no permite listar ni borrar medios. `npm run postiz:cleanup` borra del directorio de uploads los ficheros caducados. Es un script independiente que se ejecuta en el VPS donde corre Postiz; no forma parte de la API.
+
+**Qué se borra.** Un fichero se considera caducado solo si TODAS las filas de Infidash que lo referencian están terminadas y su última actividad es anterior a la retención. Se leen `editorial.publications.media`, `editorial.social_posts.media` y la imagen de cabecera de los contenidos (`editorial.contents.seo.headerImageUrl`):
+
+- Publicación terminada: `published`, `failed` o `cancelled`. Cualquier otro estado (`pending`, `sending`, `scheduled`, `unknown`, `cancel_requested`, `draft`) conserva el fichero. Última actividad: la mayor entre `published_at`, la fecha programada y `updated_at`.
+- Post RRSS terminado: `discarded`, o `scheduled` cuya publicación enlazada está terminada. `review` y `approved` conservan el fichero.
+- Contenido con imagen de cabecera: terminado si está `archived`, o `approved` con publicaciones y todas terminadas. Si una de sus publicaciones sigue viva, se conserva.
+- Si un mismo fichero lo usan varias filas, basta una sin terminar (o reciente) para conservarlo. Ante cualquier duda, se conserva.
+- Solo se tocan URLs bajo `POSTIZ_UPLOAD_URL_PREFIX` y con extensión `.mp4 .mov .m4v .webm .jpg .jpeg .png .webp`. Se rechazan rutas con `..`, absolutas, con `\` o enlaces simbólicos que salgan del directorio. Nunca se borran directorios ni ficheros no referenciados por Infidash.
+- No se modifica ninguna fila de posts o publicaciones. En modo `--apply` cada fichero borrado queda anotado en `editorial.media_cleanup_log` (migración `0008`, que se aplica con `npm run db:migrate:editorial` o al arrancar), para poder mostrar «archivado» más adelante.
+
+**Variables de entorno** (solo para este script; no están en `.env.example`):
+
+- `POSTIZ_UPLOAD_DIR` — obligatoria. Directorio de uploads de Postiz tal como lo ve el script.
+- `POSTIZ_UPLOAD_URL_PREFIX` — obligatoria. Prefijo de URL que corresponde a ese directorio, p. ej. `https://postiz.example.com/uploads` (también vale solo la ruta, `/uploads`, que acepta cualquier host).
+- `POSTIZ_MEDIA_RETENTION_DAYS` — días de retención, entero de 1 a 365 (por defecto 7). El flag `--days=N` tiene prioridad.
+- `DATABASE_URL` — la misma que usa Infidash (no hace falta con `--check-disk`).
+
+**Uso.**
+
+```bash
+npm run postiz:cleanup                 # dry-run: lista lo que borraría, no borra nada
+npm run postiz:cleanup -- --apply      # borra los ficheros caducados
+npm run postiz:cleanup -- --days=14    # otra retención
+npm run postiz:cleanup -- --check-disk --warn-percent=80 --min-free-gb=10
+```
+
+Empieza siempre con el dry-run y revisa la lista. El script termina con código distinto de cero si algún borrado falla (el resto de ficheros se procesan igualmente) y es idempotente: una segunda ejecución ignora lo ya borrado.
+
+**Montar el volumen.** El script necesita acceso de lectura y escritura al directorio de uploads de Postiz. En EasyPanel, monta el mismo volumen/bind mount que usa Postiz (por ejemplo `/uploads` de Postiz, en el host `/etc/easypanel/projects/<proyecto>/postiz/volumes/...`) dentro del contenedor desde el que se ejecuta el script, o ejecútalo en el host con una copia del repositorio y apunta `POSTIZ_UPLOAD_DIR` a esa ruta.
+
+**Programarlo.** Ejemplo de cron diario (03:30) en el host:
+
+```cron
+30 3 * * * cd /ruta/a/infidash && /usr/bin/env npm run postiz:cleanup -- --apply >> /var/log/postiz-cleanup.log 2>&1
+```
+
+En EasyPanel puedes usar un Cron Job del servicio de Infidash con el comando `npm run postiz:cleanup -- --apply` (con el volumen montado y las variables definidas).
+
+**Alerta de disco.** `npm run postiz:cleanup -- --check-disk` no necesita base de datos: muestra el uso del sistema de ficheros del directorio de uploads y sale con código 1 si el uso es mayor o igual que `--warn-percent` (80 por defecto) o si quedan menos GB libres que `--min-free-gb`. Úsalo en otro cron para que avise por correo o monitorización.
+
+**Limitaciones.**
+
+- Las entradas de la biblioteca de medios de Postiz quedan huérfanas (la entrada sigue visible en Postiz, pero sin fichero); este script solo libera disco.
+- Las imágenes que los workflows de n8n suben directamente a Postiz (imágenes de cabecera) solo se limpian cuando están referenciadas por filas de Infidash; los ficheros sin referencia se conservan siempre.
+- No se eliminan subdirectorios vacíos y las instantáneas antiguas de revisiones de contenido no cuentan como referencia.
 
 ## Documentación editorial
 
