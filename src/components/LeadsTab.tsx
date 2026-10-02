@@ -5,6 +5,7 @@ import { Megaphone, CheckCircle2, Clock, XCircle, Copy, Check, LoaderCircle } fr
 import { type Client, useClientStore } from '../store/useClientStore';
 import { buildLeadsCsv, type LeadExportRow } from '../lib/leadsExport.js';
 import { getClientIntegrations, getLeads, rotateIntegrationWebhook, setIntegrationActive, type ApiIntegration, type ApiLead, type LeadsPage } from '../services/infidashApi.js';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 const PAGE_SIZE = 50;
 
@@ -29,6 +30,7 @@ function leadDateLabel(iso: string) {
 
 export function LeadsTab({ client }: { client: Client }) {
   const { sessionToken, currentUser } = useClientStore();
+  const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
 
   const [leads, setLeads] = useState<ApiLead[]>([]);
@@ -99,8 +101,18 @@ export function LeadsTab({ client }: { client: Client }) {
 
   const updateWebhook = async (action: 'enable' | 'disable' | 'rotate') => {
     if (!sessionToken || !wordpressIntegration || updatingWebhook) return;
-    if (action === 'rotate' && !window.confirm('¿Rotar la URL del webhook? La URL anterior dejará de funcionar de inmediato.')) return;
-    if (action === 'disable' && !window.confirm('¿Desactivar la captura de leads de WordPress?')) return;
+    if (action === 'rotate' && !(await confirm({
+      title: '¿Rotar la URL del webhook?',
+      description: 'La URL anterior dejará de funcionar de inmediato: tendrás que actualizarla en Fluent Forms o Contact Form 7, o dejarás de recibir leads.',
+      confirmLabel: 'Rotar URL',
+      tone: 'danger',
+    }))) return;
+    if (action === 'disable' && !(await confirm({
+      title: '¿Desactivar la captura de leads de WordPress?',
+      description: 'El webhook dejará de aceptar envíos y no se registrarán nuevos leads hasta que lo vuelvas a activar.',
+      confirmLabel: 'Desactivar captura',
+      tone: 'danger',
+    }))) return;
     setUpdatingWebhook(true);
     setError(null);
     try {

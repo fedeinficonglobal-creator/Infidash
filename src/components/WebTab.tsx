@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link2, PencilLine, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { Link2, PencilLine, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
 import { buildClientSignals } from '../lib/clientSignals.js';
 import { currentPlanPeriodKey, useOperationalPlan } from '../lib/useOperationalPlan.js';
@@ -10,6 +10,8 @@ import {
   upsertWebPlanRow,
   type WebPlanRow,
 } from '../lib/webPlan.js';
+import { Modal } from './Modal.js';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 const EMPTY_FORM = {
   cliente: '',
@@ -24,6 +26,7 @@ const EMPTY_FORM = {
 
 export function WebTab({ client }: { client: Client }) {
   const { currentUser, sessionToken } = useClientStore();
+  const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
   const signals = buildClientSignals(client);
   const [periodKey, setPeriodKey] = useState(currentPlanPeriodKey);
@@ -111,7 +114,13 @@ export function WebTab({ client }: { client: Client }) {
 
   const handleDelete = async (rowId: string) => {
     const target = rows.find((row) => row.id === rowId);
-    if (!window.confirm(`¿Eliminar la fila web de ${target?.cliente ?? 'este cliente'}?`)) return;
+    const confirmed = await confirm({
+      title: `¿Eliminar la fila web de ${target?.cliente ?? 'este cliente'}?`,
+      description: 'Se quitará la fila del plan web. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar fila',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await saveRows(removeWebPlanRow(rows, rowId));
       if (editingRow?.id === rowId) closeModal();
@@ -238,17 +247,13 @@ export function WebTab({ client }: { client: Client }) {
         </div>
       </section>
 
-      {isAdmin && isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-100 p-6">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-1">{monthLabel}</p>
-                <h3 className="text-xl font-bold text-slate-900">{editingRow ? 'Editar fila web' : 'Añadir fila web'}</h3>
-              </div>
-              <button type="button" onClick={closeModal} className="text-slate-400 transition-colors hover:text-slate-600"><X className="size-5" /></button>
-            </div>
-
+      <Modal
+        open={isAdmin && isModalOpen}
+        onClose={closeModal}
+        eyebrow={monthLabel}
+        title={editingRow ? 'Editar fila web' : 'Añadir fila web'}
+        size="xl"
+      >
             <form onSubmit={handleSubmit} className="p-6">
               {error && (
                 <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
@@ -352,9 +357,7 @@ export function WebTab({ client }: { client: Client }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 }

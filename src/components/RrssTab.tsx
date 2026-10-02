@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Plus, PencilLine, Trash2, Link2, Target, Sparkles, X } from 'lucide-react';
+import { Plus, PencilLine, Trash2, Link2, Target, Sparkles } from 'lucide-react';
 import { type Client, useClientStore } from '../store/useClientStore';
 import { currentPlanPeriodKey, useOperationalPlan } from '../lib/useOperationalPlan.js';
 import {
@@ -10,6 +10,8 @@ import {
   type RrssPlanRow,
 } from '../lib/rrssPlan.js';
 import { RrssPostsSection } from './rrss/RrssPostsSection.js';
+import { Modal } from './Modal.js';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 type RrssSection = 'posts' | 'plan';
 const SECTIONS: ReadonlyArray<[RrssSection, string]> = [['posts', 'Publicaciones'], ['plan', 'Planificación mensual']];
@@ -24,6 +26,7 @@ const EMPTY_FORM = {
 
 export function RrssTab({ client }: { client: Client }) {
   const { currentUser, sessionToken } = useClientStore();
+  const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
   const [section, setSection] = useState<RrssSection>('posts');
   const [periodKey, setPeriodKey] = useState(currentPlanPeriodKey);
@@ -100,7 +103,12 @@ export function RrssTab({ client }: { client: Client }) {
 
   const handleDeleteRow = async (rowId: string) => {
     const current = planRows.find((row) => row.id === rowId);
-    const confirmed = window.confirm(`¿Eliminar esta fila RRSS${current?.web ? ` de ${current.web}` : ''}?`);
+    const confirmed = await confirm({
+      title: `¿Eliminar esta fila RRSS${current?.web ? ` de ${current.web}` : ''}?`,
+      description: 'Se quitará la fila del plan de redes sociales. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar fila',
+      tone: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -226,19 +234,13 @@ export function RrssTab({ client }: { client: Client }) {
         </div>
       </section>
 
-      {isAdmin && isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-slate-100 p-6">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-1">{monthLabel}</p>
-                <h3 className="text-xl font-bold text-slate-900">{editingRow ? 'Editar fila RRSS' : 'Añadir fila RRSS'}</h3>
-              </div>
-              <button type="button" onClick={closeModal} className="text-slate-400 transition-colors hover:text-slate-600">
-                <X className="size-5" />
-              </button>
-            </div>
-
+      <Modal
+        open={isAdmin && isModalOpen}
+        onClose={closeModal}
+        eyebrow={monthLabel}
+        title={editingRow ? 'Editar fila RRSS' : 'Añadir fila RRSS'}
+        size="lg"
+      >
             <form onSubmit={handleSubmitPlan} className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {planError && (
@@ -325,9 +327,7 @@ export function RrssTab({ client }: { client: Client }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
       </div>
 
     </div>

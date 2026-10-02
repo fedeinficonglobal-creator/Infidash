@@ -44,6 +44,7 @@ import {
   type IntegrationProvider,
 } from '../lib/integrationCatalog.js';
 import { cn } from '../lib/utils.js';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 type IntegrationDraft = {
   label: string;
@@ -129,6 +130,7 @@ function capabilityTone(capability: string) {
 
 export function IntegrationsTab({ client }: { client: Client }) {
   const { sessionToken, currentUser } = useClientStore();
+  const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
   const [integrations, setIntegrations] = useState<ApiIntegration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -401,7 +403,13 @@ export function IntegrationsTab({ client }: { client: Client }) {
       return;
     }
 
-    if (!window.confirm(`¿Eliminar la integración ${target.label}?`)) {
+    const confirmed = await confirm({
+      title: `¿Eliminar la integración ${target.label}?`,
+      description: 'Se borrarán sus credenciales y su configuración. Los datos ya sincronizados no se recuperan al eliminarla. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar integración',
+      tone: 'danger',
+    });
+    if (!confirmed) {
       return;
     }
 

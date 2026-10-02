@@ -8,6 +8,8 @@ import { CREATIVE_ACCEPT, RRSS_FORMATS, RRSS_NETWORKS, bulkUploadTargets, canGen
 import type { RrssIdea, SocialPost } from '../../services/rrssApi.js';
 import { cn } from '../../lib/utils.js';
 import { Button, Field } from '../content/controls.js';
+import { Modal } from '../Modal.js';
+import { useConfirm } from '../../hooks/useConfirm.js';
 import { ContentStatusBadge } from '../content/ContentStatusBadge.js';
 import { SocialPostCard } from './SocialPostCard.js';
 
@@ -41,8 +43,8 @@ function GeneratePostsDialog({ idea, onClose }: { idea: RrssIdea; onClose: () =>
     });
     return () => { active = false; };
   }, [idea.id, networksKey, loadAccounts, token]);
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Generar posts">
-    <form className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl" onSubmit={async (event) => {
+  return <Modal open onClose={onClose} title="Generar posts" size="md">
+    <form className="space-y-4 p-6" onSubmit={async (event) => {
       event.preventDefault();
       setError(null);
       setIsSubmitting(true);
@@ -50,7 +52,6 @@ function GeneratePostsDialog({ idea, onClose }: { idea: RrssIdea; onClose: () =>
       catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo iniciar la generación de los posts'); }
       finally { setIsSubmitting(false); }
     }}>
-      <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Generar posts</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar"><X className="size-4" /></Button></div>
       <p className="text-xs text-slate-500">Se creará un borrador por cuenta. Los posts ya programados no se sobrescriben.</p>
       <fieldset className="space-y-1"><legend className="text-xs font-bold text-slate-500">Cuentas</legend>
         {isLoadingAccounts ? <p className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />Cargando cuentas…</p>
@@ -61,7 +62,7 @@ function GeneratePostsDialog({ idea, onClose }: { idea: RrssIdea; onClose: () =>
       {error && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</p>}
       <div className="flex justify-end gap-2"><Button type="button" onClick={onClose} className="bg-slate-100 text-slate-700">Cancelar</Button><Button type="submit" disabled={isSubmitting || isLoadingAccounts || !accountIds.length} className="bg-slate-900 text-white">{isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Generar posts</Button></div>
     </form>
-  </div>;
+  </Modal>;
 }
 
 const NO_EDITABLE_DRAFTS = 'No hay borradores editables (en revisión o aprobados)';
@@ -134,8 +135,8 @@ function NewDraftDialog({ idea, onClose }: { idea: RrssIdea; onClose: () => void
   const selected = accounts.find((account) => account.id === accountId);
   const limit = copyLimit(selected ? networkFromInstanceKey(selected.instanceKey) : 'other');
   const created = failedFiles !== null;
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Nuevo borrador">
-    <form className="max-h-full w-full max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" onSubmit={async (event) => {
+  return <Modal open onClose={onClose} title="Nuevo borrador" size="md">
+    <form className="space-y-4 p-6" onSubmit={async (event) => {
       event.preventDefault();
       if (created) { onClose(); return; }
       setError(null);
@@ -146,7 +147,6 @@ function NewDraftDialog({ idea, onClose }: { idea: RrssIdea; onClose: () => void
       } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo crear el borrador'); }
       finally { setIsSubmitting(false); }
     }}>
-      <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Nuevo borrador</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar"><X className="size-4" /></Button></div>
       <p className="text-xs text-slate-500">Para posts hechos en otra herramienta (Canva, Photoshop, CapCut…): elige la cuenta, pega el texto y sube las creatividades.</p>
       <label className="block text-xs font-bold text-slate-500">Cuenta
         {isLoadingAccounts ? <span className="mt-1 flex items-center gap-2 text-sm font-normal text-slate-500"><LoaderCircle className="size-4 animate-spin" />Cargando cuentas…</span>
@@ -174,11 +174,12 @@ function NewDraftDialog({ idea, onClose }: { idea: RrssIdea; onClose: () => void
           : <Button type="submit" disabled={isSubmitting || isLoadingAccounts || !selected || !copy.trim()} className="bg-slate-900 text-white">{isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}Crear borrador</Button>}
       </div>
     </form>
-  </div>;
+  </Modal>;
 }
 
 /** Drawer with the idea brief, its status actions and its social post drafts. */
 export function RrssIdeaPanel() {
+  const confirm = useConfirm();
   const token = useClientStore((state) => state.sessionToken) ?? '';
   const role = useClientStore((state) => state.currentUser?.role);
   const { items, selectedId, socialPosts, uploads, bulkUpload, readiness, isLoadingDetail, isSaving, detailError, conflict, select, saveIdea, releaseGeneration, saveCopy, removeMedia, moveMedia, uploadFiles, uploadToAllDrafts, dismissBulkUpload, dismissUpload, approvePost, discardPost, schedulePost, refresh, clearConflict } = useRrssStore();
@@ -191,8 +192,8 @@ export function RrssIdeaPanel() {
   const admin = role === 'admin';
   const ignore = () => { /* the store already surfaced the error in the panel */ };
   const close = () => { setGenerating(false); setNewDraftOpen(false); void select(token, null); };
-  const release = () => { if (!window.confirm('¿Marcar la generación como fallida? Revisa antes que no se hayan creado ya los borradores para no duplicarlos.')) return; void releaseGeneration(token, idea.id).catch(ignore); };
-  return <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" role="dialog" aria-modal="true" aria-label={`Detalle de ${idea.title}`} onMouseDown={(event) => { if (event.currentTarget === event.target) close(); }}><aside className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
+  const release = async () => { if (!(await confirm({ title: '¿Marcar la generación como fallida?', description: 'Revisa antes que no se hayan creado ya los borradores para no duplicarlos.', confirmLabel: 'Marcar como fallida', tone: 'danger' }))) return; void releaseGeneration(token, idea.id).catch(ignore); };
+  return <Modal open onClose={close} variant="drawer" size="lg" hideHeader ariaLabel={`Detalle de ${idea.title}`}>
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur"><div className="flex items-start justify-between gap-4"><div><ContentStatusBadge status={rrssIdeaDisplayStatus(idea.status, socialPosts)} /><h2 className="mt-2 text-xl font-bold text-slate-900">{idea.title}</h2><p className="mt-1 text-xs text-slate-500">{formatEditorialDate(idea.plannedAt)} · {formatLabel(idea.format)}</p></div><Button onClick={close} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar detalle"><X className="size-4" /></Button></div></div>
     <div className="space-y-6 p-5">
       {conflict && <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex gap-2"><AlertCircle className="size-5 shrink-0" /><div><p className="font-bold">Hay una versión más reciente</p><p className="mt-1">{conflict}</p><Button className="mt-3 bg-amber-900 text-white" onClick={() => { clearConflict(); void refresh(token).then(() => select(token, idea.id)); }}>Recargar datos</Button></div></div></div>}
@@ -227,11 +228,11 @@ export function RrssIdeaPanel() {
           onUpload={(files) => void uploadFiles(token, post.id, files)}
           onDismissUpload={(key) => dismissUpload(post.id, key)}
           onApprove={() => void approvePost(token, post.id).catch(ignore)}
-          onDiscard={() => { if (window.confirm('¿Descartar este borrador?')) void discardPost(token, post.id).catch(ignore); }}
+          onDiscard={async () => { if (await confirm({ title: '¿Descartar este borrador?', description: 'Se descartará este borrador y no se publicará.', confirmLabel: 'Descartar borrador', tone: 'danger' })) void discardPost(token, post.id).catch(ignore); }}
           onSchedule={(input) => void schedulePost(token, post.id, input).catch(ignore)} />)}
       </section>
     </div>
     {generating && <GeneratePostsDialog idea={idea} onClose={() => setGenerating(false)} />}
     {newDraftOpen && <NewDraftDialog idea={idea} onClose={() => setNewDraftOpen(false)} />}
-  </aside></div>;
+  </Modal>;
 }
