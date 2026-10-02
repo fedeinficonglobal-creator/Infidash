@@ -18,10 +18,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # Non-blocking for the first week after it was introduced (audit remediation W0.4);
-      # then drop continue-on-error so a new high-severity advisory fails the build.
+      # Blocking since audit remediation W5.2: a new high-severity advisory fails the build.
       - run: npm audit --audit-level=high
-        continue-on-error: true
       - run: npm run lint
       - run: npm test
       - run: npm run build
@@ -91,3 +89,11 @@ jobs:
       - run: npm run build
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: npm run test:api
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      # Build only (no push): proves the production image still builds from this commit.
+      - run: docker build -t infidash:ci .
