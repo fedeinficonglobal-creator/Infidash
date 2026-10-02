@@ -914,7 +914,8 @@ test('admin can create a postgres backup and viewer cannot', async () => {
   // The internal filesystem path is never exposed; the client only gets the file name.
   assert.equal('path' in body.backup, false);
   assert.equal(typeof body.backup.name, 'string');
-  assert.ok(body.backup.name.endsWith('.sql'));
+  // Backups are gzip-compressed while streaming (W5.5), so the file name ends in .sql.gz.
+  assert.ok(body.backup.name.endsWith('.sql.gz'));
   assert.ok(!body.backup.name.includes('/') && !body.backup.name.includes('\\'));
   assert.equal(typeof body.backup.sizeBytes, 'number');
   assert.equal(typeof body.backup.createdAt, 'string');
