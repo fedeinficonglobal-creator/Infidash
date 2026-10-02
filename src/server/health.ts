@@ -125,3 +125,12 @@ export function registerHealthRoute(app: FastifyInstance, check: HealthCheck) {
     return reply.code(result.statusCode).send(result.body);
   });
 }
+
+/**
+ * Public, unauthenticated: tells when this process started. The deploy workflow polls it to know the NEW container is
+ * serving (its startedAt is later than the moment the deploy was triggered). It exposes no version or build detail.
+ */
+export function registerVersionRoute(app: FastifyInstance, startedAt: Date = new Date()) {
+  const body = { startedAt: startedAt.toISOString() };
+  app.get('/api/version', async () => body);
+}

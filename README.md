@@ -252,6 +252,24 @@ En EasyPanel puedes usar un Cron Job del servicio de Infidash con el comando `np
 - Las imágenes que los workflows de n8n suben directamente a Postiz (imágenes de cabecera) solo se limpian cuando están referenciadas por filas de Infidash; los ficheros sin referencia se conservan siempre.
 - No se eliminan subdirectorios vacíos y las instantáneas antiguas de revisiones de contenido no cuentan como referencia.
 
+## Despliegue continuo
+
+Cada merge a `main` con el CI en verde puede desplegarse solo en EasyPanel. Es opcional: mientras no configures lo de abajo, el workflow `Deploy` se salta y el despliegue sigue siendo manual (botón «Implementar»).
+
+**Activarlo (una vez):**
+
+1. En EasyPanel, servicio de Infidash, busca la URL de **despliegue por webhook** («Deploy Webhook» / «Trigger URL», en la pestaña de origen o de despliegue) y cópiala. Quien tenga esa URL puede lanzar un despliegue: trátala como un secreto.
+2. En GitHub: Settings → Secrets and variables → Actions:
+   - **Secret** `EASYPANEL_DEPLOY_URL`: la URL del paso 1.
+   - **Variable** `INFIDASH_BASE_URL`: la URL pública de Infidash, sin barra final (p. ej. `https://infidash.tudominio.com`).
+3. Para probarlo sin esperar a un merge: Actions → Deploy → Run workflow.
+
+**Qué hace:** espera a que el CI termine bien en `main`, llama al webhook de EasyPanel y comprueba cada 10 segundos (hasta 15 minutos) que el contenedor nuevo ha arrancado (`GET /api/version` devuelve `startedAt`, la hora de arranque del proceso, posterior al despliegue) y que `GET /api/health?deep=1` responde 200 (base de datos y migraciones al día). Si no lo consigue, el job falla y GitHub te avisa. Los despliegues no se solapan: uno nuevo espera al que está en curso.
+
+**Migraciones:** se aplican al arrancar el contenedor (antes de abrir el puerto), no en un paso previo. Si una migración falla, el contenedor nuevo no llega a estar sano y el workflow marca el despliegue como fallido. Las migraciones que cambian tipos o borran filas no tienen vuelta atrás con el código anterior: haz backup antes de fusionarlas (`npm run db:backup`).
+
+**Vuelta atrás:** haz `git revert` del commit problemático en `main` (por una PR) y el mismo flujo despliega la versión anterior. Si una migración ya se aplicó, restaurar el backup es el único camino para deshacerla (ver «Backups y restauración»).
+
 ## Documentación editorial
 
 - [Plan aprobado](docs/plans/2026-09-15-content-hub-plan.md)

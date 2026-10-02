@@ -141,3 +141,15 @@ test('the health route turns an unexpected failure into the 503 body', async () 
   assert.deepEqual(response.json(), { status: 'degraded', checks: { database: 'down' } });
   await app.close();
 });
+
+test('GET /api/version reports when this process started, so a deploy can tell the new container from the old one', async () => {
+  const { default: fastify } = await import('fastify');
+  const { registerVersionRoute } = await import('../src/server/health.js');
+  const app = fastify();
+  registerVersionRoute(app, new Date('2026-10-02T10:00:00.000Z'));
+  await app.ready();
+  const response = await app.inject({ url: '/api/version' });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { startedAt: '2026-10-02T10:00:00.000Z' });
+  await app.close();
+});

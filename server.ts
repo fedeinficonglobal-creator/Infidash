@@ -82,7 +82,7 @@ import { closeEditorialPool, getEditorialPool } from './src/server/content/postg
 import { closeCorePool, getCorePool } from './src/lib/corePool.js';
 import { runEditorialMigrations } from './src/server/content/migrations.js';
 import { testWordPressConnection } from './src/lib/wordpressProbe.js';
-import { createHealthCheck, registerHealthRoute } from './src/server/health.js';
+import { createHealthCheck, registerHealthRoute, registerVersionRoute } from './src/server/health.js';
 import { assertPublicHttpUrl } from './src/lib/urlSafety.js';
 import { getIntegrationProviderDefinition } from './src/lib/integrationCatalog.js';
 import { LoginThrottle } from './src/lib/loginThrottle.js';
@@ -401,6 +401,7 @@ function startClaritySyncScheduler() {
 
 // Real health check: async SELECT 1 through the editorial pg.Pool (2s timeout). `?deep=1` also reports editorial
 // migrations and runs an async SELECT 1 on the core pool (same timeout), so a core-only outage shows up there.
+registerVersionRoute(app);
 registerHealthRoute(app, createHealthCheck({
   pool: { query: (sql: string) => getEditorialPool().query(sql) },
   coreCheck: async () => { await getCorePool().query('SELECT 1'); },

@@ -1,0 +1,72 @@
+name: Deploy
+
+# Continuous deployment to EasyPanel (audit remediation W5.4). Opt-in: it does nothing until the repository has the
+# EASYPANEL_DEPLOY_URL secret and the INFIDASH_BASE_URL variable (see README, "Despliegue continuo").
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one instead of cancelling it mid-migration.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Only after CI passed on main (or when started by hand).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_URL: ${{ secrets.EASYPANEL_DEPLOY_URL }}
+      BASE_URL: ${{ vars.INFIDASH_BASE_URL }}
+    steps:
+      - name: Check configuration
+        id: config
+        run: |
+          if [ -z "$DEPLOY_URL" ] || [ -z "$BASE_URL" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Deploy skipped: set the EASYPANEL_DEPLOY_URL secret and the INFIDASH_BASE_URL variable to enable continuous deployment."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger the EasyPanel deploy
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          # 30 s of margin for clock differences between this runner and the server.
+          echo "TRIGGERED_AT=$(date -u -d '30 seconds ago' +%Y-%m-%dT%H:%M:%S.000Z)" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error --max-time 60 -X POST "$DEPLOY_URL" > /dev/null
+          echo "Deploy triggered for ${GITHUB_SHA}"
+
+      - name: Wait until the new container is healthy
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          # The new container is serving when /api/version reports a start time later than the trigger,
+          # and /api/health?deep=1 confirms the database and every migration (they run at boot).
+          for attempt in $(seq 1 90); do
+            started=$(curl --silent --max-time 10 "$BASE_URL/api/version" | jq -r '.startedAt // empty' 2>/dev/null || true)
+            if [ -n "$started" ] && [[ "$started" > "$TRIGGERED_AT" ]]; then
+              code=$(curl --silent --output /dev/null --max-time 10 --write-out '%{http_code}' "$BASE_URL/api/health?deep=1" || true)
+              if [ "$code" = "200" ]; then
+                echo "Healthy: new container started at $started (commit ${GITHUB_SHA})."
+                echo "### Deploy OK" >> "$GITHUB_STEP_SUMMARY"
+                echo "Commit \`${GITHUB_SHA}\` is live (container started at \`$started\`)." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              echo "New container is up but /api/health?deep=1 returned $code (attempt $attempt)."
+            else
+              echo "Waiting for the new container (current startedAt: ${started:-unreachable}), attempt $attempt."
+            fi
+            sleep 10
+          done
+          echo "::error::The new container did not become healthy in 15 minutes. Check the EasyPanel logs; to roll back, revert the commit on main."
+          echo "### Deploy FAILED" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit \`${GITHUB_SHA}\` did not become healthy. Revert it on main to redeploy the previous version." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
