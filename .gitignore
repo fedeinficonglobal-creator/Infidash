@@ -13,5 +13,10 @@ n8n-import/
 # Client operations data and raw n8n exports: they carry real client IDs, webhook tokens and
 # credential blocks, so they must never be committed (keep them outside the repo when possible).
 docs/*.csv
+# Spreadsheet exports anywhere (client data, tokens): keep them outside the repository.
+*.csv
+*.tsv
+*.xls
+*.xlsx
 docs/Blog *.json
 docs/Plan de Contenidos *.json
