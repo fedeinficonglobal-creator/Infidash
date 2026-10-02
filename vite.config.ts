@@ -10,6 +10,22 @@ export default defineConfig({
       '@': path.resolve(__dirname, '.'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Only vendor libraries that the entry never needs eagerly get named chunks.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/node_modules[\/](react|react-dom|react-router|scheduler)[\/]/.test(id)) return 'react';
+          if (/node_modules[\/](recharts|recharts-scale|victory-vendor|d3-[^\/]+|internmap|decimal\.js-light|es-toolkit|immer|reselect|redux|@reduxjs[\/]toolkit|react-redux|use-sync-external-store|eventemitter3)[\/]/.test(id)) return 'charts';
+          // Shared by the shell and charts; a named chunk keeps it out of `charts`.
+          if (/node_modules[\/](clsx|tailwind-merge)[\/]/.test(id)) return 'utils';
+          if (/node_modules[\/]lucide-react[\/]/.test(id)) return 'icons';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': {

@@ -23,6 +23,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npx tsx --test tests/bundle-budget.test.ts
 
   database-tests:
     runs-on: ubuntu-latest
