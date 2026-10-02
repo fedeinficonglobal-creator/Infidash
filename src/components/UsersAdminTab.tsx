@@ -4,6 +4,7 @@ import { cn } from '../lib/utils';
 import { useClientStore } from '../store/useClientStore';
 import { createUserAccount, deleteUserAccount, getUsers, updateUserAccount, type SessionUser, type UserRole } from '../services/infidashApi.js';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { formatDateTime } from '../lib/format.js';
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string; hint: string }> = [
   { value: 'admin', label: 'Administrador', hint: 'Puede crear usuarios y gestionar permisos' },
@@ -18,16 +19,6 @@ function roleBadgeClass(role: UserRole) {
   return role === 'admin'
     ? 'bg-slate-900 text-white'
     : 'bg-slate-100 text-slate-600 border border-slate-200';
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('es-ES', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
 }
 
 export function UsersAdminTab() {
@@ -324,7 +315,7 @@ export function UsersAdminTab() {
                         {user.email}
                       </span>
                       <span className="text-slate-500">•</span>
-                      <span>Creado {formatDate(user.createdAt)}</span>
+                      <span>Creado {formatDateTime(user.createdAt, 'compact')}</span>
                     </div>
                   </div>
                 </div>

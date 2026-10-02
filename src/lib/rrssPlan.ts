@@ -1,3 +1,4 @@
+import { formatMonthName } from './format.js';
 export interface RrssPlanRowInput {
   web: string;
   rrss: string;
@@ -19,7 +20,7 @@ export function getRrssPlanStorageKey(clientId: string) {
 }
 
 export function getRrssMonthLabel(date = new Date()) {
-  return new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(date).toUpperCase();
+  return formatMonthName(date).toUpperCase();
 }
 
 export function normalizeRrssPlanRow(input: Partial<RrssPlanRow> & RrssPlanRowInput, timestamp = new Date().toISOString()): RrssPlanRow {

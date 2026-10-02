@@ -2,8 +2,9 @@ import { Sparkles, AlertCircle, TrendingUp, Lightbulb, MessageSquare, ArrowRight
 import { type Client } from '../store/useClientStore.js';
 import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { buildAiInsightPlan } from '../lib/aiInsights.js';
-import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
+import { buildClientSignals } from '../lib/clientSignals.js';
 import { cn } from '../lib/utils';
+import { formatInteger, formatMoney } from '../lib/format.js';
 
 export function AiInsightsTab({ client }: { client: Client }) {
   const { goToTab } = useAppNavigation();
@@ -87,7 +88,7 @@ export function AiInsightsTab({ client }: { client: Client }) {
                 <h4 className="text-lg font-bold">{plan.title}</h4>
               </div>
               <p className="text-sm leading-relaxed">
-                {client.name} está operando con {formatMoney(signals.revenue)} de revenue y {formatPlain(signals.conversions)} conversiones visibles. El ROAS actual es de {signals.roas.toFixed(1)}x.
+                {client.name} está operando con {formatMoney(signals.revenue)} de revenue y {formatInteger(signals.conversions)} conversiones visibles. El ROAS actual es de {signals.roas.toFixed(1)}x.
               </p>
               <p className="text-sm leading-relaxed">{plan.summary}</p>
               <div className="pt-4 border-t border-white/10 space-y-3">
