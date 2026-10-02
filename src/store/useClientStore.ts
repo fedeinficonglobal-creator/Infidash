@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useContentStore } from './useContentStore.js';
 import { DEFAULT_KPI_THRESHOLDS, normalizeKpiThresholds, type KpiThresholds } from '../lib/kpiThresholds.js';
 import {
   clearStoredSession,
@@ -14,6 +15,7 @@ import {
   type ApiClient,
   type SessionUser,
 } from '../services/infidashApi.js';
+import { isAbortError, isUnauthorizedError, resetUnauthorizedLatch, setUnauthorizedHandler } from '../services/sessionExpiry.js';
 
 export interface Metric {
   label: string;
@@ -50,6 +52,7 @@ interface ClientState {
   isAuthenticating: boolean;
   isRefreshingClients: boolean;
   authError: string | null;
+  sessionExpiredMessage: string | null;
   dataError: string | null;
   setActiveClient: (id: string | null) => void;
   setActiveTab: (id: string) => void;
@@ -145,6 +148,25 @@ async function withSession<T>(getState: () => ClientState, fn: (token: string) =
   return fn(token);
 }
 
+export const SESSION_EXPIRED_MESSAGE = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+
+// Abort scopes. The session scope covers requests that live as long as the login; the client
+// scope covers requests tied to the active client and is replaced on every client switch.
+let sessionController = new AbortController();
+let clientController = new AbortController();
+
+/** Signal aborted when the active client changes or the session ends; for client-scoped loaders. */
+export function getActiveClientSignal(): AbortSignal {
+  return clientController.signal;
+}
+
+function abortSessionScopes() {
+  sessionController.abort();
+  clientController.abort();
+  sessionController = new AbortController();
+  clientController = new AbortController();
+}
+
 export const useClientStore = create<ClientState>((set, get) => ({
   activeClientId: null,
   activeTabId: 'overview',
@@ -155,11 +177,13 @@ export const useClientStore = create<ClientState>((set, get) => ({
   isAuthenticating: false,
   isRefreshingClients: false,
   authError: null,
+  sessionExpiredMessage: null,
   dataError: null,
   setActiveClient: (id) => set({ activeClientId: id, activeTabId: id ? get().activeTabId : 'overview' }),
   setActiveTab: (id) => set({ activeTabId: id }),
   bootstrapSession: async () => {
     set({ isBootstrapping: true, authError: null, dataError: null });
+    resetUnauthorizedLatch();
     try {
       const stored = loadStoredSession();
       if (!stored) {
@@ -177,16 +201,18 @@ export const useClientStore = create<ClientState>((set, get) => ({
         sessionToken: null,
         currentUser: null,
         clients: FALLBACK_CLIENTS,
-        authError: error instanceof Error ? error.message : 'No se pudo restaurar la sesión',
+        // A 401 already surfaces through the session-expired notice.
+        authError: isUnauthorizedError(error) ? null : error instanceof Error ? error.message : 'No se pudo restaurar la sesión',
       });
     } finally {
       set({ isBootstrapping: false });
     }
   },
   signIn: async (email, password) => {
-    set({ isAuthenticating: true, authError: null });
+    set({ isAuthenticating: true, authError: null, sessionExpiredMessage: null });
     try {
       const result = await apiLogin(email, password);
+      resetUnauthorizedLatch();
       saveStoredSession({ token: result.token, user: result.user });
       set({ sessionToken: result.token, currentUser: result.user });
       await get().refreshClients();
@@ -207,21 +233,16 @@ export const useClientStore = create<ClientState>((set, get) => ({
       }
     }
 
-    clearStoredSession();
-    set({
-      sessionToken: null,
-      currentUser: null,
-      clients: FALLBACK_CLIENTS,
-      activeClientId: null,
-      activeTabId: 'overview',
-      authError: null,
-      dataError: null,
-    });
+    endSession(set, null);
   },
   refreshClients: async () => {
     set({ isRefreshingClients: true, dataError: null });
+    const token = get().sessionToken;
+    const signal = sessionController.signal;
     try {
-      const response = await withSession(get, (token) => getClients(token));
+      const response = await withSession(get, (sessionToken) => getClients(sessionToken, signal));
+      // A logout/expiry or a different session finished while the request was in flight.
+      if (signal.aborted || get().sessionToken !== token) return;
       const mapped = response.clients.map(mapApiClientToUiClient);
       set((state) => {
         const currentActiveClient = mapped.find((client) => client.id === state.activeClientId) ?? null;
@@ -248,11 +269,12 @@ export const useClientStore = create<ClientState>((set, get) => ({
         };
       });
     } catch (error) {
+      if (isAbortError(error) || signal.aborted || get().sessionToken !== token) return;
       set({
         dataError: error instanceof Error ? error.message : 'No se pudieron cargar los clientes',
       });
     } finally {
-      set({ isRefreshingClients: false });
+      if (!signal.aborted) set({ isRefreshingClients: false });
     }
   },
   addClient: async (clientInput) => {
@@ -335,3 +357,40 @@ export const useClientStore = create<ClientState>((set, get) => ({
     }
   },
 }));
+
+/** Clears every piece of per-user state; used by explicit logout and by session expiry. */
+function endSession(set: (partial: Partial<ClientState>) => void, sessionExpiredMessage: string | null) {
+  abortSessionScopes();
+  clearStoredSession();
+  useContentStore.getState().reset();
+  set({
+    sessionToken: null,
+    currentUser: null,
+    clients: FALLBACK_CLIENTS,
+    activeClientId: null,
+    activeTabId: 'overview',
+    authError: null,
+    dataError: null,
+    isRefreshingClients: false,
+    sessionExpiredMessage,
+  });
+}
+
+// A client switch cancels whatever the previous client had in flight.
+useClientStore.subscribe((state, previous) => {
+  if (state.activeClientId !== previous.activeClientId) {
+    clientController.abort();
+    clientController = new AbortController();
+  }
+});
+
+// The token is already invalid on a 401, so the server logout endpoint is not called.
+export function registerSessionExpiryHandler() {
+  setUnauthorizedHandler((token) => {
+    const current = useClientStore.getState().sessionToken;
+    if (current && current !== token) return; // stale response from a previous session
+    endSession(useClientStore.setState, SESSION_EXPIRED_MESSAGE);
+  });
+}
+
+registerSessionExpiryHandler();
