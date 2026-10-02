@@ -382,7 +382,7 @@ test('listDailyStats orders by stat_date desc, applies scopes and returns empty 
   const clientA = await makeClient('Stat list A');
   const clientB = await makeClient('Stat list B');
   await upsertDailyStat({ clientId: clientA.id, statDate: '2030-01-01', revenue: 1 });
-  await upsertDailyStat({ clientId: clientA.id, statDate: '2030-01-03', revenue: 3 });
+  const a3 = await upsertDailyStat({ clientId: clientA.id, statDate: '2030-01-03', revenue: 3 });
   await upsertDailyStat({ clientId: clientA.id, statDate: '2030-01-02', revenue: 2 });
   const b = await upsertDailyStat({ clientId: clientB.id, statDate: '2030-01-03', revenue: 9 });
 
@@ -394,8 +394,9 @@ test('listDailyStats orders by stat_date desc, applies scopes and returns empty 
   const scoped = await listDailyStats(undefined, { clientIds: [clientA.id, clientB.id] });
   assert.equal(scoped.length, 4);
   assert.deepEqual(scoped.map((stat) => stat.statDate), ['2030-01-03', '2030-01-03', '2030-01-02', '2030-01-01']);
-  // Same date across clients: created_at DESC, so the later insert (client B) comes first.
-  assert.equal(scoped[0]?.id, b?.id);
+  // Same date across clients: the order within the tie is only created_at DESC (milliseconds, and both inserts can land in
+  // the same millisecond), so assert the pair as a set instead of depending on the tiebreak.
+  assert.deepEqual(new Set([scoped[0]?.id, scoped[1]?.id]), new Set([a3?.id, b?.id]));
   assert.deepEqual((await listDailyStats(undefined, { clientIds: [clientB.id] })).map((stat) => stat.id), [b?.id]);
 
   // An explicit clientId honors the clientIds scope: outside it nothing is returned, inside it only that client's rows.
