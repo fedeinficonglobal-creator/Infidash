@@ -99,6 +99,7 @@ import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPd
 import { deliverReportEmail, reportSmtpConfigured } from './src/lib/reportEmail.js';
 import { registerErrorHandling } from './src/lib/errorHandling.js';
 import { buildFastifyLoggingOptions, logger, registerRequestId } from './src/lib/logger.js';
+import { LEADS_RETENTION_LOCK_ID, createLeadsRetentionRunner, purgeLeads, resolveLeadsRetention, startLeadsRetentionTimers } from './src/lib/leadsRetention.js';
 import { BACKUP_SCHEDULER_LOCK_ID, createBackupScheduler, resolveBackupSchedule, startBackupSchedulerTimers, withAdvisoryLock } from './src/lib/backupScheduler.js';
 import { applyRetention, listBackupEntries } from './src/lib/backupRetention.js';
 import { createHttpMetrics, registerHttpMetrics } from './src/lib/httpMetrics.js';
@@ -1258,6 +1259,22 @@ function startMetricsReporter() {
   globalState.__infidashMetricsReporterStop = startMetricsReporterTimers(reporter);
 }
 
+// Lead retention (GDPR, docs/gdpr-retention.md): daily purge of expired leads and old raw payloads. Runs under an
+// advisory lock so overlapping instances do not both purge; logs counts only.
+function startLeadsRetentionScheduler() {
+  if (process.env.NODE_ENV === 'test') return;
+  const globalState = globalThis as typeof globalThis & { __infidashLeadsRetentionStop?: () => void };
+  if (globalState.__infidashLeadsRetentionStop) return;
+  const runner = createLeadsRetentionRunner({
+    config: resolveLeadsRetention(process.env),
+    now: () => new Date(),
+    purge: (cutoffs) => purgeLeads(getCorePool(), cutoffs),
+    withLock: (fn) => withAdvisoryLock(getCorePool(), LEADS_RETENTION_LOCK_ID, fn),
+    log: backupSchedulerLog,
+  });
+  globalState.__infidashLeadsRetentionStop = startLeadsRetentionTimers(runner, backupSchedulerLog);
+}
+
 const SESSION_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 // Expired sessions are otherwise deleted only when their own token is presented. Hourly purge, first run delayed
@@ -1921,6 +1938,7 @@ if (process.env.NODE_ENV !== 'test') {
   startMonthlyKpiCloseScheduler();
   startSessionPurgeScheduler();
   startBackupScheduler();
+  startLeadsRetentionScheduler();
   startMetricsReporter();
 }
 
