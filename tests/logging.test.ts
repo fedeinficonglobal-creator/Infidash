@@ -101,6 +101,21 @@ test('health checks do not log at info level but other requests do', async () =>
   await app.close();
 });
 
+test('the dispatcher claim poll is not logged per request but real errors still are', async () => {
+  const { app, capture } = await buildApp({}, (instance) => {
+    instance.post('/api/internal/content/jobs/claim', async (_request, reply) => reply.code(204).send());
+    instance.post('/api/internal/content/jobs/claim-broken', async () => { throw new Error('claim exploded'); });
+  });
+  const empty = await app.inject({ method: 'POST', url: '/api/internal/content/jobs/claim' });
+  assert.equal(empty.statusCode, 204);
+  assert.equal(capture.lines().length, 0);
+  // Only the exact polling route is quiet: any other route (even a similarly named one) keeps its request lines.
+  await app.inject({ method: 'POST', url: '/api/internal/content/jobs/claim-broken' });
+  assert.ok(capture.lines().some((line) => line.msg === 'unhandled error'));
+  assert.ok(capture.lines().some((line) => line.msg === 'incoming request'));
+  await app.close();
+});
+
 test('internal errors are logged with err and reqId while the client gets the generic body', async () => {
   const { app, capture } = await buildApp();
   const response = await app.inject({ url: '/api/boom', headers: { 'x-request-id': 'req-boom-0001' } });

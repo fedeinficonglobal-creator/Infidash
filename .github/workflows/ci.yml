@@ -100,5 +100,5 @@ jobs:
       # Smoke checks on the runtime image: Node 24, tsx and pg_dump present, no compilers, no devDependencies.
       - run: |
           docker run --rm infidash:ci node --version | grep -E '^v24\.'
-          docker run --rm infidash:ci sh -c 'test -x node_modules/.bin/tsx && command -v pg_dump && test ! -e node_modules/typescript && ! command -v g++ && ! command -v make'
+          docker run --rm infidash:ci sh -c 'test -x node_modules/.bin/tsx && pg_dump --version | grep -E ") 17." && test ! -e node_modules/typescript && ! command -v g++ && ! command -v make'
           docker image inspect infidash:ci --format '{{.Size}}' | awk '{printf "image size: %.0f MB\n", $1/1048576}'

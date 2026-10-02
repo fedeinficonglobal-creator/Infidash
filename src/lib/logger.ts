@@ -120,19 +120,23 @@ export function generateRequestId(request: Pick<IncomingMessage, 'headers'>): st
   return typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming) ? incoming : randomUUID();
 }
 
-function isHealthCheck(request: { url?: string }) {
-  return (request.url ?? '').split('?')[0] === '/api/health';
+// Routes polled on a fixed schedule by the platform or by n8n: their request/response lines would be pure noise.
+const POLLING_PATHS = new Set(['/api/health', '/api/internal/content/jobs/claim']);
+
+function isPollingRequest(request: { url?: string }) {
+  return POLLING_PATHS.has((request.url ?? '').split('?')[0]);
 }
 
 /**
  * Fastify's own request-lifecycle log lines. Two overrides:
- * - health checks are polled constantly by the platform, so their request/response lines are skipped (a failing
- *   health check still logs its own error, see src/server/health.ts);
+ * - polling routes (platform health checks, the n8n dispatcher's job claim once a minute) have their
+ *   request/response lines skipped; a failing health check still logs its own error (src/server/health.ts) and
+ *   failing claims are logged by the content API error handler;
  * - the default 404 line embeds the raw URL, which for the lead webhook path would leak its bearer token.
  */
 class InfidashLogController extends LogController {
   override isLogDisabled(request: FastifyRequest): boolean {
-    return isHealthCheck(request);
+    return isPollingRequest(request);
   }
 
   override routeNotFound(request: FastifyRequest): void {
