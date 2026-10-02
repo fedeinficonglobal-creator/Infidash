@@ -6,6 +6,8 @@ import { type Client, useClientStore } from '../store/useClientStore';
 import { buildLeadsCsv, type LeadExportRow } from '../lib/leadsExport.js';
 import { getClientIntegrations, getLeads, rotateIntegrationWebhook, setIntegrationActive, type ApiIntegration, type ApiLead, type LeadsPage } from '../services/infidashApi.js';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectSession } from '../store/selectors.js';
 
 const PAGE_SIZE = 50;
 
@@ -29,7 +31,7 @@ function leadDateLabel(iso: string) {
 }
 
 export function LeadsTab({ client }: { client: Client }) {
-  const { sessionToken, currentUser } = useClientStore();
+  const { sessionToken, currentUser } = useClientStore(useShallow(selectSession));
   const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
 

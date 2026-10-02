@@ -14,6 +14,8 @@ import { Modal } from '../Modal.js';
 import { ContentStatusBadge } from '../content/ContentStatusBadge.js';
 import { FormatSelect, NetworkCheckboxes, RrssIdeaPanel } from './RrssIdeaPanel.js';
 import { NetworkBadge } from './SocialPostCard.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectRrssPostsSection } from '../../store/selectors.js';
 
 const PLAN_STATUSES = ['proposed', 'approved', 'generating', 'review', 'ready', 'generation_failed', 'archived'];
 
@@ -119,7 +121,7 @@ function NewIdeaDialog({ onClose }: { onClose: () => void }) {
 export function RrssPostsSection({ clientId }: { clientId: string }) {
   const token = useClientStore((state) => state.sessionToken) ?? '';
   const role = useClientStore((state) => state.currentUser?.role);
-  const { clientId: storeClientId, filters, items, nextCursor, page, jobs, readiness, isLoading, isRefreshing, error, lastUpdatedAt, reset, setFilters, load, refresh, nextPage, previousPage, loadReadiness, pollJobs, select } = useRrssStore();
+  const { clientId: storeClientId, filters, items, nextCursor, page, jobs, readiness, isLoading, isRefreshing, error, lastUpdatedAt, reset, setFilters, load, refresh, nextPage, previousPage, loadReadiness, pollJobs, select } = useRrssStore(useShallow(selectRrssPostsSection));
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [ideaDialogOpen, setIdeaDialogOpen] = useState(false);
   const [dismissedPlanJobId, setDismissedPlanJobId] = useState<string | null>(null);

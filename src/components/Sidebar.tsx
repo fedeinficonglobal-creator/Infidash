@@ -10,6 +10,8 @@ import { cn } from '../lib/utils.js';
 import { buildClientSignals } from '../lib/clientSignals.js';
 import { DASHBOARD_PATH, clientPath } from '../lib/routes.js';
 import { ClientRail } from './ClientRail.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectSidebar } from '../store/selectors.js';
 
 function clientAlertText(client: Client) {
   const clientSignals = buildClientSignals(client);
@@ -26,7 +28,7 @@ interface SidebarViewProps {
 }
 
 export function Sidebar() {
-  const { clients, activeClientId, activeTabId } = useClientStore();
+  const { clients, activeClientId, activeTabId } = useClientStore(useShallow(selectSidebar));
   return <SidebarView clients={clients} activeClientId={activeClientId} activeTabId={activeTabId} />;
 }
 

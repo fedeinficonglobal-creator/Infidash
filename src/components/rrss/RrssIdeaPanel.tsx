@@ -12,6 +12,8 @@ import { Modal } from '../Modal.js';
 import { useConfirm } from '../../hooks/useConfirm.js';
 import { ContentStatusBadge } from '../content/ContentStatusBadge.js';
 import { SocialPostCard } from './SocialPostCard.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectRrssAccounts, selectRrssDraftDialog, selectRrssIdeaDetail } from '../../store/selectors.js';
 
 const toLocalInput = (value: string | null) => value ? format(parseISO(value), "yyyy-MM-dd'T'HH:mm") : '';
 
@@ -26,7 +28,7 @@ export function FormatSelect({ value, onChange, disabled }: { value: string; onC
 
 function GeneratePostsDialog({ idea, onClose }: { idea: RrssIdea; onClose: () => void }) {
   const token = useClientStore((state) => state.sessionToken) ?? '';
-  const { publishingAccounts, loadAccounts, generatePosts } = useRrssStore();
+  const { publishingAccounts, loadAccounts, generatePosts } = useRrssStore(useShallow(selectRrssAccounts));
   const [accountIds, setAccountIds] = useState<string[]>([]);
   const [generateImage, setGenerateImage] = useState(true);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
@@ -115,7 +117,7 @@ export function RrssDraftsToolbar({ admin, ideaStatus, posts, busy, bulkUpload, 
 
 function NewDraftDialog({ idea, onClose }: { idea: RrssIdea; onClose: () => void }) {
   const token = useClientStore((state) => state.sessionToken) ?? '';
-  const { publishingAccounts, socialPosts, loadAccounts, createManualDraft } = useRrssStore();
+  const { publishingAccounts, socialPosts, loadAccounts, createManualDraft } = useRrssStore(useShallow(selectRrssDraftDialog));
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [accountId, setAccountId] = useState('');
   const [copy, setCopy] = useState('');
@@ -182,7 +184,7 @@ export function RrssIdeaPanel() {
   const confirm = useConfirm();
   const token = useClientStore((state) => state.sessionToken) ?? '';
   const role = useClientStore((state) => state.currentUser?.role);
-  const { items, selectedId, socialPosts, uploads, bulkUpload, readiness, isLoadingDetail, isSaving, detailError, conflict, select, saveIdea, releaseGeneration, saveCopy, removeMedia, moveMedia, uploadFiles, uploadToAllDrafts, dismissBulkUpload, dismissUpload, approvePost, discardPost, schedulePost, refresh, clearConflict } = useRrssStore();
+  const { items, selectedId, socialPosts, uploads, bulkUpload, readiness, isLoadingDetail, isSaving, detailError, conflict, select, saveIdea, releaseGeneration, saveCopy, removeMedia, moveMedia, uploadFiles, uploadToAllDrafts, dismissBulkUpload, dismissUpload, approvePost, discardPost, schedulePost, refresh, clearConflict } = useRrssStore(useShallow(selectRrssIdeaDetail));
   const idea = items.find((candidate) => candidate.id === selectedId) ?? null;
   const [draft, setDraft] = useState({ title: '', theme: '', rationale: '', format: '', networks: [] as string[], cta: '', plannedAt: '' });
   const [generating, setGenerating] = useState(false);

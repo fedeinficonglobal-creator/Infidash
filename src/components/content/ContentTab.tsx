@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { addMonths, format, isToday, parseISO, subMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Clock3, FilePlus2, LayoutList, LoaderCircle, Plus, RefreshCw, Search, Send, Sparkles, Trash2, X } from 'lucide-react';
@@ -12,6 +12,8 @@ import { Button, Field } from './controls.js';
 import { Modal } from '../Modal.js';
 import { useConfirm } from '../../hooks/useConfirm.js';
 import { EditorialJobsPanel } from './EditorialJobsPanel.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectContentFilterBar, selectContentMonth, selectContentPagination, selectContentDetail, selectContentCreatePanel, selectContentTab } from '../../store/selectors.js';
 
 const PLAN_STATUSES = ['proposed', 'approved', 'generating', 'review', 'ready', 'generation_failed', 'archived'];
 
@@ -29,7 +31,7 @@ function SummaryCards() {
 
 function Filters() {
   const clients = useClientStore((state) => state.clients);
-  const { filters, setFilters, items } = useContentStore();
+  const { filters, setFilters, items } = useContentStore(useShallow(selectContentFilterBar));
   const formats = [...new Set(items.map((item) => item.format).filter(Boolean))] as string[];
   return <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-5">
     <label className="text-xs font-bold text-slate-500">Cliente<select aria-label="Filtrar por cliente" value={filters.clientId} onChange={(event) => setFilters({ clientId: event.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800"><option value="">Todos los clientes</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
@@ -39,7 +41,7 @@ function Filters() {
   </div>;
 }
 
-function ItemButton({ item, compact = false }: { key?: string; item: PlanItem; compact?: boolean }) {
+const ItemButton = memo(function ItemButton({ item, compact = false }: { key?: string; item: PlanItem; compact?: boolean }) {
   const token = useClientStore((state) => state.sessionToken)!;
   const selectedId = useContentStore((state) => state.selectedId);
   const select = useContentStore((state) => state.select);
@@ -47,40 +49,40 @@ function ItemButton({ item, compact = false }: { key?: string; item: PlanItem; c
     <div className="flex items-start justify-between gap-2"><p className={cn('font-bold text-slate-800', compact ? 'line-clamp-2 text-xs' : 'text-sm')}>{item.title}</p><ContentStatusBadge status={displayStatus(item.status, item.publications)} /></div>
     {!compact && <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500"><span>{item.format ?? 'Sin formato'}</span><span>•</span><span>{formatEditorialDate(item.plannedAt)}</span></div>}
   </button>;
-}
+});
 
-function EditorialCalendar({ items }: { items: PlanItem[] }) {
-  const { month } = useContentStore();
+const EditorialCalendar = memo(function EditorialCalendar({ items }: { items: PlanItem[] }) {
+  const month = useContentStore(selectContentMonth);
   const days = monthDays(month);
   return <section aria-label={`Calendario de ${monthLabel(month)}`} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="hidden grid-cols-7 border-b border-slate-100 md:grid">{['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day) => <div key={day} className="p-2 text-center text-[11px] font-bold uppercase text-slate-500">{day}</div>)}</div>
     <div className="hidden grid-cols-7 md:grid">{days.map((day) => { const dayItems = itemsOnDay(items, day); return <div key={day.toISOString()} className={cn('min-h-32 border-b border-r border-slate-100 p-2', isOutsideMonth(day, month) && 'bg-slate-50/60 text-slate-500')}><span className={cn('inline-flex size-7 items-center justify-center rounded-full text-xs font-bold', isToday(day) && 'bg-brand-primary text-white')}>{format(day, 'd')}</span><div className="mt-1 space-y-1">{dayItems.slice(0, 3).map((item) => <ItemButton key={item.id} item={item} compact />)}{dayItems.length > 3 && <details className="rounded-lg bg-slate-50 p-1"><summary className="cursor-pointer text-[11px] font-bold text-slate-600">Ver {dayItems.length - 3} más</summary><div className="mt-2 space-y-1">{dayItems.slice(3).map((item) => <ItemButton key={item.id} item={item} compact />)}</div></details>}</div></div>; })}</div>
     <div className="divide-y divide-slate-100 md:hidden">{items.filter((item) => item.plannedAt).length ? items.filter((item) => item.plannedAt).sort((a, b) => a.plannedAt!.localeCompare(b.plannedAt!)).map((item) => <div key={item.id} className="p-3"><ItemButton item={item} /></div>) : <Empty label="No hay piezas con fecha este mes" />}</div>
   </section>;
-}
+});
 
-function ContentTable({ items }: { items: PlanItem[] }) {
+const ContentTable = memo(function ContentTable({ items }: { items: PlanItem[] }) {
   return <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Contenido</th><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Formato</th><th className="px-4 py-3">Estado</th></tr></thead><tbody className="divide-y divide-slate-100">{items.map((item) => <tr key={item.id} className="hover:bg-slate-50"><td className="px-4 py-3"><ItemButton item={item} /></td><td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatEditorialDate(item.plannedAt)}</td><td className="px-4 py-3 text-slate-600">{item.format ?? '—'}</td><td className="px-4 py-3"><ContentStatusBadge status={displayStatus(item.status, item.publications)} /></td></tr>)}</tbody></table></div></div>;
-}
+});
 
 function ListPagination() {
-  const { page, nextCursor, isLoading, nextPage, previousPage } = useContentStore();
+  const { page, nextCursor, isLoading, nextPage, previousPage } = useContentStore(useShallow(selectContentPagination));
   const token = useClientStore((state) => state.sessionToken)!;
   return <nav aria-label="Paginación de contenidos" className="flex items-center justify-between gap-3"><Button onClick={() => void previousPage(token)} disabled={page <= 1 || isLoading} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200"><ChevronLeft className="size-4" />Anterior</Button><span className="text-xs font-bold text-slate-500">Página {page}</span><Button onClick={() => void nextPage(token)} disabled={!nextCursor || isLoading} className="bg-white text-slate-700 shadow-sm ring-1 ring-slate-200">Siguiente<ChevronRight className="size-4" /></Button></nav>;
 }
 
 function Empty({ label }: { label: string }) { return <div className="p-8 text-center"><FilePlus2 className="mx-auto size-8 text-slate-500" /><p className="mt-3 text-sm font-semibold text-slate-500">{label}</p></div>; }
 
-function UndatedTray({ items }: { items: PlanItem[] }) {
+const UndatedTray = memo(function UndatedTray({ items }: { items: PlanItem[] }) {
   if (!items.length) return null;
   return <details className="rounded-2xl border border-amber-200 bg-amber-50/50" open><summary className="cursor-pointer p-4 text-sm font-bold text-amber-900">Sin fecha · {items.length} piezas</summary><div className="grid gap-2 border-t border-amber-100 p-4 sm:grid-cols-2 xl:grid-cols-3">{items.map((item) => <ItemButton key={item.id} item={item} />)}</div></details>;
-}
+});
 
 function DetailPanel() {
   const confirm = useConfirm();
   const token = useClientStore((state) => state.sessionToken)!;
   const role = useClientStore((state) => state.currentUser?.role);
-  const { items, selectedId, content, publications, publishingAccounts, jobs, readinessByClient, isLoadingDetail, isSaving, detailError, conflict, select, savePlanItem, releasePlanGeneration, loadReadiness, saveContent, approveContent, schedulePublication, createJob, refresh, clearConflict } = useContentStore();
+  const { items, selectedId, content, publications, publishingAccounts, jobs, readinessByClient, isLoadingDetail, isSaving, detailError, conflict, select, savePlanItem, releasePlanGeneration, loadReadiness, saveContent, approveContent, schedulePublication, createJob, refresh, clearConflict } = useContentStore(useShallow(selectContentDetail));
   const item = items.find((candidate) => candidate.id === selectedId) ?? null;
   const [tab, setTab] = useState<'brief' | 'content' | 'publications' | 'history'>('brief');
   const [draft, setDraft] = useState({ title: '', theme: '', rationale: '', format: '', keywordPrimary: '', keywords: '', entities: '', cta: '', plannedAt: '' });
@@ -119,7 +121,7 @@ function Timeline({ content, publications, jobs, item }: { content: ReturnType<t
 function CreatePanel({ onClose }: { onClose: () => void }) {
   const token = useClientStore((state) => state.sessionToken)!;
   const clients = useClientStore((state) => state.clients);
-  const { filters, calendars, loadCalendars, createPlanItem, isSaving, select } = useContentStore();
+  const { filters, calendars, loadCalendars, createPlanItem, isSaving, select } = useContentStore(useShallow(selectContentCreatePanel));
   const [clientId, setClientId] = useState(filters.clientId);
   const [calendarId, setCalendarId] = useState('');
   const [title, setTitle] = useState('');
@@ -189,7 +191,7 @@ export function GeneratePlanDialog({ clientId, onClose }: { clientId: string; on
 export function ContentTab({ clientId }: { clientId?: string | null }) {
   const token = useClientStore((state) => state.sessionToken)!;
   const role = useClientStore((state) => state.currentUser?.role);
-  const { month, view, filters, items, nextCursor, page, isLoading, isLoadingMore, isRefreshing, error, lastUpdatedAt, jobs, readinessByClient, setView, setMonth, reset, setFilters, load, loadMore, refresh, pollJobs, loadReadiness } = useContentStore();
+  const { month, view, filters, items, nextCursor, page, isLoading, isLoadingMore, isRefreshing, error, lastUpdatedAt, jobs, readinessByClient, setView, setMonth, reset, setFilters, load, loadMore, refresh, pollJobs, loadReadiness } = useContentStore(useShallow(selectContentTab));
   const [creating, setCreating] = useState(false);
   const [creatingCalendar, setCreatingCalendar] = useState(false);
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
@@ -217,8 +219,8 @@ export function ContentTab({ clientId }: { clientId?: string | null }) {
     return () => { window.clearTimeout(timer); unsubscribe(); document.removeEventListener('visibilitychange', onVisible); };
   }, [pollJobs, refresh, token]);
   const filtered = useMemo(() => filterItems(items, filters), [items, filters]);
-  const dated = filtered.filter((item) => item.plannedAt);
-  const undated = filtered.filter((item) => !item.plannedAt);
+  const dated = useMemo(() => filtered.filter((item) => item.plannedAt), [filtered]);
+  const undated = useMemo(() => filtered.filter((item) => !item.plannedAt), [filtered]);
   const admin = role === 'admin';
   const canGeneratePlan = Boolean(filters.clientId) && canRunJob(readinessByClient[filters.clientId], 'generate_plan');
   const planJob = jobs.find((job) => job.kind === 'generate_plan' && job.clientId === filters.clientId);

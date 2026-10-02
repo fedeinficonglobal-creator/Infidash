@@ -13,6 +13,8 @@ import {
 import { Modal } from './Modal.js';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { formatMonthYear, formatMonthName } from '../lib/format.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectSession } from '../store/selectors.js';
 
 const EMPTY_FORM = {
   cliente: '',
@@ -26,7 +28,7 @@ const EMPTY_FORM = {
 };
 
 export function WebTab({ client }: { client: Client }) {
-  const { currentUser, sessionToken } = useClientStore();
+  const { currentUser, sessionToken } = useClientStore(useShallow(selectSession));
   const confirm = useConfirm();
   const isAdmin = currentUser?.role === 'admin';
   const signals = buildClientSignals(client);

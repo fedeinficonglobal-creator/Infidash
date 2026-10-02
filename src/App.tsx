@@ -13,6 +13,8 @@ import { ConfirmProvider } from './hooks/useConfirm.js';
 import { signInToDashboard } from './lib/authNavigation.js';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
+import { selectAppShell } from './store/selectors.js';
 
 // Tabs are loaded on demand so the initial bundle only carries the shell and login.
 const OverviewTab = lazy(() => import('./components/OverviewTab.js').then((m) => ({ default: m.OverviewTab })));
@@ -40,7 +42,7 @@ export default function App() {
     authError,
     sessionExpiredMessage,
     isAuthenticating,
-  } = useClientStore();
+  } = useClientStore(useShallow(selectAppShell));
   const navigate = useNavigate();
 
   useEffect(() => {

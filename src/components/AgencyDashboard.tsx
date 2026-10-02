@@ -11,9 +11,11 @@ import { InitialsAvatar } from './InitialsAvatar.js';
 import { clientLogoUrl } from '../lib/clientAvatar.js';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { formatMoney } from '../lib/format.js';
+import { useShallow } from 'zustand/react/shallow';
+import { selectAgencyDashboard } from '../store/selectors.js';
 
 export function AgencyDashboard() {
-  const { clients, sessionToken, currentUser, addClient, updateClient, deleteClient } = useClientStore();
+  const { clients, sessionToken, currentUser, addClient, updateClient, deleteClient } = useClientStore(useShallow(selectAgencyDashboard));
   const confirm = useConfirm();
   const { goToClient } = useAppNavigation();
   const isAdmin = currentUser?.role === 'admin';
