@@ -76,6 +76,53 @@ La API escribe logs estructurados en JSON, un evento por línea, en la salida es
 - Las comprobaciones `/api/health` no se registran.
 - Nunca se registran cabeceras ni cuerpos de petición. Se censuran `authorization`, `cookie`, `set-cookie`, `x-service-token`, contraseñas, tokens y claves en cualquier objeto logueado; el token de los webhooks de leads (`/api/public/leads/:token`) se sustituye por `[redacted]` en la URL, igual que los parámetros de consulta con nombres como `token`, `secret`, `password` o `api_key`; y las credenciales de cadenas de conexión (`postgresql://usuario:clave@host`) se enmascaran en los errores.
 
+## Métricas
+
+`GET /api/admin/metrics` (solo administradores) responde cuántos jobs editoriales fallan y si hay 5xx sin abrir la base de datos. Los contadores HTTP viven en memoria (se reinician con el proceso) y solo guardan cifras agregadas por minuto, nunca URLs, ids ni cabeceras.
+
+```bash
+curl -s -H "Authorization: Bearer <token-de-sesion-admin>" https://<tu-dominio>/api/admin/metrics
+```
+
+Desde la consola del navegador con la sesión iniciada, el token es el mismo que usa la app (cabecera `Authorization: Bearer ...` de cualquier petición en la pestaña Red).
+
+```json
+{
+  "generatedAt": "2026-10-02T10:00:00.000Z",
+  "uptimeSeconds": 86400,
+  "process": { "rssMb": 180, "heapUsedMb": 90, "eventLoopLagMs": 12.3 },
+  "http": {
+    "last15m": {
+      "windowMinutes": 15, "total": 420, "status2xx": 400, "status3xx": 5, "status4xx": 14, "status5xx": 1,
+      "latencyMs": { "lt50": 300, "lt100": 80, "lt250": 30, "lt500": 8, "lt1000": 2, "lt2500": 0, "gte2500": 0 },
+      "status5xxPerMinute": 0.067, "errorRatio": 0.0024
+    },
+    "last60m": { "windowMinutes": 60, "...": "misma forma" }
+  },
+  "db": { "coreOk": true, "coreLatencyMs": 3, "editorialOk": true, "editorialLatencyMs": 2 },
+  "editorialJobs": {
+    "byStatus": { "pending": 0, "running": 1, "succeeded": 120, "failed": 4 },
+    "last24hByStatus": { "succeeded": 12, "failed": 2 },
+    "failedByKind": { "publish": { "retrying": 1, "frozen": 1 } },
+    "failedLast24h": 2,
+    "failedRetrying": 1,
+    "failedFrozen": 1,
+    "oldestPendingAgeSeconds": null,
+    "expiredLeases": 0,
+    "recentFailures": [
+      { "id": "...", "kind": "publish", "clientId": "...", "attemptCount": 8, "updatedAt": "2026-10-02T09:00:00.000Z", "lastError": "..." }
+    ]
+  },
+  "backups": { "lastRun": { "at": "2026-10-02T03:00:12.000Z", "ok": true, "name": "...", "sizeBytes": 1234567 } },
+  "disk": { "usedPercent": 41.2, "freeGb": 58.4 }
+}
+```
+
+- `failedRetrying` son jobs `failed` con menos de 8 intentos (se reintentarán); `failedFrozen` los que ya alcanzaron 8 y no se reclaman. `oldestPendingAgeSeconds` es la antigüedad del job `pending` ya vencido más viejo (cola atascada) y `expiredLeases` cuenta jobs `running` con la lease caducada.
+- Cada sección que falle devuelve `{ "error": "unavailable" }` sin tumbar el resto; `disk` solo aparece si existe el directorio de backups.
+- Logs a buscar: `http minute summary` (nivel `info`, una línea por minuto con al menos un 5xx: `minute`, `total`, `status5xx`, `errorRatio`) y `editorial queue alert` (nivel `warn`, como máximo cada 10 minutos mientras haya jobs fallidos en las últimas 24 h; campos `failedLast24h`, `failedRetrying`, `failedFrozen`, `threshold`). Si todo está sano no se escribe nada.
+- `METRICS_FAILED_JOBS_WARN` (opcional, por defecto `1`): número de jobs `failed` actualizados en las últimas 24 h a partir del cual se emite `editorial queue alert`. Los jobs congelados antiguos (`failedFrozen`) no disparan la alerta; siguen visibles en `/api/admin/metrics`.
+
 ## Datos y persistencia
 
 - La app requiere `DATABASE_URL` para arrancar.
