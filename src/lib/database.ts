@@ -9,6 +9,7 @@ import { assertCanonicalStatDate, isCanonicalStatDate } from './statDate.js';
 import { runCoreMigrations } from '../server/content/migrations.js';
 import { coreAll, coreGet, coreRun, getCorePool, withCoreTransaction, type CoreQueryable } from './corePool.js';
 import { createBackupFile, type BackupResult } from './databaseBackup.js';
+import { SecretBoxError, credentialsKeyStatus, decryptCredentials, decryptCredentialsWithKeyInfo, encryptCredentials, loadSecretKeys } from './secretBox.js';
 import { getBootstrapUsers, getDefaultAccountsWarning } from './bootstrapUsers.js';
 import { hasLiveIntegrationAdapter, resolveIntegrationSaveState, statusForIntegrationView } from './integrationState.js';
 import { createSessionToken, hashPassword, hashToken, normalizeEmail, nowIso, verifyPassword } from './auth.js';
@@ -479,14 +480,15 @@ async function importLegacySqliteData(db: CoreQueryable) {
       continue;
     }
 
+    const integrationId = String(row.id ?? crypto.randomUUID());
     await coreRun(db, insertIntegration, [
-      String(row.id ?? crypto.randomUUID()),
+      integrationId,
       clientId,
       String(row.provider ?? 'clarity'),
       String(row.label ?? 'Integración').trim() || 'Integración',
       String(row.status ?? 'pending'),
       String(row.config_json ?? '{}'),
-      String(row.credentials_json ?? '{}'),
+      encodeStoredCredentialsText(integrationId, String(row.credentials_json ?? '{}')),
       Number(row.is_active ?? 1) ? 1 : 0,
       row.last_sync ?? null,
       row.last_error ?? null,
@@ -681,6 +683,76 @@ async function ensureClientMembershipsBackfill(db: CoreQueryable) {
   await coreRun(db, `INSERT INTO schema_backfills (key, completed_at) VALUES ($1, $2)`, ['client_memberships_v1', nowIso()]);
 }
 
+// ---- integrations.credentials_json at-rest encryption -------------------------------------------------------------
+// Every read and write of that column goes through these helpers. Without INFIDASH_CREDENTIALS_KEY values stay plain
+// JSON (legacy behavior); with it, writes are AES-256-GCM `enc:v1:` ciphertexts bound to the integration id, and
+// plaintext legacy values remain readable until the boot migration encrypts them.
+
+/** Opens a stored value (ciphertext or legacy plaintext) into JSON text. Failures are Spanish errors that never include secrets. */
+function decodeStoredCredentialsText(id: string, stored: string): string {
+  try {
+    return decryptCredentials(stored, { aad: id });
+  } catch (error) {
+    if (error instanceof SecretBoxError) {
+      throw new Error(`Integración ${id}: ${error.message}`, { cause: error });
+    }
+    throw error;
+  }
+}
+
+/** Returns the text to persist: ciphertext when a key is configured, the JSON unchanged otherwise. */
+function encodeStoredCredentialsText(id: string, jsonText: string): string {
+  return credentialsKeyStatus().configured ? encryptCredentials(jsonText, { aad: id }) : jsonText;
+}
+
+function decodeStoredCredentials(id: string, stored: unknown): Record<string, unknown> {
+  return parseJsonRecord(decodeStoredCredentialsText(id, String(stored ?? '{}')));
+}
+
+function encodeStoredCredentials(id: string, record: Record<string, unknown>): string {
+  return encodeStoredCredentialsText(id, JSON.stringify(record));
+}
+
+/**
+ * Boot step (inside the advisory-locked data work): verifies that every encrypted row can be opened with the
+ * configured keys (fails the boot otherwise) and, when a key is configured, encrypts plaintext rows and re-encrypts
+ * rows still under INFIDASH_CREDENTIALS_KEY_PREVIOUS, all in one transaction. Idempotent. Empty '{}' credentials are
+ * encrypted too, so the column is uniformly ciphertext. Logs counts only, never values.
+ */
+export async function encryptExistingCredentials(): Promise<{ encrypted: number; reencrypted: number; unchanged: number }> {
+  loadSecretKeys(); // a malformed key fails the boot with a clear message
+  const keyConfigured = credentialsKeyStatus().configured;
+  const counts = { encrypted: 0, reencrypted: 0, unchanged: 0 };
+
+  await withCoreTransaction(async (tx) => {
+    const rows = await coreAll<{ id: string; credentials_json: string | null }>(tx, `SELECT id, credentials_json FROM integrations ORDER BY id FOR UPDATE`);
+    for (const row of rows) {
+      const stored = String(row.credentials_json ?? '{}');
+      let opened: ReturnType<typeof decryptCredentialsWithKeyInfo>;
+      try {
+        opened = decryptCredentialsWithKeyInfo(stored, { aad: row.id });
+      } catch (error) {
+        if (error instanceof SecretBoxError) {
+          throw new Error(`Integración ${row.id}: ${error.message} Arranque abortado para no perder credenciales; revisa INFIDASH_CREDENTIALS_KEY.`, { cause: error });
+        }
+        throw error;
+      }
+      if (!keyConfigured || opened.key === 'current') {
+        counts.unchanged += 1;
+        continue;
+      }
+      await coreRun(tx, `UPDATE integrations SET credentials_json = $1 WHERE id = $2`, [encryptCredentials(opened.plaintext, { aad: row.id }), row.id]);
+      if (opened.key === 'previous') counts.reencrypted += 1;
+      else counts.encrypted += 1;
+    }
+  });
+
+  if (counts.encrypted > 0 || counts.reencrypted > 0) {
+    logger.info(counts, 'integration credentials encrypted at rest');
+  }
+  return counts;
+}
+
 // The core schema (tables, columns, indexes) lives in db/migrations/0004_core_baseline.sql and is applied by
 // initializeCoreDatabase() through the migration runner before this runs. What stays here is data work only.
 // Normalizes legacy integration rows (provider/label/status/config) once the migrated columns exist.
@@ -708,13 +780,21 @@ async function normalizeIntegrationRows(db: CoreQueryable) {
         return {};
       }
     })());
+    // Throws a Spanish boot error when an encrypted row cannot be opened (missing or wrong key).
+    const rawStoredCredentials = String(row.credentials_json ?? '{}');
+    const storedCredentialsText = decodeStoredCredentialsText(String(row.id), rawStoredCredentials);
     const credentials = normalizeIntegrationSection(definition.credentialFields, (() => {
       try {
-        return JSON.parse(String(row.credentials_json ?? '{}')) as Record<string, unknown>;
+        return JSON.parse(storedCredentialsText) as Record<string, unknown>;
       } catch {
         return {};
       }
     })());
+    const credentialsJson = JSON.stringify(credentials);
+    // Keep the stored text when nothing changed so encrypted rows do not get a fresh IV on every boot.
+    const credentialsToStore = storedCredentialsText === credentialsJson
+      ? rawStoredCredentials
+      : encodeStoredCredentialsText(String(row.id), credentialsJson);
     const missingFields = listMissingIntegrationFields(definition, config, credentials);
     const status = String(row.status ?? '').trim() || (missingFields.length === 0 ? 'connected' : 'pending');
     const label = String(row.label ?? '').trim() || buildIntegrationDisplayName(definition, config);
@@ -725,7 +805,7 @@ async function normalizeIntegrationRows(db: CoreQueryable) {
       label,
       status,
       JSON.stringify(config),
-      JSON.stringify(credentials),
+      credentialsToStore,
       Number(row.is_active ?? 1),
       String(row.last_sync ?? '') || null,
       String(row.last_error ?? '') || null,
@@ -786,6 +866,11 @@ async function seedDefaults(db: CoreQueryable) {
 const CORE_SCHEMA_LOCK_ID = 4_790_321_772;
 
 async function runCoreInitialization() {
+  // Fail fast on a malformed key; without one, credentials stay plaintext and the operator is warned once per boot.
+  loadSecretKeys();
+  if (!credentialsKeyStatus().configured) {
+    logger.warn('credentials encryption disabled: INFIDASH_CREDENTIALS_KEY is not set');
+  }
   // Schema first, and BEFORE taking the core lock: the migration runner serializes itself with its own advisory
   // lock (4790321771) on a dedicated connection and releases it when done, so the two locks are never held at the
   // same time and cannot deadlock. A concurrent boot waits in the runner, then finds everything applied.
@@ -799,6 +884,7 @@ async function runCoreInitialization() {
     // Schema already exists here: runCoreMigrations() ran before this lock was taken. Data work only, in the same
     // relative order as the former synchronous bootstrap.
     await normalizeIntegrationRows(client);
+    await encryptExistingCredentials();
     await ensureClientMembershipsBackfill(client);
     await seedDefaults(client);
     await importLegacySqliteData(client);
@@ -919,7 +1005,7 @@ function rowToIntegration(row: any): IntegrationRecord {
     : 'clarity') as IntegrationProvider;
   const definition = getIntegrationProviderDefinition(provider) ?? getIntegrationProviderDefinition('clarity')!;
   const config = normalizeIntegrationSection(definition.configFields, parseJsonRecord(row.config_json ?? '{}'));
-  const credentials = normalizeIntegrationSection(definition.credentialFields, parseJsonRecord(row.credentials_json ?? '{}'));
+  const credentials = normalizeIntegrationSection(definition.credentialFields, decodeStoredCredentials(row.id, row.credentials_json));
   return {
     id: row.id,
     clientId: row.client_id,
@@ -1334,7 +1420,7 @@ export async function getIntegrationCredentialsById(id: string, db: CoreQueryabl
     return null;
   }
 
-  return parseJsonRecord(row.credentials_json ?? '{}');
+  return decodeStoredCredentials(id, row.credentials_json);
 }
 
 export async function listClientIntegrations(clientId: string, db: CoreQueryable = getCoreDb()) {
@@ -1371,7 +1457,7 @@ export async function saveClientIntegration(input: IntegrationInput, db: CoreQue
   }
 
   const previousConfig = existing ? normalizeIntegrationSection(definition.configFields, parseJsonRecord(existing.config_json ?? '{}')) : {};
-  const previousCredentials = existing ? normalizeIntegrationSection(definition.credentialFields, parseJsonRecord(existing.credentials_json ?? '{}')) : {};
+  const previousCredentials = existing ? normalizeIntegrationSection(definition.credentialFields, decodeStoredCredentials(existing.id, existing.credentials_json)) : {};
   const config = normalizeIntegrationSection(definition.configFields, { ...previousConfig, ...(input.config ?? {}) });
   if (provider === 'woocommerce') parseWooRefundPolicy(config.refundPolicy);
   if (provider === 'ga4' && config.propertyId && !/^\d+$/.test(config.propertyId)) {
@@ -1413,7 +1499,7 @@ export async function saveClientIntegration(input: IntegrationInput, db: CoreQue
         label,
         status,
         JSON.stringify(config),
-        JSON.stringify(credentials),
+        encodeStoredCredentials(existing.id, credentials),
         Number(existing.is_active ?? 1),
         lastSync,
         lastError,
@@ -1427,14 +1513,15 @@ export async function saveClientIntegration(input: IntegrationInput, db: CoreQue
     return rowToIntegration(refreshed);
   }
 
+  const newId = crypto.randomUUID();
   const record = {
-    id: crypto.randomUUID(),
+    id: newId,
     client_id: clientId,
     provider,
     label,
     status,
     config_json: JSON.stringify(config),
-    credentials_json: JSON.stringify(credentials),
+    credentials_json: encodeStoredCredentials(newId, credentials),
     is_active: 1,
     last_sync: lastSync,
     last_error: lastError,
