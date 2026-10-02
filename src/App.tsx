@@ -1,20 +1,8 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { OverviewTab } from './components/OverviewTab';
-import { SalesTab } from './components/SalesTab';
-import { TrafficTab } from './components/TrafficTab';
-import { WebTab } from './components/WebTab';
-import { SeoTab } from './components/SeoTab';
-import { LeadsTab } from './components/LeadsTab';
-import { RrssTab } from './components/RrssTab';
-import { AiInsightsTab } from './components/AiInsightsTab';
-import { ReportsTab } from './components/ReportsTab';
-import { IntegrationsTab } from './components/IntegrationsTab';
-import { UserProfile } from './components/UserProfile';
-import { AgencyDashboard } from './components/AgencyDashboard';
 import { LoginScreen } from './components/LoginScreen';
-import { UsersAdminTab } from './components/UsersAdminTab';
-import { ContentTab } from './components/content/ContentTab';
+import { TabSkeleton } from './components/TabSkeleton.js';
+import { LazyBoundary } from './components/LazyBoundary.js';
 import { useClientStore } from './store/useClientStore';
 import type { SessionUser } from './services/infidashApi.js';
 import { getAvatarInitials } from './lib/avatarInitials.js';
@@ -24,6 +12,22 @@ import { useAppNavigation } from './hooks/useAppNavigation.js';
 import { signInToDashboard } from './lib/authNavigation.js';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
+
+// Tabs are loaded on demand so the initial bundle only carries the shell and login.
+const OverviewTab = lazy(() => import('./components/OverviewTab.js').then((m) => ({ default: m.OverviewTab })));
+const SalesTab = lazy(() => import('./components/SalesTab.js').then((m) => ({ default: m.SalesTab })));
+const TrafficTab = lazy(() => import('./components/TrafficTab.js').then((m) => ({ default: m.TrafficTab })));
+const WebTab = lazy(() => import('./components/WebTab.js').then((m) => ({ default: m.WebTab })));
+const SeoTab = lazy(() => import('./components/SeoTab.js').then((m) => ({ default: m.SeoTab })));
+const LeadsTab = lazy(() => import('./components/LeadsTab.js').then((m) => ({ default: m.LeadsTab })));
+const RrssTab = lazy(() => import('./components/RrssTab.js').then((m) => ({ default: m.RrssTab })));
+const AiInsightsTab = lazy(() => import('./components/AiInsightsTab.js').then((m) => ({ default: m.AiInsightsTab })));
+const ReportsTab = lazy(() => import('./components/ReportsTab.js').then((m) => ({ default: m.ReportsTab })));
+const IntegrationsTab = lazy(() => import('./components/IntegrationsTab.js').then((m) => ({ default: m.IntegrationsTab })));
+const UserProfile = lazy(() => import('./components/UserProfile.js').then((m) => ({ default: m.UserProfile })));
+const AgencyDashboard = lazy(() => import('./components/AgencyDashboard.js').then((m) => ({ default: m.AgencyDashboard })));
+const UsersAdminTab = lazy(() => import('./components/UsersAdminTab.js').then((m) => ({ default: m.UsersAdminTab })));
+const ContentTab = lazy(() => import('./components/content/ContentTab.js').then((m) => ({ default: m.ContentTab })));
 
 export default function App() {
   const {
@@ -181,7 +185,11 @@ function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
 
         {/* Dashboard Content */}
         <div className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto w-full">
-           {renderTab()}
+           <LazyBoundary>
+             <Suspense fallback={<TabSkeleton />}>
+               {renderTab()}
+             </Suspense>
+           </LazyBoundary>
         </div>
       </main>
 
