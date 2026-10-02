@@ -25,7 +25,8 @@ export function registerErrorHandling(app: FastifyInstance) {
       return reply.code(statusCode).send({ error: body.error, code: body.code });
     }
 
-    console.error('[infidash] unhandled error', request.method, request.url, error);
+    // request.log already carries the request id and a sanitized method/url; never the body or headers.
+    request.log.error({ err: error }, 'unhandled error');
     return reply.code(500).send({ error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
   });
 }

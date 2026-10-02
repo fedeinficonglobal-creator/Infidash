@@ -1,4 +1,5 @@
 import { Pool, type PoolConfig, type PoolClient } from 'pg';
+import { logger } from '../../lib/logger.js';
 
 let editorialPool: Pool | null = null;
 
@@ -32,7 +33,7 @@ export function getEditorialPool() {
   if (!editorialPool) {
     editorialPool = new Pool(buildPostgresPoolConfig());
     editorialPool.on('error', (error) => {
-      console.error('[infidash] idle editorial PostgreSQL client failed', error.message);
+      logger.error({ err: error }, 'idle editorial PostgreSQL client failed');
     });
   }
 

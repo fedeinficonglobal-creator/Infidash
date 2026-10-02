@@ -1,3 +1,4 @@
+import { logger } from './logger.js';
 import { safeFetch, type UrlSafetyOptions } from './urlSafety.js';
 import { UserFacingError } from './userFacingError.js';
 
@@ -29,7 +30,7 @@ export async function testWordPressConnection(integration: any, credentials: Rec
     if (error instanceof UserFacingError) {
       return { ok: false, error: error.message };
     }
-    console.error('[infidash] wordpress probe failed', error);
+    logger.error({ err: error }, 'wordpress probe failed');
     const timedOut = error instanceof Error && error.name === 'AbortError';
     return { ok: false, error: timedOut ? 'WordPress no respondió a tiempo' : 'No se pudo conectar con WordPress' };
   } finally {

@@ -62,6 +62,16 @@ Copia `.env.example` a tu entorno local y ajusta lo necesario:
 - `GET /api/health` (público, sin autenticación y exento de rate limit) ejecuta un `SELECT 1` asíncrono contra el pool de PostgreSQL con un timeout de 2 s: responde `200 {"status":"ok"}` o `503 {"status":"degraded","checks":{"database":"down"}}` sin detalles de conexión (la causa solo va al log, como máximo una vez cada 30 s). `GET /api/health?deep=1` añade `checks.migrations` (`applied`/`pending` de `db/migrations`) y `checks.core` (consulta por el shim `psql`, que bloquea el event loop: úsalo solo a mano, no como healthcheck periódico) y devuelve 503 si hay migraciones pendientes.
 - Protección SSRF: las URL que configura un administrador (`siteUrl`, `storeUrl` y `exportUrl` de las integraciones, y el `externalUrl` de las publicaciones) deben ser `http`/`https`, sin credenciales, y no pueden apuntar a `localhost`, nombres `.local`/`.internal`, loopback, redes privadas, link-local (`169.254.169.254`) ni a un nombre cuyo DNS resuelva a esas direcciones. Las redirecciones se revalidan (máximo 3, sin bajar de https a http). `INFIDASH_ALLOW_PRIVATE_URLS=1` desactiva esas comprobaciones y es solo para desarrollo local (nunca en producción).
 
+## Logs
+
+La API escribe logs estructurados en JSON, un evento por línea, en la salida estándar (sin transportes ni `pino-pretty`). Cada línea incluye `time` (ISO 8601), `level`, `service: "infidash"` y `msg`.
+
+- `LOG_LEVEL`: `fatal`, `error`, `warn`, `info` (por defecto), `debug`, `trace` o `silent`. Un valor no válido se trata como `info`. Con `NODE_ENV=test` los logs están en `silent` salvo que se defina `LOG_LEVEL`.
+- Cada petición lleva un `reqId`, presente en todas sus líneas (petición recibida, respuesta con `statusCode` y `responseTime`, y errores con el campo `err`). Si el cliente envía `x-request-id` (8-100 caracteres `A-Za-z0-9._-`) se reutiliza; si no, se genera un UUID. El valor se devuelve siempre en la cabecera de respuesta `x-request-id`.
+- Para seguir una petición: copia el `x-request-id` de la respuesta (por ejemplo desde las herramientas de red del navegador) y filtra los logs por ese valor, p. ej. `docker logs <contenedor> | grep <reqId>`.
+- Las comprobaciones `/api/health` no se registran.
+- Nunca se registran cabeceras ni cuerpos de petición. Se censuran `authorization`, `cookie`, `set-cookie`, `x-service-token`, contraseñas, tokens y claves en cualquier objeto logueado; el token de los webhooks de leads (`/api/public/leads/:token`) se sustituye por `[redacted]` en la URL, igual que los parámetros de consulta con nombres como `token`, `secret`, `password` o `api_key`; y las credenciales de cadenas de conexión (`postgresql://usuario:clave@host`) se enmascaran en los errores.
+
 ## Datos y persistencia
 
 - La app requiere `DATABASE_URL` para arrancar.

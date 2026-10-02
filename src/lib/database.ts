@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import { logger } from './logger.js';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -626,7 +627,7 @@ async function importLegacySqliteData(db: CoreQueryable) {
 
   const importedAnything = Object.values(importCounts).some((count) => count > 0);
   if (importedAnything) {
-    console.warn('[infidash] Migración legacy SQLite→Postgres completada', importCounts);
+    logger.warn({ importCounts }, 'Migración legacy SQLite→Postgres completada');
   }
 }
 
@@ -749,7 +750,7 @@ async function seedDefaults(db: CoreQueryable) {
   const existingAdmin = await coreGet(db, `SELECT id FROM users WHERE role = 'admin' LIMIT 1`);
   const users = getBootstrapUsers(process.env, Boolean(existingAdmin));
   const defaultAccountsWarning = getDefaultAccountsWarning(process.env, users);
-  if (defaultAccountsWarning) console.warn(defaultAccountsWarning);
+  if (defaultAccountsWarning) logger.warn(defaultAccountsWarning);
 
   for (const user of users) {
     if (!(await coreGet(db, `SELECT id FROM users WHERE email = $1`, [user.email]))) {

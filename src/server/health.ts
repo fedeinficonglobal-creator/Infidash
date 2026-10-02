@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { logger as structuredLogger } from '../lib/logger.js';
 import { discoverMigrations } from './content/migrations.js';
 
 export interface HealthResult {
@@ -53,7 +54,7 @@ export function createHealthCheck(options: HealthCheckOptions): HealthCheck {
   const timeoutMs = options.timeoutMs ?? 2_000;
   const now = options.now ?? Date.now;
   const logIntervalMs = options.logIntervalMs ?? 30_000;
-  const logger = options.logger ?? console.error;
+  const logger = options.logger ?? ((message: unknown, error?: unknown) => structuredLogger.error({ err: error }, String(message).replace(/^\[infidash\] /, '')));
   const migrationsDirectory = options.migrationsDirectory ?? path.resolve(process.cwd(), 'db', 'migrations');
   let lastLogAt = Number.NEGATIVE_INFINITY;
 
@@ -61,7 +62,7 @@ export function createHealthCheck(options: HealthCheckOptions): HealthCheck {
     const at = now();
     if (at - lastLogAt < logIntervalMs) return;
     lastLogAt = at;
-    logger('[infidash] health check failed', error instanceof Error ? error.message : error);
+    logger('[infidash] health check failed', error);
   }
 
   async function run(deep: boolean): Promise<HealthResult> {

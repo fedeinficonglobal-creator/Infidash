@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { logger } from './logger.js';
 
 export function reportSmtpConfigured() {
   return Boolean(process.env.REPORT_SMTP_HOST && process.env.REPORT_SMTP_FROM);
@@ -39,7 +40,7 @@ export type ReportDeliveryResult =
  */
 export async function deliverReportEmail(
   input: ReportEmailInput,
-  deps: { send?: typeof sendReportEmail; record: (failure: string | null) => void | Promise<void>; context: { clientId: string; runId: string } },
+  deps: { send?: typeof sendReportEmail; record: (failure: string | null) => void | Promise<void>; context: { clientId: string; runId: string }; log?: Pick<typeof logger, 'error'> },
 ): Promise<ReportDeliveryResult> {
   try {
     await (deps.send ?? sendReportEmail)(input);
@@ -47,9 +48,9 @@ export async function deliverReportEmail(
     return { ok: true };
   } catch (error) {
     const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : undefined;
-    console.error('[infidash] report email delivery failed', {
+    (deps.log ?? logger).error({
       clientId: deps.context.clientId, runId: deps.context.runId, code, message: error instanceof Error ? error.message : String(error),
-    });
+    }, 'report email delivery failed');
     await deps.record('Entrega no confirmada');
     return { ok: false, status: 502, code: 'SMTP_DELIVERY_UNKNOWN', message: 'No se pudo confirmar la entrega SMTP; revisa el buzón antes de repetir' };
   }

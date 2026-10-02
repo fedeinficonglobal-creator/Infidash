@@ -95,13 +95,15 @@ import { nextMadridCloseInstant } from './src/lib/monthlyCloseClock.js';
 import { buildDailyStatsPdf, summarizeDailyStats } from './src/lib/dailyReportPdf.js';
 import { deliverReportEmail, reportSmtpConfigured } from './src/lib/reportEmail.js';
 import { registerErrorHandling } from './src/lib/errorHandling.js';
+import { buildFastifyLoggingOptions, logger, registerRequestId } from './src/lib/logger.js';
 import { publicErrorMessage, UserFacingError } from './src/lib/userFacingError.js';
 import { INVALID_STAT_DATE_MESSAGE, isCanonicalStatDate } from './src/lib/statDate.js';
 import { shouldRunEditorialMigrations, shouldServeHttp } from './src/lib/serverRuntime.js';
 import { isOperationalPlanDomain, isPlanPeriod, normalizeOperationalPlanRows } from './src/lib/operationalPlanValidation.js';
 
 const app = fastify({
-  logger: false,
+  // Structured JSON logs with request ids (see src/lib/logger.ts); silent when NODE_ENV=test unless LOG_LEVEL is set.
+  ...buildFastifyLoggingOptions(process.env),
   bodyLimit: 1_000_000,
   // Behind a reverse proxy (EasyPanel/Traefik) set INFIDASH_TRUST_PROXY so req.ip is the real client address.
   trustProxy: resolveTrustProxy(process.env),
@@ -115,10 +117,10 @@ if (process.env.GA4_SERVICE_ACCOUNT_JSON) {
     const account = parseGa4ServiceAccount(process.env.GA4_SERVICE_ACCOUNT_JSON);
     ga4Service = { getAccessToken: createGa4AccessTokenProvider(account), clientEmail: account.clientEmail };
     ga4Service.getAccessToken().catch((error) => {
-      console.error('[infidash] No se pudo obtener un token de GA4 al arrancar; revisa GA4_SERVICE_ACCOUNT_JSON:', error instanceof Error ? error.message : error);
+      logger.error({ err: error }, 'No se pudo obtener un token de GA4 al arrancar; revisa GA4_SERVICE_ACCOUNT_JSON');
     });
   } catch (error) {
-    console.error('[infidash] GA4_SERVICE_ACCOUNT_JSON inválido:', error instanceof Error ? error.message : error);
+    logger.error({ err: error }, 'GA4_SERVICE_ACCOUNT_JSON inválido');
   }
 }
 
@@ -134,15 +136,16 @@ if (process.env.GOOGLE_ADS_DEVELOPER_TOKEN && process.env.GOOGLE_ADS_CLIENT_ID &
     });
     googleAdsService = { getAccessToken, developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN, loginCustomerId: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, '') };
     googleAdsService.getAccessToken().catch((error) => {
-      console.error('[infidash] No se pudo obtener un token de Google Ads al arrancar; revisa GOOGLE_ADS_REFRESH_TOKEN:', error instanceof Error ? error.message : error);
+      logger.error({ err: error }, 'No se pudo obtener un token de Google Ads al arrancar; revisa GOOGLE_ADS_REFRESH_TOKEN');
     });
   } catch (error) {
-    console.error('[infidash] Credenciales de Google Ads inválidas:', error instanceof Error ? error.message : error);
+    logger.error({ err: error }, 'Credenciales de Google Ads inválidas');
   }
 }
 const loginThrottle = new LoginThrottle();
 
 // Must be registered before any plugin so every encapsulated route inherits it.
+registerRequestId(app);
 registerErrorHandling(app);
 // Security headers + rate limiting. Registered before every route so headers also cover static files,
 // the SPA fallback and error responses.
@@ -195,7 +198,7 @@ function sendError(reply: FastifyReply, status: number, message: string, code?: 
  */
 function sendCaughtError(reply: FastifyReply, error: unknown, opts: { status: number; fallback: string; code: string; unknownStatus?: number }) {
   if (error instanceof UserFacingError) return sendError(reply, opts.status, error.message, opts.code);
-  console.error('[infidash] request failed', opts.code, error);
+  reply.log.error({ err: error, code: opts.code }, 'request failed');
   return sendError(reply, opts.unknownStatus ?? 500, opts.fallback, opts.code);
 }
 
@@ -349,7 +352,7 @@ async function syncAllClarityIntegrations() {
           status: 'error',
           lastError: publicErrorMessage(error, 'Error desconocido durante la sincronización de Análisis/UX'),
         });
-        console.error('[infidash] clarity sync failed', integration.id, error instanceof Error ? error.message : error);
+        logger.error({ err: error, integrationId: integration.id }, 'clarity sync failed');
       }
     }
   } finally {
@@ -373,7 +376,7 @@ function startClaritySyncScheduler() {
 
   const run = () => {
     void syncAllClarityIntegrations().catch((error) => {
-      console.error('[infidash] clarity sync scheduler failed', error);
+      logger.error({ err: error }, 'clarity sync scheduler failed');
     });
   };
 
@@ -1209,9 +1212,9 @@ function startSessionPurgeScheduler() {
 
   const run = () => {
     purgeExpiredSessions().then((removed) => {
-      if (removed > 0) console.log('[infidash] sesiones caducadas eliminadas', removed);
+      if (removed > 0) logger.info({ removed }, 'sesiones caducadas eliminadas');
     }).catch((error) => {
-      console.error('[infidash] session purge failed', error instanceof Error ? error.message : error);
+      logger.error({ err: error }, 'session purge failed');
     });
   };
 
@@ -1237,7 +1240,7 @@ function startMonthlyKpiCloseScheduler() {
       const untilClose = nextMadridCloseInstant(new Date()).getTime() - Date.now();
       schedule(Math.min(untilClose, 24 * 60 * 60 * 1000));
     } catch (error) {
-      console.error('[infidash] monthly KPI close failed; retrying', error);
+      logger.error({ err: error }, 'monthly KPI close failed; retrying');
       schedule(60_000);
     }
   };
@@ -1764,7 +1767,7 @@ app.post('/api/admin/backup', async (req: AnyFastifyRequest, reply: FastifyReply
     const backup = await createDatabaseBackup(typeof (req.body as any)?.label === 'string' ? (req.body as any).label : null);
     return reply.code(201).send({ backup });
   } catch (error) {
-    console.error('[infidash] backup failed', error);
+    req.log.error({ err: error }, 'backup failed');
     return sendError(reply, 500, 'No se pudo crear la copia de seguridad', 'BACKUP_FAILED');
   }
 });
@@ -1814,12 +1817,12 @@ if (shouldServeHttp(process.env)) {
     // A failing migration stops the boot loudly instead of serving 500s.
     if (shouldRunEditorialMigrations(process.env)) {
       const migrations = await runEditorialMigrations(getEditorialPool());
-      if (migrations.applied.length) console.log('[infidash] migraciones editoriales aplicadas', migrations.applied);
+      if (migrations.applied.length) logger.info({ applied: migrations.applied }, 'migraciones editoriales aplicadas');
     }
     await app.listen({ port, host: '0.0.0.0' });
-    console.log(`[infidash] API escuchando en http://127.0.0.1:${port}`);
+    logger.info({ port }, `API escuchando en http://127.0.0.1:${port}`);
   })().catch((error) => {
-    console.error('[infidash] failed to start', error);
+    logger.fatal({ err: error }, 'failed to start');
     process.exit(1);
   });
 }

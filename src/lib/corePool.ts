@@ -1,4 +1,5 @@
 import { Pool, types as pgTypes, type PoolConfig } from 'pg';
+import { logger } from './logger.js';
 import { buildPostgresPoolConfig } from '../server/content/postgres.js';
 
 // Async, fully parameterized access to the core (public schema) tables. It shares the connection string, SSL and
@@ -58,7 +59,7 @@ export function getCorePool() {
   if (!corePool) {
     corePool = new Pool(buildCorePoolConfig());
     corePool.on('error', (error) => {
-      console.error('[infidash] idle core PostgreSQL client failed', error.message);
+      logger.error({ err: error }, 'idle core PostgreSQL client failed');
     });
   }
 

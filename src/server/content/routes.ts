@@ -54,13 +54,14 @@ function optionalHttpUrl(value: unknown) {
 
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof ContentApiError) return reply.code(error.statusCode).send({ error: error.message, code: error.code, details: error.details });
-  requestSafeLog('content api failed', error);
+  requestSafeLog(reply, 'content api failed', error);
   return reply.code(500).send({ error: 'No se pudo completar la operación', code: 'INTERNAL_ERROR' });
 }
 
-function requestSafeLog(label: string, error: unknown) {
-  const payload = error instanceof Error ? { name: error.name, message: sanitizeError(error.message) } : { error: redactSecrets(error) };
-  console.error(`[infidash] ${label}`, redactSecrets(payload));
+function requestSafeLog(reply: FastifyReply, label: string, error: unknown) {
+  // reply.log carries the request id; the error is reduced to name + sanitized message (no stack, no payload).
+  const payload = error instanceof Error ? { err: { type: error.name, message: sanitizeError(error.message) } } : { detail: redactSecrets(error) };
+  reply.log.error(payload, label);
 }
 
 function asDate(value: unknown, field: string) {
