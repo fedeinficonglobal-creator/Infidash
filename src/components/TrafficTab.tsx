@@ -9,6 +9,7 @@ import {
   type ApiIntegration, type Ga4TrafficReport, type GoogleAdsCampaignReport,
 } from '../services/infidashApi.js';
 import { isValidInclusiveDateRange } from '../lib/dateRange.js';
+import { planGa4Load } from '../lib/trafficAutoLoad.js';
 
 function defaultWindow() {
   const to = new Date().toISOString().slice(0, 10);
@@ -27,7 +28,13 @@ export function TrafficTab({ client }: { client: Client }) {
   const [report, setReport] = useState<Ga4TrafficReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
   const requestId = useRef(0);
+  // Separate id for report loads so the integrations request is never invalidated by them.
+  const loadId = useRef(0);
+  // One in-flight refresh per integration + range; later triggers share the same promise.
+  const inFlight = useRef(new Map<string, Promise<Ga4TrafficReport>>());
 
   const [adsIntegrations, setAdsIntegrations] = useState<ApiIntegration[]>([]);
   const [adsIntegrationLoading, setAdsIntegrationLoading] = useState(true);
@@ -42,7 +49,10 @@ export function TrafficTab({ client }: { client: Client }) {
     let cancelled = false;
     setReport(null);
     setError(null);
+    setWarning(null);
     setLoading(false);
+    setUpdating(false);
+    setIntegrations([]);
     setIntegrationLoading(true);
     if (!sessionToken) {
       setIntegrations([]);
@@ -92,28 +102,75 @@ export function TrafficTab({ client }: { client: Client }) {
     }
   };
 
-  const handleQuery = async (event: FormEvent) => {
-    event.preventDefault();
+  const rangeIsValid = isValidInclusiveDateRange(range.from, range.to, 31);
+
+  // Shared loader for the automatic load (effect) and the manual "Actualizar ahora" button.
+  const loadTraffic = async (force: boolean) => {
     if (!sessionToken || !activeIntegration) return;
     if (!isValidInclusiveDateRange(range.from, range.to, 31)) {
+      setReport(null);
       setError('Selecciona un periodo válido de hasta 31 días.');
       return;
     }
-    const id = ++requestId.current;
-    setLoading(true);
+    const id = ++loadId.current;
+    const isCurrent = () => id === loadId.current;
+    const integrationId = activeIntegration.id;
+    const { from, to } = range;
     setError(null);
-    setReport(null);
+    setWarning(null);
     try {
-      const result = isAdmin
-        ? await syncGa4Traffic(sessionToken, activeIntegration.id, range.from, range.to)
-        : await getGa4TrafficSnapshot(sessionToken, activeIntegration.id, range.from, range.to).then((saved) =>
-          saved.complete ? saved : getGa4TrafficPreview(sessionToken, activeIntegration.id, range.from, range.to));
-      if (id === requestId.current) setReport(result);
-    } catch (cause) {
-      if (id === requestId.current) setError(cause instanceof Error ? cause.message : 'No se pudo consultar Google Analytics');
+      let snapshot: Ga4TrafficReport | null = force ? report : null;
+      if (!force) {
+        setLoading(true);
+        setUpdating(false);
+        // Fast path: persisted data only, no Google call.
+        snapshot = await getGa4TrafficSnapshot(sessionToken, integrationId, from, to).catch(() => null);
+        if (!isCurrent()) return;
+      }
+      const plan = planGa4Load({ isAdmin, snapshot, now: Date.now(), force });
+      if (plan.show) setReport(plan.show);
+      if (plan.refresh === 'none') return;
+      const blocking = plan.refresh === 'blocking-sync' || plan.refresh === 'blocking-preview';
+      setLoading(blocking);
+      setUpdating(!blocking);
+      const key = `${integrationId}|${from}|${to}`;
+      let pending = inFlight.current.get(key);
+      if (!pending) {
+        pending = (isAdmin
+          ? syncGa4Traffic(sessionToken, integrationId, from, to)
+          : getGa4TrafficPreview(sessionToken, integrationId, from, to)
+        ).finally(() => { inFlight.current.delete(key); });
+        inFlight.current.set(key, pending);
+      }
+      try {
+        const result = await pending;
+        if (isCurrent()) setReport(result);
+      } catch (cause) {
+        if (!isCurrent()) return;
+        const message = cause instanceof Error ? cause.message : 'No se pudo consultar Google Analytics';
+        if (plan.show) setWarning(`No se pudo actualizar; se muestran los últimos datos disponibles. ${message}`);
+        else setError(message);
+      }
     } finally {
-      if (id === requestId.current) setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        setUpdating(false);
+      }
     }
+  };
+
+  // Automatic load on entering the tab and when the integration or range changes.
+  // Deliberately excludes report/loading from the dependencies to avoid effect loops.
+  useEffect(() => {
+    if (!sessionToken || !activeIntegration?.id) return undefined;
+    void loadTraffic(false);
+    return () => { loadId.current += 1; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionToken, activeIntegration?.id, range.from, range.to, isAdmin]);
+
+  const handleQuery = (event: FormEvent) => {
+    event.preventDefault();
+    void loadTraffic(true);
   };
 
   const chartData = report?.sessionsSeries.map((point) => ({ name: point.date.slice(5), sessions: point.sessions, conversions: point.conversions })) ?? [];
@@ -139,15 +196,20 @@ export function TrafficTab({ client }: { client: Client }) {
                 <button type="button" onClick={() => goToTab('integrations')} className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">Ir a Integraciones</button>
               </div>
             ) : (
-              <form className="mt-5 space-y-4" onSubmit={(event) => void handleQuery(event)}>
+              <form className="mt-5 space-y-4" onSubmit={handleQuery}>
                 <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                  <label className="text-xs font-bold text-slate-600">Desde<input aria-label="Desde" type="date" value={range.from} max={range.to} onChange={(event) => { requestId.current += 1; setLoading(false); setRange((current) => ({ ...current, from: event.target.value })); setReport(null); setError(null); }} className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></label>
-                  <label className="text-xs font-bold text-slate-600">Hasta<input aria-label="Hasta" type="date" value={range.to} min={range.from} onChange={(event) => { requestId.current += 1; setLoading(false); setRange((current) => ({ ...current, to: event.target.value })); setReport(null); setError(null); }} className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></label>
-                  <button type="submit" disabled={loading || !isValidInclusiveDateRange(range.from, range.to, 31)} className="rounded-xl bg-brand-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{loading ? 'Consultando…' : isAdmin ? 'Sincronizar' : 'Consultar'}</button>
+                  <label className="text-xs font-bold text-slate-600">Desde<input aria-label="Desde" type="date" value={range.from} max={range.to} onChange={(event) => { loadId.current += 1; setLoading(false); setUpdating(false); setRange((current) => ({ ...current, from: event.target.value })); setReport(null); setError(null); setWarning(null); }} className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></label>
+                  <label className="text-xs font-bold text-slate-600">Hasta<input aria-label="Hasta" type="date" value={range.to} min={range.from} onChange={(event) => { loadId.current += 1; setLoading(false); setUpdating(false); setRange((current) => ({ ...current, to: event.target.value })); setReport(null); setError(null); setWarning(null); }} className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></label>
+                  <button type="submit" disabled={loading || updating || !rangeIsValid} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary disabled:opacity-50">{loading || updating ? 'Actualizando…' : 'Actualizar ahora'}</button>
                 </div>
-                <p className="text-xs text-slate-500">Máximo 31 días. Los administradores guardan sincronizaciones completas; viewers consultan lo ya guardado y pueden ver una vista previa si aún no existe.</p>
+                <p className="text-xs text-slate-500">Máximo 31 días. Los datos se cargan solos al entrar; los guardados con menos de 6 horas no vuelven a consultarse a Google. Los administradores guardan sincronizaciones completas; viewers ven una vista previa si aún no existe ninguna.</p>
               </form>
             )}
+            <div aria-live="polite">
+              {loading && !report && <p className="mt-4 text-sm text-slate-500" role="status">Cargando datos de Google Analytics…</p>}
+              {updating && <p className="mt-4 text-xs font-semibold text-slate-500">Actualizando…</p>}
+            </div>
+            {warning && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{warning}</p>}
             {error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-800" role="alert">{error}</p>}
             {report?.samplingWarning && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800" role="alert">GA4 aplicó muestreo a este periodo; los números son una estimación.</p>}
           </div>
@@ -156,7 +218,7 @@ export function TrafficTab({ client }: { client: Client }) {
 
       {report && (
         <div className="mt-6 space-y-6" aria-live="polite">
-          <p className="text-xs text-slate-500">{report.persisted ? 'Sincronización guardada' : 'Vista previa sin guardar'} · propiedad {report.propertyId}.</p>
+          <p className="text-xs text-slate-500">{report.persisted ? 'Sincronización guardada' : 'Vista previa sin guardar'} · propiedad {report.propertyId}.{report.syncedAt && !Number.isNaN(Date.parse(report.syncedAt)) ? ` Última sincronización: ${new Date(report.syncedAt).toLocaleString('es-ES')}.` : ''}</p>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Sesiones y conversiones</h3>
