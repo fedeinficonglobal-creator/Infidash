@@ -1,5 +1,5 @@
 # ---- build stage: full toolchain and devDependencies, produces dist/ ----
-FROM node:24-bookworm-slim AS build
+FROM node:24-trixie-slim AS build
 
 WORKDIR /app
 
@@ -11,9 +11,10 @@ RUN npm run build \
   && npm prune --omit=dev
 
 # ---- runtime stage: Node + pg_dump only (no compilers, no devDependencies) ----
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-trixie-slim AS runtime
 
-# pg_dump is needed at runtime for the admin backup endpoint; psql is no longer used.
+# pg_dump is needed at runtime for the backups. Debian 13 (trixie) ships the PostgreSQL 17 client, which matches the
+# production server (a pg_dump older than the server refuses to dump it).
 RUN apt-get update \
   && apt-get install -y --no-install-recommends postgresql-client \
   && rm -rf /var/lib/apt/lists/*
