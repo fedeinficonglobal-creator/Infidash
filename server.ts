@@ -4,6 +4,8 @@ import fastifyStatic from '@fastify/static';
 import { leadsRouteConfig, loginRouteConfig, registerSecurity, resolveTrustProxy } from './src/server/security.js';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
+import { statfs } from 'node:fs/promises';
 import {
   authenticateUser,
   closeMonthlyKpiCycle,
@@ -99,6 +101,10 @@ import { registerErrorHandling } from './src/lib/errorHandling.js';
 import { buildFastifyLoggingOptions, logger, registerRequestId } from './src/lib/logger.js';
 import { BACKUP_SCHEDULER_LOCK_ID, createBackupScheduler, resolveBackupSchedule, startBackupSchedulerTimers, withAdvisoryLock } from './src/lib/backupScheduler.js';
 import { applyRetention, listBackupEntries } from './src/lib/backupRetention.js';
+import { createHttpMetrics, registerHttpMetrics } from './src/lib/httpMetrics.js';
+import { createMetricsReporter, parseFailedJobsThreshold, startMetricsReporterTimers } from './src/lib/metricsReporter.js';
+import { getEditorialJobMetrics } from './src/server/content/metrics.js';
+import { buildMetricsReport } from './src/server/metricsReport.js';
 import { publicErrorMessage, UserFacingError } from './src/lib/userFacingError.js';
 import { INVALID_STAT_DATE_MESSAGE, isCanonicalStatDate } from './src/lib/statDate.js';
 import { shouldRunEditorialMigrations, shouldServeHttp } from './src/lib/serverRuntime.js';
@@ -150,6 +156,9 @@ const loginThrottle = new LoginThrottle();
 // Must be registered before any plugin so every encapsulated route inherits it.
 registerRequestId(app);
 registerErrorHandling(app);
+// In-memory request counters (per-minute buckets, no URLs or ids) feeding GET /api/admin/metrics and the log summaries.
+const httpMetrics = createHttpMetrics();
+registerHttpMetrics(app, httpMetrics);
 // Security headers + rate limiting. Registered before every route so headers also cover static files,
 // the SPA fallback and error responses.
 await registerSecurity(app, process.env);
@@ -1232,6 +1241,22 @@ function startBackupScheduler() {
   globalState.__infidashBackupSchedulerStop = startBackupSchedulerTimers(backupScheduler, backupSchedulerLog);
 }
 
+// Quiet once-a-minute log reporter: `http minute summary` (only minutes with 5xx) and `editorial queue alert`
+// (failed editorial jobs >= METRICS_FAILED_JOBS_WARN, at most once every 10 minutes). Healthy = no output.
+function startMetricsReporter() {
+  if (process.env.NODE_ENV === 'test') return;
+  const globalState = globalThis as typeof globalThis & { __infidashMetricsReporterStop?: () => void };
+  if (globalState.__infidashMetricsReporterStop) return;
+  const reporter = createMetricsReporter({
+    now: () => Date.now(),
+    http: httpMetrics,
+    getJobMetrics: () => getEditorialJobMetrics(getEditorialPool()),
+    log: (level, message, meta) => logger[level](meta, message),
+    failedJobsThreshold: parseFailedJobsThreshold(process.env.METRICS_FAILED_JOBS_WARN),
+  });
+  globalState.__infidashMetricsReporterStop = startMetricsReporterTimers(reporter);
+}
+
 const SESSION_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 
 // Expired sessions are otherwise deleted only when their own token is presented. Hourly purge, first run delayed
@@ -1822,6 +1847,44 @@ app.get('/api/admin/backups', async (req: AnyFastifyRequest, reply: FastifyReply
   }
 });
 
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+eventLoopDelay.enable();
+
+// Admin-only operational metrics: request counters, database reachability, editorial job queue, backups and disk.
+// Every section degrades on its own to { error: 'unavailable' }; internals are never returned.
+app.get('/api/admin/metrics', async (req: AnyFastifyRequest, reply: FastifyReply) => {
+  const session = await requireSession(req, reply, ['admin']);
+  if (!session) {
+    return;
+  }
+
+  try {
+    const report = await buildMetricsReport({
+      now: () => new Date(),
+      uptimeSeconds: () => process.uptime(),
+      memoryUsage: () => process.memoryUsage(),
+      http: httpMetrics,
+      pingCore: () => getCorePool().query('SELECT 1'),
+      pingEditorial: () => getEditorialPool().query('SELECT 1'),
+      getJobMetrics: () => getEditorialJobMetrics(getEditorialPool()),
+      getBackupLastRun: () => backupScheduler.getLastRun(),
+      getDisk: async () => {
+        const directory = getBackupDirectory();
+        if (!existsSync(directory)) return null;
+        const stats = await statfs(directory);
+        const total = stats.blocks * stats.bsize;
+        const free = stats.bavail * stats.bsize;
+        return { usedPercent: total > 0 ? Number((((total - free) / total) * 100).toFixed(1)) : 0, freeGb: Number((free / 1024 ** 3).toFixed(2)) };
+      },
+      eventLoopLagMs: () => (eventLoopDelay.count > 0 ? Number((eventLoopDelay.percentile(99) / 1e6).toFixed(1)) : null),
+    });
+    return reply.send(report);
+  } catch (error) {
+    req.log.error({ err: error }, 'metrics report failed');
+    return sendError(reply, 500, 'No se pudieron obtener las métricas', 'METRICS_FAILED');
+  }
+});
+
 app.get('/api/dashboard/summary', async (req: AnyFastifyRequest, reply: FastifyReply) => {
   const session = await requireSession(req, reply, ['viewer', 'admin']);
   if (!session) {
@@ -1857,6 +1920,7 @@ if (process.env.NODE_ENV !== 'test') {
   startMonthlyKpiCloseScheduler();
   startSessionPurgeScheduler();
   startBackupScheduler();
+  startMetricsReporter();
 }
 
 if (shouldServeHttp(process.env)) {
