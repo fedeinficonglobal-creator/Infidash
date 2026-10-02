@@ -7,44 +7,23 @@ import { getClientDashboard, getClientIntegrations, getGa4TrafficSnapshot, getGo
 import { useClientStore } from '../store/useClientStore.js';
 import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { buildComparisonPeriod, type ComparisonMetric } from '../lib/overviewComparison.js';
-import { buildClientSignals, formatMoney, formatPlain } from '../lib/clientSignals.js';
+import { buildClientSignals } from '../lib/clientSignals.js';
 import { hasClarityMetric } from '../lib/clarityAvailability.js';
+import { formatCurrency, formatDateTime, formatDecimal, formatInteger, formatMoney, formatStatDate } from '../lib/format.js';
 
 const PERIOD_OPTIONS = [7, 14, 30] as const;
 type PeriodOption = (typeof PERIOD_OPTIONS)[number];
 
-function formatDateLabel(statDate: string) {
-return new Intl.DateTimeFormat('es-ES', {
-day: 'numeric',
-month: 'short',
-}).format(new Date(`${statDate}T00:00:00`));
-}
-
-function formatCurrency(value: number) {
-return new Intl.NumberFormat('es-ES', {
-style: 'currency',
-currency: 'EUR',
-maximumFractionDigits: 0,
-}).format(value);
-}
-
-function formatPercent(value: number) {
-return new Intl.NumberFormat('es-ES', {
-minimumFractionDigits: 1,
-maximumFractionDigits: 1,
-}).format(value);
-}
-
 function formatComparisonValue(metric: ComparisonMetric) {
 switch (metric.key) {
 case 'revenue':
-return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(metric.current);
+return formatMoney(metric.current);
 case 'roas':
-return `${formatPercent(metric.current)}x`;
+return `${formatDecimal(metric.current)}x`;
 case 'conversions':
-return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(metric.current);
+return formatInteger(metric.current);
 case 'cpa':
-return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(metric.current);
+return formatMoney(metric.current);
 }
 
 return '';
@@ -54,11 +33,11 @@ function formatComparisonPrevious(metric: ComparisonMetric) {
 switch (metric.key) {
 case 'revenue':
 case 'cpa':
-return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(metric.previous);
+return formatMoney(metric.previous);
 case 'roas':
-return `${formatPercent(metric.previous)}x`;
+return `${formatDecimal(metric.previous)}x`;
 case 'conversions':
-return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(metric.previous);
+return formatInteger(metric.previous);
 }
 
 return '';
@@ -70,7 +49,7 @@ return 'Sin referencia';
 }
 
 const sign = metric.percentDelta > 0 ? '+' : '';
-const formatted = `${sign}${formatPercent(metric.percentDelta)}%`;
+const formatted = `${sign}${formatDecimal(metric.percentDelta)}%`;
 return metric.key === 'cpa' ? `${formatted} vs periodo anterior` : formatted;
 }
 
@@ -193,7 +172,7 @@ window.clearInterval(interval);
 
 const chartData = useMemo(() => {
 return dailyStats.slice(-comparisonWindow).map((stat) => ({
-name: formatDateLabel(stat.statDate),
+name: formatStatDate(stat.statDate, 'short'),
 sales: stat.revenue,
 roas: stat.roas,
 }));
@@ -243,7 +222,7 @@ return (
 Análisis consolidado para <span className="text-slate-900 font-bold">{client.name}</span>
 {latestStat && (
 <span className="ml-2 text-xs text-slate-500">
-· Último dato: {formatDateLabel(latestStat.statDate)}
+· Último dato: {formatStatDate(latestStat.statDate, 'short')}
 </span>
 )}
 </p>
@@ -283,7 +262,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
     </div>
     <div className="text-xs text-slate-500 text-right">
       <p className="font-semibold text-slate-700">Última sincronización</p>
-      <p>{latestUxSnapshot?.updatedAt ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latestUxSnapshot.updatedAt)) : 'Sin sincronizar'}</p>
+      <p>{latestUxSnapshot?.updatedAt ? formatDateTime(latestUxSnapshot.updatedAt, 'medium') : 'Sin sincronizar'}</p>
     </div>
   </div>
 
@@ -296,22 +275,22 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Sesiones</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('sessions') ? formatPlain(latestUxSnapshot!.sessions) : '—'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('sessions') ? formatInteger(latestUxSnapshot!.sessions) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">{latestUxSnapshot?.source ?? 'Sin datos reales'}</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Páginas vistas</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('pageViews') ? formatPlain(latestUxSnapshot!.pageViews) : '—'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('pageViews') ? formatInteger(latestUxSnapshot!.pageViews) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">{hasUxMetric('pageViews') ? 'Sincronizado desde backend' : latestUxSnapshot?.source === 'clarity' ? 'No disponible en la exportación de Clarity' : 'Sin datos reales'}</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Clics de fricción</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('rageClicks') && hasUxMetric('deadClicks') ? formatPlain(latestUxSnapshot!.rageClicks + latestUxSnapshot!.deadClicks) : '—'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('rageClicks') && hasUxMetric('deadClicks') ? formatInteger(latestUxSnapshot!.rageClicks + latestUxSnapshot!.deadClicks) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">Rage + dead clicks</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Scroll medio</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('scrollDepthAvg') ? `${formatPercent(latestUxSnapshot!.scrollDepthAvg)}%` : '—'}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('scrollDepthAvg') ? `${formatDecimal(latestUxSnapshot!.scrollDepthAvg)}%` : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">Profundidad media de lectura</p>
     </div>
   </div>
@@ -328,7 +307,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
     </div>
     <div className="text-xs text-slate-500 text-right">
       <p className="font-semibold text-slate-700">Última sincronización</p>
-      <p>{ga4Report?.syncedAt ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ga4Report.syncedAt)) : 'Sin sincronizar'}</p>
+      <p>{ga4Report?.syncedAt ? formatDateTime(ga4Report.syncedAt, 'medium') : 'Sin sincronizar'}</p>
     </div>
   </div>
 
@@ -343,11 +322,11 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Sesiones (30d)</p>
-        <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.sessions, 0))}</p>
+        <p className="mt-2 text-2xl font-bold text-slate-900">{formatInteger(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.sessions, 0))}</p>
       </div>
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Conversiones (30d)</p>
-        <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.conversions, 0))}</p>
+        <p className="mt-2 text-2xl font-bold text-slate-900">{formatInteger(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.conversions, 0))}</p>
       </div>
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Principal fuente</p>
@@ -372,7 +351,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
     </div>
     <div className="text-xs text-slate-500 text-right">
       <p className="font-semibold text-slate-700">Última sincronización</p>
-      <p>{googleAdsReport?.syncedAt ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(googleAdsReport.syncedAt)) : 'Sin sincronizar'}</p>
+      <p>{googleAdsReport?.syncedAt ? formatDateTime(googleAdsReport.syncedAt, 'medium') : 'Sin sincronizar'}</p>
     </div>
   </div>
 
@@ -392,11 +371,11 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Inversión (30d)</p>
-            <p className="mt-2 text-2xl font-bold text-slate-900">{totalCost.toLocaleString('es-ES', { style: 'currency', currency: googleAdsReport.currencyCode || 'EUR' })}</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(totalCost, googleAdsReport.currencyCode || 'EUR')}</p>
           </div>
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Conversiones (30d)</p>
-            <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(totalConversions)}</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{formatInteger(totalConversions)}</p>
           </div>
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">ROAS</p>
@@ -479,7 +458,7 @@ border: 'none',
 boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
 fontSize: '12px'
 }}
-formatter={(value, name) => [name === 'sales' ? formatCurrency(Number(value)) : `${formatPercent(Number(value))}x`, name === 'sales' ? 'Ventas' : 'ROAS']}
+formatter={(value, name) => [name === 'sales' ? formatMoney(Number(value)) : `${formatDecimal(Number(value))}x`, name === 'sales' ? 'Ventas' : 'ROAS']}
 />
 <Area type="monotone" dataKey="sales" stroke="#0ea5e9" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
 <Area type="monotone" dataKey="roas" stroke="#6366f1" strokeWidth={3} fill="none" strokeDasharray="5 5" />
@@ -497,11 +476,11 @@ formatter={(value, name) => [name === 'sales' ? formatCurrency(Number(value)) : 
 {chartData.length > 1 && (
 <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
 <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold">
-Cambio ventas: {salesDelta >= 0 ? '+' : ''}{formatPercent(salesDelta)}%
+Cambio ventas: {salesDelta >= 0 ? '+' : ''}{formatDecimal(salesDelta)}%
 </span>
 {latestStat && (
 <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold">
-ROAS último dato: {formatPercent(latestStat.roas)}x
+ROAS último dato: {formatDecimal(latestStat.roas)}x
 </span>
 )}
 </div>
@@ -587,7 +566,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <div>
 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Leads diarios</p>
 <div className="flex items-center gap-2">
-<h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.leads) : '0'}</h4>
+<h4 className="text-xl font-bold">{latestStat ? formatInteger(latestStat.leads) : '0'}</h4>
 <span className="text-[10px] text-emerald-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
 </div>
 </div>
@@ -602,7 +581,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <div>
 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tráfico diario</p>
 <div className="flex items-center gap-2">
-<h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.traffic) : '0'}</h4>
+<h4 className="text-xl font-bold">{latestStat ? formatInteger(latestStat.traffic) : '0'}</h4>
 <span className="text-[10px] text-blue-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
 </div>
 </div>
@@ -616,7 +595,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <div>
 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Clicks diarios</p>
 <div className="flex items-center gap-2">
-<h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.clicks) : '0'}</h4>
+<h4 className="text-xl font-bold">{latestStat ? formatInteger(latestStat.clicks) : '0'}</h4>
 <span className="text-[10px] text-rose-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
 </div>
 </div>

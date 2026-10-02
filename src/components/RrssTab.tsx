@@ -12,6 +12,7 @@ import {
 import { RrssPostsSection } from './rrss/RrssPostsSection.js';
 import { Modal } from './Modal.js';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { formatMonthYear } from '../lib/format.js';
 
 type RrssSection = 'posts' | 'plan';
 const SECTIONS: ReadonlyArray<[RrssSection, string]> = [['posts', 'Publicaciones'], ['plan', 'Planificación mensual']];
@@ -38,7 +39,7 @@ export function RrssTab({ client }: { client: Client }) {
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const monthLabel = useMemo(() => new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(`${periodKey}-01T12:00:00`)), [periodKey]);
+  const monthLabel = useMemo(() => formatMonthYear(new Date(`${periodKey}-01T12:00:00`)), [periodKey]);
   const visibleRows = planRows.filter((row) => `${row.web} ${row.rrss} ${row.objetivo} ${row.competidores}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
 
 

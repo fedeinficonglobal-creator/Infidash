@@ -3,38 +3,10 @@ import { Calendar, FileText, LoaderCircle, Save, Share2, Download, Mail } from '
 import { type Client, useClientStore } from '../store/useClientStore';
 import { createDailyStat, fetchDailyReportPdf, getDailyStats, type DailyStat } from '../services/infidashApi';
 import { SavedReportsPanel } from './SavedReportsPanel.js';
+import { formatDecimal, formatInteger, formatMoney, formatStatDate } from '../lib/format.js';
 
 function todayISODate() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function formatDate(statDate: string) {
-  return new Intl.DateTimeFormat('es-ES', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(`${statDate}T00:00:00`));
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatDecimal(value: number) {
-  return new Intl.NumberFormat('es-ES', {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function formatInteger(value: number) {
-  return new Intl.NumberFormat('es-ES', {
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 function DailyStatRow({ stat }: { stat: DailyStat }) {
@@ -45,7 +17,7 @@ function DailyStatRow({ stat }: { stat: DailyStat }) {
           <FileText className="size-5" />
         </div>
         <div>
-          <h4 className="text-sm font-bold text-slate-900">{formatDate(stat.statDate)}</h4>
+          <h4 className="text-sm font-bold text-slate-900">{formatStatDate(stat.statDate, 'long')}</h4>
           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
             {stat.source} • {stat.notes ? stat.notes : 'Sin notas'}
           </p>
@@ -227,7 +199,7 @@ export function ReportsTab({ client }: { client: Client }) {
             <h3 className="text-lg font-bold text-slate-900 mb-2">Última métrica guardada</h3>
             <p className="text-sm text-slate-500 font-medium mb-6">
               {latestStat
-                ? `${formatDate(latestStat.statDate)} · Revenue ${formatMoney(latestStat.revenue)} · ROAS ${formatDecimal(latestStat.roas)}x`
+                ? `${formatStatDate(latestStat.statDate, 'long')} · Revenue ${formatMoney(latestStat.revenue)} · ROAS ${formatDecimal(latestStat.roas)}x`
                 : 'Todavía no hay métricas guardadas para este cliente.'}
             </p>
           </div>
@@ -436,7 +408,7 @@ export function ReportsTab({ client }: { client: Client }) {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  <p className="font-semibold text-slate-700">{formatDate(latestStat.statDate)}</p>
+                  <p className="font-semibold text-slate-700">{formatStatDate(latestStat.statDate, 'long')}</p>
                   <p className="mt-1">{latestStat.notes || 'Sin notas para esta métrica.'}</p>
                 </div>
                 <div className="flex items-center justify-between gap-3">

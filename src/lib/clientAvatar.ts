@@ -1,13 +1,16 @@
-/** Tailwind class pairs for client avatars without a logo. Literal strings so Tailwind keeps them. */
+/**
+ * Background colours for initials avatars. Every entry keeps white text at a WCAG contrast of at least 4.5:1
+ * (guarded by tests/frontend-hygiene.test.ts). Hex values so the contrast can be verified.
+ */
 export const CLIENT_AVATAR_PALETTE: readonly string[] = Object.freeze([
-  'bg-sky-600 text-white',
-  'bg-indigo-600 text-white',
-  'bg-emerald-600 text-white',
-  'bg-amber-500 text-slate-900',
-  'bg-rose-600 text-white',
-  'bg-violet-600 text-white',
-  'bg-teal-600 text-white',
-  'bg-slate-700 text-white',
+  '#0369a1', // sky-700
+  '#4f46e5', // indigo-600
+  '#047857', // emerald-700
+  '#b45309', // amber-700
+  '#be123c', // rose-700
+  '#7c3aed', // violet-600
+  '#0f766e', // teal-700
+  '#334155', // slate-700
 ]);
 
 function stripAccents(value: string) {
@@ -29,7 +32,7 @@ export function clientInitials(name: string) {
   return initials.toLocaleUpperCase('es');
 }
 
-/** Deterministic palette entry for a client slug. */
+/** Deterministic palette background (hex) for a client slug or name. */
 export function clientColor(slug: string) {
   let hash = 0;
   for (let index = 0; index < slug.length; index += 1) {
@@ -38,7 +41,10 @@ export function clientColor(slug: string) {
   return CLIENT_AVATAR_PALETTE[hash % CLIENT_AVATAR_PALETTE.length];
 }
 
-/** Returns the logo URL, or null when the client has none (empty or the generated ui-avatars placeholder). */
+/**
+ * Returns the logo URL, or null when the client has none. Old rows may still store a generated
+ * ui-avatars.com placeholder; those count as "no logo" so that host is never requested.
+ */
 export function clientLogoUrl(logo: string | null | undefined) {
   const url = logo?.trim();
   if (!url || /^https?:\/\/ui-avatars\.com\//i.test(url)) return null;

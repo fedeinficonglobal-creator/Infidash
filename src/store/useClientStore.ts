@@ -16,6 +16,7 @@ import {
   type SessionUser,
 } from '../services/infidashApi.js';
 import { isAbortError, isUnauthorizedError, resetUnauthorizedLatch, setUnauthorizedHandler } from '../services/sessionExpiry.js';
+import { formatDecimal, formatInteger, formatMoney } from '../lib/format.js';
 
 export interface Metric {
   label: string;
@@ -73,25 +74,6 @@ function getFallbackClient(slug: string) {
   return FALLBACK_CLIENTS.find((client) => client.slug === slug) ?? null;
 }
 
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatDecimal(value: number) {
-  return new Intl.NumberFormat('es-ES', {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function formatPlain(value: number) {
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(value);
-}
-
 function mapApiClientToUiClient(client: ApiClient): Client {
   const fallback = getFallbackClient(client.slug);
   const latestStat = client.latestStat;
@@ -118,7 +100,7 @@ function mapApiClientToUiClient(client: ApiClient): Client {
     };
     metrics.conversions = {
       ...metrics.conversions,
-      value: formatPlain(latestStat.conversions),
+      value: formatInteger(latestStat.conversions),
     };
     metrics.cpa = {
       ...metrics.cpa,
@@ -130,7 +112,7 @@ function mapApiClientToUiClient(client: ApiClient): Client {
     id: client.id,
     slug: client.slug,
     name: client.name,
-    logo: client.logoUrl ?? fallback?.logo ?? 'https://ui-avatars.com/api/?name=Infidash&background=random',
+    logo: client.logoUrl ?? fallback?.logo ?? '',
     health: client.healthScore,
     revenue30d: client.revenue30d,
     industry: client.industry ?? fallback?.industry ?? 'General',

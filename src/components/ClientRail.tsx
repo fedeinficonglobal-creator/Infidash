@@ -4,7 +4,8 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import type { Client } from '../store/useClientStore.js';
 import { cn } from '../lib/utils.js';
 import { DASHBOARD_PATH, clientPath } from '../lib/routes.js';
-import { clientColor, clientInitials, clientLogoUrl, filterClients, sortClients } from '../lib/clientAvatar.js';
+import { filterClients, sortClients } from '../lib/clientAvatar.js';
+import { InitialsAvatar } from './InitialsAvatar.js';
 
 const railTileClass =
   'relative w-[4.25rem] shrink-0 flex flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary';
@@ -15,34 +16,6 @@ const railLabelClass = 'w-full text-center text-[10px] font-semibold leading-tig
 // Scrolls without a visible scrollbar; the edges fade so it is clear there is more.
 const railScrollClass =
   '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]';
-
-function ClientAvatar({ client, className }: { client: Client; className?: string }) {
-  const logoUrl = clientLogoUrl(client.logo);
-  const [logoFailed, setLogoFailed] = useState(false);
-
-  if (logoUrl && !logoFailed) {
-    return (
-      <img
-        src={logoUrl}
-        alt=""
-        className={cn('size-full rounded-[inherit] object-cover bg-white', className)}
-        onError={() => setLogoFailed(true)}
-      />
-    );
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'size-full rounded-[inherit] flex items-center justify-center text-xs font-bold tracking-wide',
-        clientColor(client.slug),
-        className,
-      )}
-    >
-      {clientInitials(client.name)}
-    </span>
-  );
-}
 
 function ClientSearch({ clients }: { clients: Client[] }) {
   const [open, setOpen] = useState(false);
@@ -127,7 +100,7 @@ function ClientSearch({ clients }: { clients: Client[] }) {
                   className="flex items-center gap-3 px-2 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none"
                 >
                   <span className="size-7 shrink-0 rounded-lg overflow-hidden">
-                    <ClientAvatar client={client} className="text-[10px]" />
+                    <InitialsAvatar name={client.name} seed={client.slug} logo={client.logo} decorative className="text-[10px]" />
                   </span>
                   <span className="truncate">{client.name}</span>
                 </Link>
@@ -179,7 +152,7 @@ export function ClientRail({ clients, activeClientId }: { clients: Client[]; act
                 className={cn(railTileClass, isActive ? railTileActive : railTileIdle)}
               >
                 <span className={cn(railIconClass, 'overflow-hidden', isActive && 'ring-2 ring-brand-primary')}>
-                  <ClientAvatar client={client} className="text-[11px]" />
+                  <InitialsAvatar name={client.name} seed={client.slug} logo={client.logo} decorative className="text-[11px]" />
                 </span>
                 <span className={railLabelClass}>{client.name}</span>
               </Link>

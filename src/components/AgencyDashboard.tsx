@@ -7,7 +7,10 @@ import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
 import { LayoutGrid, List, Plus, Search, TrendingUp, TrendingDown, ArrowRight, PencilLine, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Modal } from './Modal.js';
+import { InitialsAvatar } from './InitialsAvatar.js';
+import { clientLogoUrl } from '../lib/clientAvatar.js';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { formatMoney } from '../lib/format.js';
 
 export function AgencyDashboard() {
   const { clients, sessionToken, currentUser, addClient, updateClient, deleteClient } = useClientStore();
@@ -61,7 +64,7 @@ export function AgencyDashboard() {
     setNewClientForm({
       name: client.name,
       industry: client.industry,
-      logo: client.logo,
+      logo: clientLogoUrl(client.logo) ?? '',
       revenueTarget: String(client.kpiThresholds.revenue),
       roasTarget: String(client.kpiThresholds.roas),
       conversionsTarget: String(client.kpiThresholds.conversions),
@@ -87,7 +90,8 @@ export function AgencyDashboard() {
       const payload = {
         name: newClientForm.name.trim(),
         industry: newClientForm.industry || 'General',
-        logo: newClientForm.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(newClientForm.name)}&background=random`,
+        // An empty logo is stored as null; the UI renders local initials for it.
+        logo: newClientForm.logo.trim(),
         kpiThresholds: {
           revenue: Number(newClientForm.revenueTarget) || DEFAULT_KPI_THRESHOLDS.revenue,
           roas: Number(newClientForm.roasTarget) || DEFAULT_KPI_THRESHOLDS.roas,
@@ -207,7 +211,7 @@ export function AgencyDashboard() {
          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
             <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Revenue Gestionado (30d)</h3>
             <div className="flex items-end justify-between">
-               <span className="text-3xl font-bold text-slate-900">{revenue30dRows ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(totalRevenue) : 'Sin datos'}</span>
+               <span className="text-3xl font-bold text-slate-900">{revenue30dRows ? formatMoney(totalRevenue) : 'Sin datos'}</span>
                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{revenue30dRows ? `${revenue30dRows} registros · 30 días` : 'Sin datos · 30 días'}</span>
             </div>
          </div>
@@ -296,7 +300,7 @@ export function AgencyDashboard() {
                      <div className="p-6 border-b border-slate-50">
                         <div className="flex justify-between items-start mb-4">
                            <div className="size-12 rounded-xl overflow-hidden shadow-sm">
-                              <img src={client.logo} alt={client.name} className="size-full object-cover" />
+                              <InitialsAvatar name={client.name} seed={client.slug} logo={client.logo} className="text-base" />
                            </div>
                            <div className="flex items-start gap-2">
                              <div className={cn("px-2.5 py-1 rounded-full flex items-center gap-1.5", status.bg)}>
@@ -401,7 +405,7 @@ export function AgencyDashboard() {
                         >
                            <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                 <img src={client.logo} alt={client.name} className="size-10 rounded-lg object-cover" />
+                                 <div className="size-10 shrink-0 rounded-lg overflow-hidden"><InitialsAvatar name={client.name} seed={client.slug} logo={client.logo} className="text-sm" /></div>
                                  <div>
                                     <h3 className="text-sm font-bold text-slate-900">
                                        <button

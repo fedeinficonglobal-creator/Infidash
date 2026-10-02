@@ -1,3 +1,4 @@
+import { formatMonthName } from './format.js';
 export interface WebPlanRowInput {
   cliente: string;
   web: string;
@@ -26,7 +27,7 @@ export function getWebPlanInitialRows(savedRows: WebPlanRow[]) {
 }
 
 export function getWebMonthLabel(date = new Date()) {
-  return new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(date).toUpperCase();
+  return formatMonthName(date).toUpperCase();
 }
 
 export function normalizeWebPlanRow(input: Partial<WebPlanRow> & WebPlanRowInput, timestamp = new Date().toISOString()): WebPlanRow {

@@ -12,6 +12,7 @@ import {
 } from '../lib/webPlan.js';
 import { Modal } from './Modal.js';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { formatMonthYear, formatMonthName } from '../lib/format.js';
 
 const EMPTY_FORM = {
   cliente: '',
@@ -38,11 +39,11 @@ export function WebTab({ client }: { client: Client }) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const monthLabel = useMemo(() => new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(`${periodKey}-01T12:00:00`)), [periodKey]);
+  const monthLabel = useMemo(() => formatMonthYear(new Date(`${periodKey}-01T12:00:00`)), [periodKey]);
   const previousMonthLabel = useMemo(() => {
     const date = new Date(`${periodKey}-01T12:00:00`);
     date.setMonth(date.getMonth() - 1);
-    return new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(date);
+    return formatMonthName(date);
   }, [periodKey]);
   const visibleRows = rows.filter((row) => `${row.cliente} ${row.web} ${row.kpi}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
 

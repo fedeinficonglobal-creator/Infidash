@@ -10,6 +10,7 @@ import {
 } from '../services/infidashApi.js';
 import { isValidInclusiveDateRange } from '../lib/dateRange.js';
 import { planGa4Load } from '../lib/trafficAutoLoad.js';
+import { formatCurrency, formatDateTime } from '../lib/format.js';
 
 function defaultWindow() {
   const to = new Date().toISOString().slice(0, 10);
@@ -218,7 +219,7 @@ export function TrafficTab({ client }: { client: Client }) {
 
       {report && (
         <div className="mt-6 space-y-6" aria-live="polite">
-          <p className="text-xs text-slate-500">{report.persisted ? 'Sincronización guardada' : 'Vista previa sin guardar'} · propiedad {report.propertyId}.{report.syncedAt && !Number.isNaN(Date.parse(report.syncedAt)) ? ` Última sincronización: ${new Date(report.syncedAt).toLocaleString('es-ES')}.` : ''}</p>
+          <p className="text-xs text-slate-500">{report.persisted ? 'Sincronización guardada' : 'Vista previa sin guardar'} · propiedad {report.propertyId}.{report.syncedAt && !Number.isNaN(Date.parse(report.syncedAt)) ? ` Última sincronización: ${formatDateTime(report.syncedAt)}.` : ''}</p>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Sesiones y conversiones</h3>
@@ -323,7 +324,7 @@ export function TrafficTab({ client }: { client: Client }) {
                     <tr key={campaign.id} className="border-t border-slate-100">
                       <td className="py-2 truncate max-w-[16rem]" title={campaign.name}>{campaign.name}</td>
                       <td className="py-2">{campaign.status}</td>
-                      <td className="py-2">{campaign.cost.toLocaleString('es-ES', { style: 'currency', currency: adsReport.currencyCode || 'EUR' })}</td>
+                      <td className="py-2">{formatCurrency(campaign.cost, adsReport.currencyCode || 'EUR')}</td>
                       <td className="py-2">{campaign.clicks}</td>
                       <td className="py-2">{campaign.conversions}</td>
                       <td className="py-2">{campaign.cost > 0 ? `${(campaign.conversionsValue / campaign.cost).toFixed(2)}x` : '—'}</td>

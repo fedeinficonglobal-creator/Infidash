@@ -1,5 +1,6 @@
 import { type Client } from '../store/useClientStore.js';
 import { evaluateKpiThresholds as evaluateKpiThresholdStates, type KpiThresholdState } from './kpiThresholds.js';
+import { formatDecimal, formatInteger, formatMoney } from './format.js';
 
 export type HealthBand = 'excellent' | 'stable' | 'risk' | 'critical';
 
@@ -36,21 +37,6 @@ function parseLocaleNumber(value: string | number) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function formatMoney(value: number) {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-export function formatDecimal(value: number, fractionDigits = 1) {
-  return new Intl.NumberFormat('es-ES', {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  }).format(value);
-}
-
 export function evaluateKpiThresholds(client: Client): KpiThresholdState[] {
   return evaluateKpiThresholdStates(
     {
@@ -61,10 +47,6 @@ export function evaluateKpiThresholds(client: Client): KpiThresholdState[] {
     },
     client.kpiThresholds,
   );
-}
-
-export function formatPlain(value: number) {
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(value);
 }
 
 export function getHealthBand(health: number): HealthBand {
@@ -108,7 +90,7 @@ export function buildClientSignals(client: Client): ClientSignals {
 
   const riskMessage =
     healthBand === 'excellent'
-      ? `La combinación de ${formatDecimal(roas)}x ROAS y ${formatPlain(conversions)} conversiones abre margen para escalar.`
+      ? `La combinación de ${formatDecimal(roas)}x ROAS y ${formatInteger(conversions)} conversiones abre margen para escalar.`
       : healthBand === 'stable'
         ? `Hay una base sana, pero conviene vigilar el CPA medio de ${formatMoney(cpa)}.`
         : healthBand === 'risk'
