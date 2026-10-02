@@ -121,8 +121,8 @@ export async function registerSecurity(app: FastifyInstance, env: SecurityEnv) {
     app.addHook('onRequest', async (request) => {
       if (warned || !request.headers['x-forwarded-for']) return;
       warned = true;
-      console.warn(
-        '[infidash] Se recibió X-Forwarded-For pero INFIDASH_TRUST_PROXY no está definido: todos los clientes comparten la misma IP para el rate limit y el bloqueo de login. Si la app corre detrás de un proxy (EasyPanel/Traefik), define INFIDASH_TRUST_PROXY=1.',
+      request.log.warn(
+        'Se recibió X-Forwarded-For pero INFIDASH_TRUST_PROXY no está definido: todos los clientes comparten la misma IP para el rate limit y el bloqueo de login. Si la app corre detrás de un proxy (EasyPanel/Traefik), define INFIDASH_TRUST_PROXY=1.',
       );
     });
   }

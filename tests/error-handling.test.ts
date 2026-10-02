@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { after, afterEach, test } from 'node:test';
+import { Writable } from 'node:stream';
+import { after, test } from 'node:test';
 import Fastify from 'fastify';
 import { UserFacingError, publicErrorMessage } from '../src/lib/userFacingError.js';
 import { registerErrorHandling } from '../src/lib/errorHandling.js';
+import { buildFastifyLoggingOptions } from '../src/lib/logger.js';
 
 const previousNodeEnv = process.env.NODE_ENV;
 const previousDatabaseUrl = process.env.DATABASE_URL;
@@ -16,15 +18,11 @@ if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
 else process.env.DATABASE_URL = previousDatabaseUrl;
 after(async () => app.close());
 
-const originalConsoleError = console.error;
-afterEach(() => { console.error = originalConsoleError; });
-
-function captureConsoleError() {
-  const lines: string[] = [];
-  console.error = (...args: unknown[]) => {
-    lines.push(args.map((arg) => (arg instanceof Error ? `${arg.message}\n${arg.stack}` : typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '));
-  };
-  return lines;
+// The error handler now logs through the request logger (structured JSON); capture it with an in-memory stream.
+function capturedLogger() {
+  const chunks: string[] = [];
+  const stream = new Writable({ write(chunk, _encoding, done) { chunks.push(String(chunk)); done(); } });
+  return { options: buildFastifyLoggingOptions({ LOG_LEVEL: 'info' }, stream), output: () => chunks.join('') };
 }
 
 const SECRET_MESSAGE = 'connection string postgresql://user:secret@host/db failed; psql: error: relation "x" does not exist';
@@ -38,8 +36,8 @@ test('publicErrorMessage only exposes messages from UserFacingError', () => {
 });
 
 test('the global handler hides internal errors and logs them without request secrets', async () => {
-  const lines = captureConsoleError();
-  const bare = Fastify();
+  const captured = capturedLogger();
+  const bare = Fastify(captured.options);
   registerErrorHandling(bare);
   bare.post('/boom', async () => { throw new Error(SECRET_MESSAGE); });
   const response = await bare.inject({
@@ -48,11 +46,11 @@ test('the global handler hides internal errors and logs them without request sec
   assert.equal(response.statusCode, 500);
   assert.deepEqual(response.json(), { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
   assert.doesNotMatch(response.body, /postgresql|secret|psql|relation/);
-  const log = lines.join('\n');
-  assert.match(log, /\[infidash\] unhandled error/);
+  const log = captured.output();
+  assert.match(log, /unhandled error/);
   assert.match(log, /POST/);
   assert.match(log, /\/boom/);
-  assert.match(log, /relation "x" does not exist/);
+  assert.match(log, /relation \\"x\\" does not exist/); // quotes are JSON-escaped in the log line
   assert.doesNotMatch(log, /super-secret-token|hunter2/);
   await bare.close();
 });
@@ -76,15 +74,13 @@ test('the global handler keeps 4xx statuses with a safe Spanish message', async 
   await typed.close();
 });
 
-test('an unexpected database failure on a real route returns the generic 500 and logs the detail', async () => {
-  const lines = captureConsoleError();
+test('an unexpected database failure on a real route returns the generic 500', async () => {
   // The session lookup shells out to psql against an unreachable database, so it throws.
   const response = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: 'Bearer some-token' } });
   assert.equal(response.statusCode, 500);
   assert.deepEqual(response.json(), { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
   assert.doesNotMatch(response.body, /psql|postgres|127\.0\.0\.1|spawn/i);
-  assert.match(lines.join('\n'), /\[infidash\] unhandled error/);
-  assert.doesNotMatch(lines.join('\n'), /some-token/);
+  // The real app logs silently under NODE_ENV=test; the logged detail is covered by the bare-app test above and tests/logging.test.ts.
 });
 
 test('malformed JSON on a real route is a safe 400 in the project error shape', async () => {
@@ -119,4 +115,11 @@ test('the real app sends security headers on a JSON 404 and is not rate limited 
     assert.ok(response.headers['x-frame-options']);
     assert.match(String(response.headers['content-security-policy-report-only']), /default-src 'self'/);
   }
+});
+
+test('the real app echoes a valid x-request-id and replaces an invalid one', async () => {
+  const kept = await app.inject({ method: 'GET', url: '/api/does-not-exist', headers: { 'x-request-id': 'client-trace-0001' } });
+  assert.equal(kept.headers['x-request-id'], 'client-trace-0001');
+  const replaced = await app.inject({ method: 'GET', url: '/api/does-not-exist', headers: { 'x-request-id': 'bad id!' } });
+  assert.match(String(replaced.headers['x-request-id']), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 });

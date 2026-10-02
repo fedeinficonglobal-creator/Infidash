@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { Writable } from 'node:stream';
 import { test } from 'node:test';
 import fastify from 'fastify';
 import { LoginThrottle } from '../src/lib/loginThrottle.js';
 import { registerErrorHandling } from '../src/lib/errorHandling.js';
+import { buildFastifyLoggingOptions } from '../src/lib/logger.js';
 import {
   buildContentSecurityPolicy,
   leadsRouteConfig,
@@ -13,8 +15,8 @@ import {
   resolveTrustProxy,
 } from '../src/server/security.js';
 
-async function buildApp(env: Record<string, string | undefined>, options: { trustProxy?: any } = {}) {
-  const app = fastify({ logger: false, trustProxy: options.trustProxy ?? false });
+async function buildApp(env: Record<string, string | undefined>, options: { trustProxy?: any; stream?: Writable } = {}) {
+  const app = fastify({ ...(options.stream ? buildFastifyLoggingOptions({ LOG_LEVEL: 'warn' }, options.stream) : { logger: false }), trustProxy: options.trustProxy ?? false });
   registerErrorHandling(app);
   await registerSecurity(app, env);
   app.get('/api/health', async () => ({ status: 'ok' }));
@@ -100,8 +102,7 @@ test('off mode sends no CSP header but keeps the other security headers', async 
   await app.close();
 });
 
-test('helmet headers are present on 200, 404 and 500 responses', async (t) => {
-  t.mock.method(console, 'error', () => {});
+test('helmet headers are present on 200, 404 and 500 responses', async () => {
   const app = await buildApp({ NODE_ENV: 'test' });
   for (const [url, status] of [['/api/ping', 200], ['/api/missing', 404], ['/api/boom', 500]] as const) {
     const response = await app.inject({ url });
@@ -208,20 +209,23 @@ test('without trustProxy the forwarded header is ignored', async () => {
   await app.close();
 });
 
-test('proxy warning fires once, only with X-Forwarded-For and trust disabled', async (t) => {
-  const warn = t.mock.method(console, 'warn', () => {});
-  const untrusted = await buildApp({ NODE_ENV: 'test' });
+test('proxy warning fires once, only with X-Forwarded-For and trust disabled', async () => {
+  // The warning goes through the request logger now; capture it with an in-memory stream.
+  const chunks: string[] = [];
+  const stream = new Writable({ write(chunk, _encoding, done) { chunks.push(String(chunk)); done(); } });
+  const warnings = () => chunks.join('').split(String.fromCharCode(10)).filter((line) => line.includes('"level":"warn"'));
+  const untrusted = await buildApp({ NODE_ENV: 'test' }, { stream });
   await untrusted.inject({ url: '/api/ping' });
-  assert.equal(warn.mock.callCount(), 0);
+  assert.equal(warnings().length, 0);
   await untrusted.inject({ url: '/api/ping', headers: { 'x-forwarded-for': '203.0.113.1' } });
   await untrusted.inject({ url: '/api/ping', headers: { 'x-forwarded-for': '203.0.113.2' } });
-  assert.equal(warn.mock.callCount(), 1);
-  assert.match(String(warn.mock.calls[0].arguments[0]), /INFIDASH_TRUST_PROXY=1/);
+  assert.equal(warnings().length, 1);
+  assert.match(warnings()[0], /INFIDASH_TRUST_PROXY=1/);
   await untrusted.close();
 
-  warn.mock.resetCalls();
-  const trusted = await buildApp({ NODE_ENV: 'test', INFIDASH_TRUST_PROXY: '1' }, { trustProxy: resolveTrustProxy({ INFIDASH_TRUST_PROXY: '1' }) });
+  chunks.length = 0;
+  const trusted = await buildApp({ NODE_ENV: 'test', INFIDASH_TRUST_PROXY: '1' }, { trustProxy: resolveTrustProxy({ INFIDASH_TRUST_PROXY: '1' }), stream });
   await trusted.inject({ url: '/api/ping', headers: { 'x-forwarded-for': '203.0.113.1' } });
-  assert.equal(warn.mock.callCount(), 0);
+  assert.equal(warnings().length, 0);
   await trusted.close();
 });

@@ -5,7 +5,7 @@
  * when it is a `UserFacingError` (validators, provider failures meant for the admin).
  * Everything else (psql/pg_dump output, TypeErrors, filesystem errors...) may contain SQL,
  * connection strings or paths, so handlers must answer with a generic message and log
- * the real error with `console.error`. Use `publicErrorMessage` to apply the rule.
+ * the real error with the structured logger (`request.log` / `logger`). Use `publicErrorMessage` to apply the rule.
  */
 export class UserFacingError extends Error {
   constructor(message: string) {
