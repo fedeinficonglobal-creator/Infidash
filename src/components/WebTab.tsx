@@ -137,7 +137,7 @@ export function WebTab({ client }: { client: Client }) {
           <p className="text-slate-500 font-medium">Plan compartido de WEB, KPI, umbral de leads y seguimiento mensual.</p>
         </div>
         <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">Salud del cliente</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500">Salud del cliente</p>
           <p className="mt-1 text-sm font-semibold text-slate-700">{signals.primaryMessage}</p>
         </div>
       </header>
@@ -162,7 +162,7 @@ export function WebTab({ client }: { client: Client }) {
       <section className="mb-8 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-100 bg-gradient-to-r from-blue-50 to-amber-50 p-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400 mb-2">{monthLabel}</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500 mb-2">{monthLabel}</p>
             <h3 className="text-xl font-bold text-slate-900">Seguimiento Web editable</h3>
             <p className="text-sm text-slate-500 mt-1">Los campos heredados de abril/mayo corresponden al mes anterior y al mes seleccionado.</p>
           </div>
@@ -180,7 +180,7 @@ export function WebTab({ client }: { client: Client }) {
           <table className="min-w-[1500px] w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="bg-slate-50 px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200" colSpan={5}>INFORMACIÓN BASE</th>
+                <th className="bg-slate-50 px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200" colSpan={5}>INFORMACIÓN BASE</th>
                 <th className="bg-pink-50 px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200">{previousMonthLabel}</th>
                 <th className="bg-amber-50 px-5 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-200" colSpan={3}>{monthLabel}</th>
               </tr>
@@ -223,7 +223,7 @@ export function WebTab({ client }: { client: Client }) {
                   <td className="px-5 py-4 border-b border-slate-100 text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[180px]">{row.leadsMayo || '—'}</td>
                   <td className="px-5 py-4 border-b border-slate-100 text-sm text-slate-700 whitespace-pre-wrap break-words max-w-[120px]">{row.wpoMayo || '—'}</td>
                   <td className="px-5 py-4 border-b border-slate-100 text-right">
-                    {isAdmin && <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    {isAdmin && <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity">
                       <button
                         type="button"
                         onClick={() => openEditModal(row)}
@@ -272,7 +272,7 @@ export function WebTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700 md:col-span-2">
-                  <span className="flex items-center gap-2"><Link2 className="size-4 text-slate-400" /> Web</span>
+                  <span className="flex items-center gap-2"><Link2 className="size-4 text-slate-500" /> Web</span>
                   <input
                     type="url"
                     required
@@ -317,7 +317,7 @@ export function WebTab({ client }: { client: Client }) {
                 </label>
 
                 <label className="space-y-2 text-sm font-bold text-slate-700 md:col-span-2">
-                  <span className="flex items-center gap-2"><Sparkles className="size-4 text-slate-400" /> Acción - {monthLabel}</span>
+                  <span className="flex items-center gap-2"><Sparkles className="size-4 text-slate-500" /> Acción - {monthLabel}</span>
                   <textarea
                     required
                     rows={4}

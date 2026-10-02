@@ -257,17 +257,17 @@ export function UsersAdminTab() {
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">Usuarios totales</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Usuarios totales</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{userCount}</p>
           <p className="mt-1 text-sm text-slate-500">Cuentas registradas en el backend.</p>
         </div>
         <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">Administradores</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Administradores</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{adminCount}</p>
           <p className="mt-1 text-sm text-slate-500">Usuarios con permisos de gestión.</p>
         </div>
         <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">Usuarios activos</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Usuarios activos</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{activeCount}</p>
           <p className="mt-1 text-sm text-slate-500">Acceso habilitado en la sesión actual.</p>
         </div>
@@ -307,7 +307,7 @@ export function UsersAdminTab() {
               >
                 <div className="flex items-start gap-4">
                   <div className="flex size-12 items-center justify-center rounded-2xl bg-white border border-slate-100 shadow-sm">
-                    <Users className="size-5 text-slate-400" />
+                    <Users className="size-5 text-slate-500" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -323,7 +323,7 @@ export function UsersAdminTab() {
                         <Mail className="size-4" />
                         {user.email}
                       </span>
-                      <span className="text-slate-300">•</span>
+                      <span className="text-slate-500">•</span>
                       <span>Creado {formatDate(user.createdAt)}</span>
                     </div>
                   </div>
@@ -351,7 +351,7 @@ export function UsersAdminTab() {
 
                 <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
                   <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
-                    <Shield className="size-4 text-slate-400" />
+                    <Shield className="size-4 text-slate-500" />
                     <select
                       value={user.role}
                       onChange={(event) => void handleRoleChange(user, event.target.value as UserRole)}
@@ -408,7 +408,7 @@ export function UsersAdminTab() {
 
                 {user.role === 'viewer' && editingMembershipsId === user.id && (
                   <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Clientes a los que puede acceder</p>
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Clientes a los que puede acceder</p>
                     {clients.length === 0 ? (
                       <p className="mt-2 text-sm text-slate-500">No hay clientes dados de alta todavía.</p>
                     ) : (
@@ -480,7 +480,7 @@ export function UsersAdminTab() {
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="space-y-2">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Nombre</span>
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Nombre</span>
               <input
                 type="text"
                 value={newUser.name}
@@ -492,7 +492,7 @@ export function UsersAdminTab() {
             </label>
 
             <label className="space-y-2">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Email</span>
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Email</span>
               <input
                 type="email"
                 value={newUser.email}
@@ -504,7 +504,7 @@ export function UsersAdminTab() {
             </label>
 
             <label className="space-y-2">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Contraseña</span>
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Contraseña</span>
               <input
                 type="password"
                 value={newUser.password}
@@ -517,7 +517,7 @@ export function UsersAdminTab() {
             </label>
 
             <label className="space-y-2">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Rol inicial</span>
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Rol inicial</span>
               <select
                 value={newUser.role}
                 onChange={(event) => setNewUser((current) => ({ ...current, role: event.target.value as UserRole }))}
@@ -534,7 +534,7 @@ export function UsersAdminTab() {
 
           {newUser.role === 'viewer' && (
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Clientes a los que podrá acceder</span>
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Clientes a los que podrá acceder</span>
               {clients.length === 0 ? (
                 <p className="mt-2 text-sm text-slate-500">No hay clientes dados de alta todavía.</p>
               ) : (

@@ -134,7 +134,7 @@ function ClientSearch({ clients }: { clients: Client[] }) {
               </li>
             ))}
             {matches.length === 0 && (
-              <li className="px-2 py-1.5 text-sm text-slate-400">Sin resultados</li>
+              <li className="px-2 py-1.5 text-sm text-slate-500">Sin resultados</li>
             )}
           </ul>
         </div>

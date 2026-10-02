@@ -219,21 +219,21 @@ export function LeadsTab({ client }: { client: Client }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-[160px]">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Leads según filtros</p>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Leads según filtros</p>
             <h3 className="text-3xl font-bold">{page?.total ?? '—'}</h3>
           </div>
           <div className="text-xs text-slate-500">{loading ? 'Cargando…' : error ? 'No se pudieron cargar' : `${leads.length} en esta página`}</div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-[160px]">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">En curso</p>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">En curso</p>
             <h3 className="text-3xl font-bold">{page?.openCount ?? '—'}</h3>
           </div>
           <div className="text-xs text-slate-500">Nuevos o en proceso</div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-[160px]">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Cerrados / perdidos</p>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Cerrados / perdidos</p>
             <h3 className="text-3xl font-bold">{page?.resolvedCount ?? '—'}</h3>
           </div>
           <div className="text-xs text-slate-500">Según el estado registrado</div>
@@ -277,10 +277,10 @@ export function LeadsTab({ client }: { client: Client }) {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-50">
-                  <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Contacto</th>
-                  <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fuente</th>
-                  <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estado</th>
-                  <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Contacto adicional</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Contacto</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fuente</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Estado</th>
+                  <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Contacto adicional</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -289,7 +289,7 @@ export function LeadsTab({ client }: { client: Client }) {
                     <td className="px-6 py-4">
                       <div>
                         <p className="text-sm font-bold text-slate-900">{leadContactLabel(lead)}</p>
-                        <p className="text-[10px] text-slate-400 font-medium tracking-wide">{leadDateLabel(lead.receivedAt)}</p>
+                        <p className="text-[10px] text-slate-500 font-medium tracking-wide">{leadDateLabel(lead.receivedAt)}</p>
                       </div>
                     </td>
                     <td className="px-6 py-4">

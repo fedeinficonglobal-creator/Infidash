@@ -83,7 +83,7 @@ const TrendIcon = isNeutral ? RefreshCw : isUp ? ArrowUpRight : ArrowDownRight;
 return (
 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
 <div className="flex items-center justify-between gap-3 mb-3">
-<p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">{metric.label}</p>
+<p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{metric.label}</p>
 <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${trendClass}`}>
 <TrendIcon className="size-3" />
 {formatComparisonDelta(metric)}
@@ -242,7 +242,7 @@ return (
 <p className="text-slate-500 font-medium">
 Análisis consolidado para <span className="text-slate-900 font-bold">{client.name}</span>
 {latestStat && (
-<span className="ml-2 text-xs text-slate-400">
+<span className="ml-2 text-xs text-slate-500">
 · Último dato: {formatDateLabel(latestStat.statDate)}
 </span>
 )}
@@ -279,7 +279,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
         <h3 className="text-lg font-bold text-slate-900">Análisis/UX sincronizado</h3>
         <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Análisis/UX</span>
       </div>
-      <p className="text-xs text-slate-400 font-medium tracking-wide">Datos reales del último sincronizado en base de datos</p>
+      <p className="text-xs text-slate-500 font-medium tracking-wide">Datos reales del último sincronizado en base de datos</p>
     </div>
     <div className="text-xs text-slate-500 text-right">
       <p className="font-semibold text-slate-700">Última sincronización</p>
@@ -295,22 +295,22 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
 
   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Sesiones</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Sesiones</p>
       <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('sessions') ? formatPlain(latestUxSnapshot!.sessions) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">{latestUxSnapshot?.source ?? 'Sin datos reales'}</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Páginas vistas</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Páginas vistas</p>
       <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('pageViews') ? formatPlain(latestUxSnapshot!.pageViews) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">{hasUxMetric('pageViews') ? 'Sincronizado desde backend' : latestUxSnapshot?.source === 'clarity' ? 'No disponible en la exportación de Clarity' : 'Sin datos reales'}</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Clics de fricción</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Clics de fricción</p>
       <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('rageClicks') && hasUxMetric('deadClicks') ? formatPlain(latestUxSnapshot!.rageClicks + latestUxSnapshot!.deadClicks) : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">Rage + dead clicks</p>
     </div>
     <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Scroll medio</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Scroll medio</p>
       <p className="mt-2 text-2xl font-bold text-slate-900">{hasUxMetric('scrollDepthAvg') ? `${formatPercent(latestUxSnapshot!.scrollDepthAvg)}%` : '—'}</p>
       <p className="text-xs text-slate-500 mt-1">Profundidad media de lectura</p>
     </div>
@@ -324,7 +324,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
         <h3 className="text-lg font-bold text-slate-900">Tráfico GA4</h3>
         <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Google Analytics 4</span>
       </div>
-      <p className="text-xs text-slate-400 font-medium tracking-wide">Últimos 30 días sincronizados desde Tráfico</p>
+      <p className="text-xs text-slate-500 font-medium tracking-wide">Últimos 30 días sincronizados desde Tráfico</p>
     </div>
     <div className="text-xs text-slate-500 text-right">
       <p className="font-semibold text-slate-700">Última sincronización</p>
@@ -342,19 +342,19 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
   ) : (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Sesiones (30d)</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Sesiones (30d)</p>
         <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.sessions, 0))}</p>
       </div>
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Conversiones (30d)</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Conversiones (30d)</p>
         <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(ga4Report.sessionsSeries.reduce((sum, point) => sum + point.conversions, 0))}</p>
       </div>
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Principal fuente</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Principal fuente</p>
         <p className="mt-2 text-xl font-bold text-slate-900">{ga4Report.trafficSources[0]?.channelGroup ?? '—'}</p>
       </div>
       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Página más vista</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Página más vista</p>
         <p className="mt-2 text-xs font-bold text-slate-900 truncate" title={ga4Report.topPages[0]?.pagePath}>{ga4Report.topPages[0]?.pagePath ?? '—'}</p>
       </div>
     </div>
@@ -368,7 +368,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
         <h3 className="text-lg font-bold text-slate-900">Inversión Google Ads</h3>
         <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">Google Ads</span>
       </div>
-      <p className="text-xs text-slate-400 font-medium tracking-wide">Últimos 30 días sincronizados desde Tráfico</p>
+      <p className="text-xs text-slate-500 font-medium tracking-wide">Últimos 30 días sincronizados desde Tráfico</p>
     </div>
     <div className="text-xs text-slate-500 text-right">
       <p className="font-semibold text-slate-700">Última sincronización</p>
@@ -391,15 +391,15 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
       return (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Inversión (30d)</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Inversión (30d)</p>
             <p className="mt-2 text-2xl font-bold text-slate-900">{totalCost.toLocaleString('es-ES', { style: 'currency', currency: googleAdsReport.currencyCode || 'EUR' })}</p>
           </div>
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Conversiones (30d)</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Conversiones (30d)</p>
             <p className="mt-2 text-2xl font-bold text-slate-900">{formatPlain(totalConversions)}</p>
           </div>
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">ROAS</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">ROAS</p>
             <p className="mt-2 text-2xl font-bold text-slate-900">{totalCost > 0 ? `${(totalConversionsValue / totalCost).toFixed(2)}x` : '—'}</p>
           </div>
         </div>
@@ -414,7 +414,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
 <div className="flex items-center justify-between mb-8">
 <div>
 <h3 className="text-lg font-bold text-slate-900">Ventas y ROAS</h3>
-<p className="text-xs text-slate-400 font-medium tracking-wide">{periodLabel.toUpperCase()} FRENTE AL MISMO PERIODO ANTERIOR</p>
+<p className="text-xs text-slate-500 font-medium tracking-wide">{periodLabel.toUpperCase()} FRENTE AL MISMO PERIODO ANTERIOR</p>
 </div>
 <div className="flex items-center gap-4">
 <div className="flex items-center gap-2">
@@ -447,7 +447,7 @@ className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${compariso
 <div className="h-full flex items-center justify-center rounded-2xl bg-slate-50 border border-dashed border-slate-200 px-6 text-center">
 <div>
 <p className="text-sm font-bold text-slate-700">Aún no hay métricas diarias</p>
-<p className="text-xs text-slate-400 mt-1">Cuando el equipo registre datos, aquí verás la evolución real del cliente.</p>
+<p className="text-xs text-slate-500 mt-1">Cuando el equipo registre datos, aquí verás la evolución real del cliente.</p>
 </div>
 </div>
 ) : chartWidth > 0 ? (
@@ -547,7 +547,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <div className="flex items-center justify-between gap-4 mb-6">
 <div>
 <h3 className="text-lg font-bold text-slate-900">Comparador periodo actual vs anterior</h3>
-<p className="text-xs text-slate-400 font-medium tracking-wide">{periodLabel.toUpperCase()} FRENTE A LOS {comparisonWindow} DÍAS ANTERIORES</p>
+<p className="text-xs text-slate-500 font-medium tracking-wide">{periodLabel.toUpperCase()} FRENTE A LOS {comparisonWindow} DÍAS ANTERIORES</p>
 </div>
 <div className="text-right text-xs text-slate-500">
 {comparisonReady && comparison ? (
@@ -572,7 +572,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 ) : (
 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
 <p className="text-sm font-semibold text-slate-700">Aún no hay suficientes métricas para este comparador</p>
-<p className="text-xs text-slate-400 mt-1">Carga al menos {comparisonWindow * 2} días para ver la comparación {comparisonWindow} vs {comparisonWindow}.</p>
+<p className="text-xs text-slate-500 mt-1">Carga al menos {comparisonWindow * 2} días para ver la comparación {comparisonWindow} vs {comparisonWindow}.</p>
 </div>
 )}
 </div>
@@ -585,7 +585,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <ShoppingCart className="size-6 text-emerald-600" />
 </div>
 <div>
-<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Leads diarios</p>
+<p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Leads diarios</p>
 <div className="flex items-center gap-2">
 <h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.leads) : '0'}</h4>
 <span className="text-[10px] text-emerald-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
@@ -600,7 +600,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <UserCheck className="size-6 text-blue-600" />
 </div>
 <div>
-<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tráfico diario</p>
+<p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tráfico diario</p>
 <div className="flex items-center gap-2">
 <h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.traffic) : '0'}</h4>
 <span className="text-[10px] text-blue-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>
@@ -614,7 +614,7 @@ Ver recomendación prioritaria <ArrowUpRight className="size-3" />
 <AlertTriangle className="size-6 text-rose-600" />
 </div>
 <div>
-<p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Clicks diarios</p>
+<p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Clicks diarios</p>
 <div className="flex items-center gap-2">
 <h4 className="text-xl font-bold">{latestStat ? formatPlain(latestStat.clicks) : '0'}</h4>
 <span className="text-[10px] text-rose-600 font-bold">{latestStat ? latestStat.source : 'Sin datos reales'}</span>

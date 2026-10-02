@@ -56,7 +56,7 @@ export function SidebarView({ clients, activeClientId, activeTabId }: SidebarVie
         <div className="p-5 border-b border-slate-100">
           {activeClient ? (
             <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Cliente</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Cliente</p>
               <h1 className="text-base font-bold leading-tight text-slate-900 break-words">{activeClient.name}</h1>
               <div className="flex items-center gap-1.5 mt-1.5">
                 <span
@@ -65,7 +65,7 @@ export function SidebarView({ clients, activeClientId, activeTabId }: SidebarVie
                     activeClient.health > 70 ? 'bg-emerald-500' : activeClient.health > 40 ? 'bg-amber-500' : 'bg-rose-500'
                   )}
                 />
-                <span className="text-[10px] text-slate-400 font-medium">{clientAlertText(activeClient)}</span>
+                <span className="text-[10px] text-slate-500 font-medium">{clientAlertText(activeClient)}</span>
               </div>
             </div>
           ) : (
@@ -75,7 +75,7 @@ export function SidebarView({ clients, activeClientId, activeTabId }: SidebarVie
               </div>
               <div>
                 <h1 className="text-lg font-bold leading-none group-hover:text-brand-primary transition-colors">Infidash</h1>
-                <span className="text-xs text-slate-400 font-medium tracking-wide">PANEL OPERATIVO</span>
+                <span className="text-xs text-slate-500 font-medium tracking-wide">PANEL OPERATIVO</span>
               </div>
             </Link>
           )}
@@ -84,7 +84,7 @@ export function SidebarView({ clients, activeClientId, activeTabId }: SidebarVie
         <div className="flex-1 overflow-y-auto px-4 py-6">
           {activeClient && (
             <div>
-              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-3">Menú de cliente</h2>
+              <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-2 mb-3">Menú de cliente</h2>
               <nav aria-label="Menú de cliente" className="space-y-1">
                 {navItems.map((item) => (
                   <Link
@@ -98,7 +98,7 @@ export function SidebarView({ clients, activeClientId, activeTabId }: SidebarVie
                     <item.icon
                       className={cn(
                         'size-4 transition-colors',
-                        activeTabId === item.id ? 'text-brand-primary' : 'text-slate-400 group-hover:text-brand-primary'
+                        activeTabId === item.id ? 'text-brand-primary' : 'text-slate-500 group-hover:text-brand-primary'
                       )}
                     />
                     {item.label}

@@ -130,7 +130,7 @@ function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
         {/* Navbar */}
         <header className="h-20 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 text-slate-400">
+             <div className="flex items-center gap-2 text-slate-500">
                 <Link
                   to={DASHBOARD_PATH}
                   className="text-sm font-medium hover:text-slate-900 transition-colors"
@@ -139,7 +139,7 @@ function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
                 </Link>
                 {activeClient && (
                   <>
-                    <span className="text-slate-300">/</span>
+                    <span className="text-slate-500">/</span>
                     <Link
                       to={clientPath(activeClient.slug)}
                       className={activeTabId === 'content' ? 'text-sm font-medium hover:text-slate-900 transition-colors' : 'text-sm font-bold text-slate-900'}
@@ -150,7 +150,7 @@ function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
                 )}
                 {activeTabId === 'content' && (
                   <>
-                    <span className="text-slate-300">/</span>
+                    <span className="text-slate-500">/</span>
                     <span className="text-sm font-bold text-slate-900">Contenidos</span>
                   </>
                 )}
@@ -163,7 +163,7 @@ function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
                   <button
                     type="button"
                     onClick={goToUsersAdmin}
-                    className="p-2 text-slate-400 hover:text-slate-700 transition-colors relative group rounded-xl hover:bg-slate-50"
+                    className="p-2 text-slate-500 hover:text-slate-700 transition-colors relative group rounded-xl hover:bg-slate-50"
                     aria-label="Administración de usuarios"
                     title="Administración de usuarios"
                   >
@@ -180,9 +180,9 @@ function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {
                    </div>
                    <div className="hidden md:block">
                       <p className="text-sm font-bold text-slate-900 leading-none mb-1">{currentUser.name}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">{currentUser.role === 'admin' ? 'Administrador' : 'Visualizador'}</p>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">{currentUser.role === 'admin' ? 'Administrador' : 'Visualizador'}</p>
                    </div>
-                   <ChevronDown className="size-4 text-slate-400 group-hover:translate-y-0.5 transition-transform" />
+                   <ChevronDown className="size-4 text-slate-500 group-hover:translate-y-0.5 transition-transform" />
                 </button>
              </div>
           </div>
