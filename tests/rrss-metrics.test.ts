@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RrssTab } from '../src/components/RrssTab.js';
+import { ConfirmProvider } from '../src/hooks/useConfirm.js';
 import type { Client } from '../src/store/useClientStore.js';
 
 test('RRSS keeps the planning table but does not fabricate audience or post performance', () => {
@@ -16,7 +17,7 @@ test('RRSS keeps the planning table but does not fabricate audience or post perf
     },
     kpiThresholds: {} as Client['kpiThresholds'],
   };
-  const html = renderToStaticMarkup(createElement(RrssTab, { client }));
+  const html = renderToStaticMarkup(createElement(ConfirmProvider, null, createElement(RrssTab, { client })));
   assert.match(html, /Plan RRSS editable/);
   assert.doesNotMatch(html, /Seguidores|Impresiones \(7d\)|Engagement Rate|Rendimiento de Posts|Alcance e Impresiones/);
 });

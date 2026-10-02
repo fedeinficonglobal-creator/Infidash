@@ -4,11 +4,14 @@ import { formatDailyStatsSummary, getHealthLabel } from '../lib/dashboardMetrics
 import { useClientStore, type Client } from '../store/useClientStore';
 import { useAppNavigation } from '../hooks/useAppNavigation.js';
 import { getHealthSummary, type HealthSummary } from '../services/infidashApi';
-import { LayoutGrid, List, Plus, Search, TrendingUp, TrendingDown, ArrowRight, X, PencilLine, Trash2 } from 'lucide-react';
+import { LayoutGrid, List, Plus, Search, TrendingUp, TrendingDown, ArrowRight, PencilLine, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { Modal } from './Modal.js';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 export function AgencyDashboard() {
   const { clients, sessionToken, currentUser, addClient, updateClient, deleteClient } = useClientStore();
+  const confirm = useConfirm();
   const { goToClient } = useAppNavigation();
   const isAdmin = currentUser?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
@@ -108,7 +111,12 @@ export function AgencyDashboard() {
   };
 
   const handleDeleteClient = async (client: Client) => {
-    const confirmed = window.confirm(`¿Seguro que quieres eliminar a ${client.name}? Esta acción borrará también sus datos asociados.`);
+    const confirmed = await confirm({
+      title: `¿Eliminar a ${client.name}?`,
+      description: 'Se eliminarán sus datos, integraciones e historial. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar cliente',
+      tone: 'danger',
+    });
     if (!confirmed) {
       return;
     }
@@ -449,19 +457,12 @@ export function AgencyDashboard() {
       )}
 
       {/* New Client Modal */}
-      {isNewClientModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between p-6 border-b border-slate-100">
-              <h3 className="text-xl font-bold text-slate-900">{clientModalMode === 'edit' ? 'Editar Cliente' : 'Añadir Nuevo Cliente'}</h3>
-              <button 
-                onClick={closeClientModal}
-                className="text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            
+      <Modal
+        open={isNewClientModalOpen}
+        onClose={closeClientModal}
+        title={clientModalMode === 'edit' ? 'Editar Cliente' : 'Añadir Nuevo Cliente'}
+        size="md"
+      >
             <form onSubmit={handleSubmitClientForm} className="p-6">
               <div className="space-y-4">
                 {clientActionError && (
@@ -567,9 +568,7 @@ export function AgencyDashboard() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 }

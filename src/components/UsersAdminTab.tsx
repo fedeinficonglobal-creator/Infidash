@@ -3,6 +3,7 @@ import { BadgeCheck, Building2, CircleAlert, LoaderCircle, Mail, RefreshCw, Shie
 import { cn } from '../lib/utils';
 import { useClientStore } from '../store/useClientStore';
 import { createUserAccount, deleteUserAccount, getUsers, updateUserAccount, type SessionUser, type UserRole } from '../services/infidashApi.js';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string; hint: string }> = [
   { value: 'admin', label: 'Administrador', hint: 'Puede crear usuarios y gestionar permisos' },
@@ -31,6 +32,7 @@ function formatDate(value: string) {
 
 export function UsersAdminTab() {
   const { sessionToken, currentUser, clients } = useClientStore();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<SessionUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -165,7 +167,12 @@ export function UsersAdminTab() {
       return;
     }
 
-    const confirmed = window.confirm(`¿Seguro que quieres eliminar a ${user.name}? Esta acción no se puede deshacer.`);
+    const confirmed = await confirm({
+      title: `¿Eliminar a ${user.name}?`,
+      description: 'Se eliminará su cuenta y perderá el acceso a Infidash. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar usuario',
+      tone: 'danger',
+    });
     if (!confirmed) {
       return;
     }

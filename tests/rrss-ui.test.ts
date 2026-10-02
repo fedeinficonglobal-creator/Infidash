@@ -8,6 +8,7 @@ import { RrssTab } from '../src/components/RrssTab.tsx';
 import { RrssToolbar } from '../src/components/rrss/RrssPostsSection.tsx';
 import { SocialPostCard } from '../src/components/rrss/SocialPostCard.tsx';
 import { canGeneratePosts, canSchedulePost, draftsSummary, mediaKind, moveMediaItem, networkFromInstanceKey, preselectAccountIds, removeMediaItem, rrssIdeaDisplayStatus, socialPostDisplayStatus, socialPostStatusLabel, validateCreativeFile } from '../src/lib/rrss.ts';
+import { ConfirmProvider } from '../src/hooks/useConfirm.tsx';
 import { useRrssStore } from '../src/store/useRrssStore.ts';
 import type { SocialPost } from '../src/services/rrssApi.ts';
 import type { Client } from '../src/store/useClientStore.ts';
@@ -295,7 +296,7 @@ const client: Client = {
 };
 
 test('the RRSS tab renders both sections with «Publicaciones» selected by default', () => {
-  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(RrssTab, { client })));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(ConfirmProvider, null, createElement(RrssTab, { client }))));
   assert.match(html, /role="tablist"/);
   assert.match(html, /Publicaciones/);
   assert.match(html, /Planificación mensual/);

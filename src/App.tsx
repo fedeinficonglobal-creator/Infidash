@@ -9,6 +9,7 @@ import { getAvatarInitials } from './lib/avatarInitials.js';
 import { DASHBOARD_PATH, clientPath } from './lib/routes.js';
 import { useRouteSync } from './hooks/useRouteSync.js';
 import { useAppNavigation } from './hooks/useAppNavigation.js';
+import { ConfirmProvider } from './hooks/useConfirm.js';
 import { signInToDashboard } from './lib/authNavigation.js';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { ChevronDown, LoaderCircle, Settings2 } from 'lucide-react';
@@ -61,7 +62,11 @@ export default function App() {
     return <LoginScreen isLoading={isAuthenticating} error={authError} notice={sessionExpiredMessage} onLogin={(email, password) => signInToDashboard(signIn, navigate, email, password)} />;
   }
 
-  return <AuthenticatedApp currentUser={currentUser} />;
+  return (
+    <ConfirmProvider>
+      <AuthenticatedApp currentUser={currentUser} />
+    </ConfirmProvider>
+  );
 }
 
 function AuthenticatedApp({ currentUser }: { currentUser: SessionUser }) {

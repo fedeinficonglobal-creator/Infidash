@@ -10,6 +10,7 @@ import type { EditorialReadiness } from '../../services/contentApi.js';
 import type { RrssFormat, RrssNetwork } from '../../services/rrssApi.js';
 import { cn } from '../../lib/utils.js';
 import { Button, Field } from '../content/controls.js';
+import { Modal } from '../Modal.js';
 import { ContentStatusBadge } from '../content/ContentStatusBadge.js';
 import { FormatSelect, NetworkCheckboxes, RrssIdeaPanel } from './RrssIdeaPanel.js';
 import { NetworkBadge } from './SocialPostCard.js';
@@ -62,8 +63,8 @@ function GenerateRrssPlanDialog({ onClose }: { onClose: () => void }) {
   const perWeek = Number(postsPerWeek);
   const weeksValue = Number(weeks);
   const valid = Boolean(topic.trim()) && networks.length > 0 && Number.isInteger(perWeek) && perWeek >= 1 && perWeek <= 14 && Number.isInteger(weeksValue) && weeksValue >= 1 && weeksValue <= 12;
-  return <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Generar plan de redes">
-    <form className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl" onSubmit={async (event) => {
+  return <Modal open onClose={onClose} title="Generar plan de redes" size="md">
+    <form className="space-y-4 p-6" onSubmit={async (event) => {
       event.preventDefault();
       setError(null);
       setIsSubmitting(true);
@@ -71,7 +72,6 @@ function GenerateRrssPlanDialog({ onClose }: { onClose: () => void }) {
       catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo iniciar la generación del plan de redes'); }
       finally { setIsSubmitting(false); }
     }}>
-      <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Generar plan de redes</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar"><X className="size-4" /></Button></div>
       <p className="text-xs text-slate-500">El tema y las keywords orientan las ideas; se guardan para las próximas generaciones.</p>
       <Field label="Tema" value={topic} onChange={setTopic} disabled={isLoadingInputs} required maxLength={200} />
       <Field label="Keywords (una por línea o separadas por comas)" value={keywords} onChange={setKeywords} disabled={isLoadingInputs} multiline rows={4} />
@@ -80,7 +80,7 @@ function GenerateRrssPlanDialog({ onClose }: { onClose: () => void }) {
       {error && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</p>}
       <div className="flex justify-end gap-2"><Button type="button" onClick={onClose} className="bg-slate-100 text-slate-700">Cancelar</Button><Button type="submit" disabled={isSubmitting || isLoadingInputs || !valid} className="bg-slate-900 text-white">{isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Generar plan</Button></div>
     </form>
-  </div>;
+  </Modal>;
 }
 
 function NewIdeaDialog({ onClose }: { onClose: () => void }) {
@@ -90,8 +90,8 @@ function NewIdeaDialog({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState({ title: '', theme: '', rationale: '', format: '', networks: [] as string[], cta: '', plannedAt: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  return <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label="Nueva idea de redes">
-    <form className="max-h-full w-full max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" onSubmit={async (event) => {
+  return <Modal open onClose={onClose} title="Nueva idea" size="md">
+    <form className="space-y-4 p-6" onSubmit={async (event) => {
       event.preventDefault();
       setError(null);
       setIsSubmitting(true);
@@ -102,7 +102,6 @@ function NewIdeaDialog({ onClose }: { onClose: () => void }) {
       } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo crear la idea'); }
       finally { setIsSubmitting(false); }
     }}>
-      <div className="flex items-center justify-between"><h2 className="text-xl font-bold">Nueva idea</h2><Button type="button" onClick={onClose} className="bg-slate-100 px-3 text-slate-700" aria-label="Cerrar"><X className="size-4" /></Button></div>
       <Field label="Título" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} required maxLength={500} />
       <Field label="Tema" value={draft.theme} onChange={(theme) => setDraft({ ...draft, theme })} />
       <Field label="Enfoque" value={draft.rationale} onChange={(rationale) => setDraft({ ...draft, rationale })} multiline rows={3} />
@@ -113,7 +112,7 @@ function NewIdeaDialog({ onClose }: { onClose: () => void }) {
       {error && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</p>}
       <div className="flex justify-end gap-2"><Button type="button" onClick={onClose} className="bg-slate-100 text-slate-700">Cancelar</Button><Button type="submit" disabled={isSubmitting || !draft.title.trim()} className="bg-brand-primary text-white">{isSubmitting && <LoaderCircle className="size-4 animate-spin" />}Crear idea</Button></div>
     </form>
-  </div>;
+  </Modal>;
 }
 
 /** «Publicaciones»: RRSS ideas with their AI drafts, creatives and scheduling. */
